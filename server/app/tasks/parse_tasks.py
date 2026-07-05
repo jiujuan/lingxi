@@ -1,20 +1,22 @@
 from server.app.db.session import SessionLocal
 from server.app.services.document_parse_service import DocumentParseService
+from server.app.services.import_service import enqueue_qa_task
+from server.app.tasks._common import handle_failure, job_result, resolve_task_outcome
 from server.app.tasks.celery_app import celery_app
 
 
-@celery_app.task(name="server.app.tasks.parse_tasks.parse_document_task")
-def parse_document_task(job_id: str) -> dict:
+@celery_app.task(
+    bind=True,
+    acks_late=True,
+    max_retries=3,
+    name="server.app.tasks.parse_tasks.parse_document_task",
+)
+def parse_document_task(self, job_id: str) -> dict:
     with SessionLocal() as session:
         job = DocumentParseService(session).parse_import_job(job_id)
+        outcome = resolve_task_outcome(session, job, "parse_document_task")
+        if outcome.failed:
+            handle_failure(self, outcome)  # raises: retry or terminal
         if job.stage == "QA_SPLITTING" and job.status == "RUNNING":
-            from server.app.tasks.qa_tasks import split_document_qa_task
-
-            split_document_qa_task.apply_async(args=[job.id], queue="qa")
-        return {
-            "jobId": job.id,
-            "documentId": job.document_id,
-            "status": job.status,
-            "stage": job.stage,
-            "errorCode": job.error_code,
-        }
+            enqueue_qa_task(job.id)  # raises on broker failure -> task retry
+        return job_result(job)

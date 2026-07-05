@@ -108,13 +108,19 @@ def test_logs_api_lists_filters_and_redacts_sensitive_fields():
     assert audit_logs.json()["data"][0]["beforeSnapshot"]["apiKey"] == "***REDACTED***"
 
 
-def test_retry_task_run_requeues_failed_import_job():
+def test_retry_task_run_requeues_failed_import_job(monkeypatch):
     client, SessionLocal = build_test_client()
     headers = login_admin(client)
 
     from server.app.models.document import Document
     from server.app.models.import_job import ImportJob
     from server.app.models.logs import TaskRun
+    from server.app.services import import_service
+
+    requeued: list[str] = []
+    monkeypatch.setattr(
+        import_service, "enqueue_parse_task", lambda job_id: requeued.append(job_id)
+    )
 
     with SessionLocal() as session:
         tenant_id = _tenant_id(session)
@@ -144,6 +150,7 @@ def test_retry_task_run_requeues_failed_import_job():
         )
         session.add(job)
         session.flush()
+        job_id = job.id
         task_run = TaskRun(
             tenant_id=tenant_id,
             task_type="parse_document",
@@ -164,6 +171,7 @@ def test_retry_task_run_requeues_failed_import_job():
     assert response.status_code == 200
     assert response.json()["status"] == "RUNNING"
     assert response.json()["retryCount"] == 1
+    assert requeued == [job_id]  # the parse task was actually re-enqueued
 
 
 def _tenant_id(session) -> str:

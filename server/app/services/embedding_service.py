@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import logging
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -14,6 +15,8 @@ from server.app.models.import_job import ImportJob, ImportJobStatus
 from server.app.models.logs import TaskRun
 from server.app.models.model_config import ModelCapability, ModelConfig, ModelProvider
 from server.app.models.qa_pair import DocumentChunk, QaPair
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -39,6 +42,10 @@ class EmbeddingService:
         document = self.session.get(Document, job.document_id)
         if document is None:
             raise ValueError("Import job document does not exist")
+
+        # Idempotency: a duplicate delivery of an already-finished job is a no-op.
+        if job.status == ImportJobStatus.COMPLETED.value:
+            return job
 
         task_run = TaskRun(
             tenant_id=job.tenant_id,
@@ -103,6 +110,7 @@ class EmbeddingService:
             self._mark_failed(job, document, task_run, exc.code, exc.message, exc.retryable)
             return job
         except Exception:
+            logger.exception("Unexpected error embedding import job %s", job.id)
             self._mark_failed(
                 job,
                 document,

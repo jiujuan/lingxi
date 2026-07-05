@@ -1,5 +1,6 @@
 from base64 import b64decode
 import binascii
+import logging
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ from server.app.core.errors import (
     conflict,
     not_found,
     payload_too_large,
+    service_unavailable,
     unsupported_media_type,
 )
 from server.app.core.ids import current_request_id
@@ -28,35 +30,39 @@ from server.app.models.import_job import ImportJob, ImportJobFile, ImportJobStat
 from server.app.models.logs import AuditLog
 from server.app.repositories.import_job_repo import ImportJobRepository
 
+logger = logging.getLogger(__name__)
 
-def enqueue_parse_task(job_id: str) -> bool:
+
+def enqueue_parse_task(job_id: str) -> None:
     try:
         from server.app.tasks.parse_tasks import parse_document_task
 
         parse_document_task.apply_async(args=[job_id], queue="parse")
     except Exception:
-        return False
-    return True
+        # Never swallow broker failures: surface them so the caller can react
+        # instead of silently leaving the document stuck mid-pipeline.
+        logger.exception("Failed to enqueue parse task for job %s", job_id)
+        raise
 
 
-def enqueue_qa_task(job_id: str) -> bool:
+def enqueue_qa_task(job_id: str) -> None:
     try:
         from server.app.tasks.qa_tasks import split_document_qa_task
 
         split_document_qa_task.apply_async(args=[job_id], queue="qa")
     except Exception:
-        return False
-    return True
+        logger.exception("Failed to enqueue QA split task for job %s", job_id)
+        raise
 
 
-def enqueue_embedding_task(job_id: str) -> bool:
+def enqueue_embedding_task(job_id: str) -> None:
     try:
         from server.app.tasks.embedding_tasks import embed_qa_pairs_task
 
         embed_qa_pairs_task.apply_async(args=[job_id], queue="embedding")
     except Exception:
-        return False
-    return True
+        logger.exception("Failed to enqueue embedding task for job %s", job_id)
+        raise
 
 
 class ImportService:
@@ -203,7 +209,7 @@ class ImportService:
         )
         self.session.commit()
 
-        enqueue_parse_task(job.id)
+        self._enqueue_or_mark_failed(job, enqueue_parse_task)
         return job, job_file
 
     def get_job(
@@ -252,11 +258,11 @@ class ImportService:
         self.session.commit()
 
         if stage == "QA_SPLITTING":
-            enqueue_qa_task(job.id)
+            self._enqueue_or_mark_failed(job, enqueue_qa_task)
         elif stage == "EMBEDDING":
-            enqueue_embedding_task(job.id)
+            self._enqueue_or_mark_failed(job, enqueue_embedding_task)
         else:
-            enqueue_parse_task(job.id)
+            self._enqueue_or_mark_failed(job, enqueue_parse_task)
 
         files = self.jobs.list_files(context.tenant_id, job.id)
         return job, files[0] if files else None
@@ -293,6 +299,30 @@ class ImportService:
         if job is None:
             raise not_found("导入任务不存在")
         return job
+
+    def _enqueue_or_mark_failed(self, job: ImportJob, enqueue_fn) -> None:
+        """Enqueue a stage task from a synchronous API request.
+
+        If the broker is unreachable the job is marked FAILED (retryable) so it
+        can be recovered via the retry endpoint, and a 503 is surfaced to the
+        caller instead of silently leaving the document stuck.
+        """
+        try:
+            enqueue_fn(job.id)
+        except Exception as exc:
+            logger.exception("Enqueue failed for job %s; marking FAILED", job.id)
+            job.status = ImportJobStatus.FAILED.value
+            job.error_code = "TASK_ENQUEUE_FAILED"
+            job.error_message = "任务入队失败，请稍后重试"
+            document = self.session.get(Document, job.document_id)
+            if document is not None:
+                document.status = DocumentStatus.FAILED
+                document.last_error_code = "TASK_ENQUEUE_FAILED"
+                document.last_error_message = "任务入队失败，请稍后重试"
+            self.session.commit()
+            raise service_unavailable(
+                "任务入队失败，请稍后重试", "TASK_ENQUEUE_FAILED"
+            ) from exc
 
     @staticmethod
     def _build_access_rules(

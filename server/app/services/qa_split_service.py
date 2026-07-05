@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
+import logging
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -14,7 +15,18 @@ from server.app.models.import_job import ImportJob, ImportJobStatus
 from server.app.models.logs import TaskRun
 from server.app.models.model_config import ModelCapability, ModelConfig, ModelProvider
 from server.app.models.qa_pair import DocumentChunk, QaPair
+from server.app.services.import_service import enqueue_embedding_task  # re-exported
 from server.app.services.qa_prompt_builder import build_qa_split_prompt
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "QaSplitService",
+    "QaSplitValidationError",
+    "ValidatedQaItem",
+    "validate_qa_split_output",
+    "enqueue_embedding_task",
+]
 
 
 @dataclass(frozen=True)
@@ -72,16 +84,6 @@ def validate_qa_split_output(raw_output: str) -> list[ValidatedQaItem]:
     return validated
 
 
-def enqueue_embedding_task(job_id: str) -> bool:
-    try:
-        from server.app.tasks.embedding_tasks import embed_qa_pairs_task
-
-        embed_qa_pairs_task.apply_async(args=[job_id], queue="embedding")
-    except Exception:
-        return False
-    return True
-
-
 class QaSplitService:
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -93,6 +95,10 @@ class QaSplitService:
         document = self.session.get(Document, job.document_id)
         if document is None:
             raise ValueError("Import job document does not exist")
+
+        # Idempotency: a duplicate delivery of an already-finished job is a no-op.
+        if job.status == ImportJobStatus.COMPLETED.value:
+            return job
 
         task_run = TaskRun(
             tenant_id=job.tenant_id,
@@ -148,6 +154,7 @@ class QaSplitService:
             self._mark_failed(job, document, task_run, exc.code, exc.message, True)
             return job
         except Exception:
+            logger.exception("Unexpected error splitting QA for job %s", job.id)
             self._mark_failed(
                 job,
                 document,

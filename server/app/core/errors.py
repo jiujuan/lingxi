@@ -49,6 +49,12 @@ def unauthenticated(message: str = "未认证") -> HTTPException:
     )
 
 
+def service_unavailable(
+    message: str = "服务暂时不可用", code: str = "SERVICE_UNAVAILABLE"
+) -> HTTPException:
+    return api_error(503, code, message)
+
+
 async def http_exception_handler(
     _request: Request, exc: HTTPException
 ) -> JSONResponse:

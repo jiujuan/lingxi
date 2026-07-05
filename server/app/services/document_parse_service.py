@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 import hashlib
+import logging
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -18,6 +19,8 @@ from server.app.models.document import Document, DocumentStatus
 from server.app.models.import_job import ImportJob, ImportJobFile, ImportJobStatus, ParseArtifact
 from server.app.models.logs import TaskRun
 from server.app.models.qa_pair import DocumentChunk
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentParseService:
@@ -38,6 +41,10 @@ class DocumentParseService:
         document = self.session.get(Document, job.document_id)
         if document is None:
             raise ValueError("Import job document does not exist")
+
+        # Idempotency: a duplicate delivery of an already-finished job is a no-op.
+        if job.status == ImportJobStatus.COMPLETED.value:
+            return job
 
         task_run = TaskRun(
             tenant_id=job.tenant_id,
@@ -93,7 +100,8 @@ class DocumentParseService:
         except ParserError as exc:
             self._mark_failed(job, document, task_run, exc.code, exc.message, exc.retryable)
             return job
-        except Exception as exc:
+        except Exception:
+            logger.exception("Unexpected error parsing import job %s", job.id)
             self._mark_failed(
                 job,
                 document,

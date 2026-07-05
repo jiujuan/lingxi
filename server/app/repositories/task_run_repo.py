@@ -19,6 +19,20 @@ class TaskRunRepository:
             )
         )
 
+    def latest_for_resource(
+        self, tenant_id: str, resource_id: str, task_type: str | None = None
+    ) -> TaskRun | None:
+        query = select(TaskRun).where(
+            TaskRun.tenant_id == tenant_id,
+            TaskRun.resource_id == resource_id,
+            TaskRun.deleted_at.is_(None),
+        )
+        if task_type:
+            query = query.where(TaskRun.task_type == task_type)
+        return self.session.scalar(
+            query.order_by(TaskRun.created_at.desc(), TaskRun.id.desc())
+        )
+
     def list_page(
         self,
         tenant_id: str,
