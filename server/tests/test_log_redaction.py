@@ -19,3 +19,21 @@ def test_log_redaction_masks_nested_secrets_and_authorization_headers():
     assert redacted["items"][0]["secret"] == "***REDACTED***"
     assert redacted["items"][1]["keyPrefix"] == "lk_live_abcd"
 
+
+def test_value_level_redaction_masks_secrets_under_innocuous_keys():
+    payload = {
+        "message": "使用 lk_live_abcdef0123456789 访问",  # api key inside free text
+        "note": "token eyJhbGciOi.aaaaaaaa.bbbbbbbb 已下发",  # JWT
+        "requestId": "req_1234567890abcdef",  # must NOT be redacted
+        "keyPrefix": "lk_live_abcdefgh",  # safe key -> not redacted
+    }
+
+    redacted = redact_log_payload(payload)
+
+    assert "lk_live_abcdef0123456789" not in redacted["message"]
+    assert "***REDACTED***" in redacted["message"]
+    assert "eyJhbGciOi" not in redacted["note"]
+    assert redacted["requestId"] == "req_1234567890abcdef"
+    assert redacted["keyPrefix"] == "lk_live_abcdefgh"
+
+

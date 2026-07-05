@@ -19,3 +19,8 @@ def current_request_id() -> str:
         set_request_id(request_id)
     return request_id
 
+
+def peek_request_id() -> str | None:
+    """Current request id if one is set, else None (does not create one)."""
+    return _request_id.get()
+

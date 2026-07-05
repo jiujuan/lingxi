@@ -1,14 +1,13 @@
-from fastapi.testclient import TestClient
-
-
 def test_health_check_returns_request_id():
-    from server.app.main import app
+    from server.tests.test_auth_rbac import build_test_client
 
-    client = TestClient(app)
+    client, _ = build_test_client()
     response = client.get("/health")
 
+    # Deep health probes the DB (up on test SQLite); redis is absent in tests.
     assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+    assert response.json()["status"] in ("ok", "degraded")
+    assert response.json()["checks"]["db"] == "up"
     assert response.json()["requestId"]
     assert response.headers["x-request-id"] == response.json()["requestId"]
 
