@@ -2,10 +2,12 @@ import { useState } from 'react';
 
 type Props = {
   disabled: boolean;
+  isStreaming?: boolean;
+  onStop?: () => void;
   onSubmit: (content: string) => Promise<void>;
 };
 
-export function ChatComposer({ disabled, onSubmit }: Props) {
+export function ChatComposer({ disabled, isStreaming = false, onStop, onSubmit }: Props) {
   const [content, setContent] = useState('');
 
   async function submit() {
@@ -38,9 +40,15 @@ export function ChatComposer({ disabled, onSubmit }: Props) {
         placeholder={disabled ? '正在生成回答...' : '输入问题，Enter 发送，Shift+Enter 换行'}
         value={content}
       />
-      <button disabled={disabled || !content.trim()} type="submit">
-        发送
-      </button>
+      {isStreaming && onStop ? (
+        <button className="secondary-button" onClick={onStop} type="button">
+          停止生成
+        </button>
+      ) : (
+        <button disabled={disabled || !content.trim()} type="submit">
+          发送
+        </button>
+      )}
     </form>
   );
 }

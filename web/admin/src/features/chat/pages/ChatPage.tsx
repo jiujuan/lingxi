@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
+import { errorMessage } from '../../../api/client';
 import {
   createChatSession,
   listChatMessages,
@@ -36,12 +37,17 @@ export function ChatPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     void refreshSessions();
+    // Cancel any in-flight stream when the page unmounts.
+    return () => streamAbortRef.current?.abort();
   }, []);
 
   useEffect(() => {
+    // Switching sessions cancels a stream still running for the previous one.
+    streamAbortRef.current?.abort();
     if (activeSessionId) {
       void refreshMessages(activeSessionId);
     }
@@ -106,29 +112,46 @@ export function ChatPage() {
     setIsStreaming(true);
     setError(null);
 
+    const controller = new AbortController();
+    streamAbortRef.current = controller;
     try {
-      await streamChatMessage(sessionId, content, {
-        onEvent: (event) => {
-          if (event.type === 'run_started') {
-            setCurrentRunId(String(event.data.runId || ''));
-          }
-          if (event.type === 'delta') {
-            setStreamingText((current) => current + String(event.data.content ?? ''));
-          }
-          if (event.type === 'error') {
-            setError(`${String(event.data.message ?? '模型调用失败')} (${String(event.data.requestId ?? '')})`);
-          }
+      await streamChatMessage(
+        sessionId,
+        content,
+        {
+          onEvent: (event) => {
+            if (event.type === 'run_started') {
+              setCurrentRunId(String(event.data.runId || ''));
+            }
+            if (event.type === 'delta') {
+              setStreamingText((current) => current + String(event.data.content ?? ''));
+            }
+            if (event.type === 'error') {
+              setError(`${String(event.data.message ?? '模型调用失败')} (${String(event.data.requestId ?? '')})`);
+            }
+          },
+          onCitation: (citation) => setCitations((current) => [...current, citation]),
         },
-        onCitation: (citation) => setCitations((current) => [...current, citation]),
-      });
+        { signal: controller.signal },
+      );
       await refreshMessages(sessionId, true);
       await refreshSessions();
-    } catch {
-      setError('发送失败，请稍后重试');
+    } catch (err) {
+      if ((err as Error)?.name === 'AbortError') {
+        // User stopped generation — sync whatever the server persisted, no error.
+        await refreshMessages(sessionId, true);
+      } else {
+        setError(errorMessage(err, '发送失败，请稍后重试'));
+      }
     } finally {
+      streamAbortRef.current = null;
       setIsStreaming(false);
       setStreamingText('');
     }
+  }
+
+  function stopStreaming() {
+    streamAbortRef.current?.abort();
   }
 
   async function copyMessage(content: string) {
@@ -192,7 +215,7 @@ export function ChatPage() {
             onFeedback={(messageId, value) => void feedback(messageId, value)}
             streamingText={streamingText}
           />
-          <ChatComposer disabled={isStreaming} onSubmit={submitMessage} />
+          <ChatComposer disabled={isStreaming} isStreaming={isStreaming} onStop={stopStreaming} onSubmit={submitMessage} />
         </div>
         <div className="chat-side-stack">
           <CitationPanel citations={citations} onOpenSource={(citationId) => void openSource(citationId)} />

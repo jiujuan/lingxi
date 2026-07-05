@@ -84,7 +84,7 @@ async function parseBody(response: Response): Promise<unknown> {
   }
 }
 
-async function toApiError(response: Response): Promise<ApiError> {
+export async function toApiError(response: Response): Promise<ApiError> {
   const body = await parseBody(response);
   const fallback = `请求失败（HTTP ${response.status}）`;
 
