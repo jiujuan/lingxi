@@ -1,12 +1,15 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
+import time
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from server.app.core.config import settings
 from server.app.core.secrets import decrypt_secret
 import server.app.db.base  # noqa: F401
+from server.app.integrations.model_providers.base import ProviderError
 from server.app.integrations.model_providers.registry import build_provider_adapter
 from server.app.integrations.tokenizers.base import SearchTextTokenizer
 from server.app.integrations.tokenizers.jieba_tokenizer import JiebaTokenizer
@@ -15,6 +18,7 @@ from server.app.models.import_job import ImportJob, ImportJobStatus
 from server.app.models.logs import TaskRun
 from server.app.models.model_config import ModelCapability, ModelConfig, ModelProvider
 from server.app.models.qa_pair import DocumentChunk, QaPair
+from server.app.services._batching import run_ordered
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +87,9 @@ class EmbeddingService:
                 model_name=model_config.model_name,
                 timeout_ms=model_config.timeout_ms,
             )
-            vectors = adapter.embed_texts([item.question for item in qa_pairs])
+            vectors = self._embed_in_batches(
+                adapter, [item.question for item in qa_pairs], expected_dimension
+            )
             self._validate_vectors(vectors, expected_dimension, len(qa_pairs))
 
             for qa_pair, vector in zip(qa_pairs, vectors, strict=True):
@@ -153,6 +159,56 @@ class EmbeddingService:
                 .order_by(QaPair.pair_index)
             ).all()
         )
+
+    def _embed_in_batches(
+        self, adapter, questions: list[str], expected_dimension: int
+    ) -> list[list[float]]:
+        """Embed questions in bounded batches, fanned out over a thread pool.
+
+        Large documents cannot be embedded in a single call (provider batch
+        limits), so questions are split into ``embedding_batch_size`` chunks.
+        Each batch is embedded independently with its own transient-failure
+        retries; a batch that keeps failing raises and lets the task layer
+        (Celery) retry the whole job.
+        """
+        batch_size = max(1, settings.embedding_batch_size)
+        batches = [
+            questions[start : start + batch_size]
+            for start in range(0, len(questions), batch_size)
+        ]
+        batch_vectors = run_ordered(
+            batches,
+            lambda batch: self._embed_batch_with_retry(
+                adapter, batch, expected_dimension
+            ),
+            settings.embedding_max_concurrency,
+        )
+        return [vector for batch in batch_vectors for vector in batch]
+
+    def _embed_batch_with_retry(
+        self, adapter, batch: list[str], expected_dimension: int
+    ) -> list[list[float]]:
+        max_retries = max(0, settings.embedding_batch_max_retries)
+        attempt = 0
+        while True:
+            try:
+                vectors = adapter.embed_texts(batch)
+                self._validate_vectors(vectors, expected_dimension, len(batch))
+                return vectors
+            except ProviderError as exc:
+                if exc.retryable and attempt < max_retries:
+                    attempt += 1
+                    time.sleep(min(5.0, 0.5 * (2**attempt)))
+                    logger.warning(
+                        "embedding batch retry %d/%d: %s",
+                        attempt,
+                        max_retries,
+                        exc.code,
+                    )
+                    continue
+                raise EmbeddingServiceError(
+                    exc.code, exc.message, retryable=exc.retryable
+                ) from exc
 
     def _validate_vectors(
         self, vectors: list[list[float]], expected_dimension: int, expected_count: int

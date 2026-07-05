@@ -184,6 +184,21 @@ class Settings:
             os.getenv("RETRIEVAL_LOW_CONFIDENCE_THRESHOLD", "1.35")
         )
     )
+    embedding_batch_size: int = field(
+        default_factory=lambda: int(os.getenv("EMBEDDING_BATCH_SIZE", "64"))
+    )
+    embedding_max_concurrency: int = field(
+        default_factory=lambda: int(os.getenv("EMBEDDING_MAX_CONCURRENCY", "4"))
+    )
+    embedding_batch_max_retries: int = field(
+        default_factory=lambda: int(os.getenv("EMBEDDING_BATCH_MAX_RETRIES", "2"))
+    )
+    qa_split_max_batch_chars: int = field(
+        default_factory=lambda: int(os.getenv("QA_SPLIT_MAX_BATCH_CHARS", "6000"))
+    )
+    qa_split_max_concurrency: int = field(
+        default_factory=lambda: int(os.getenv("QA_SPLIT_MAX_CONCURRENCY", "4"))
+    )
 
     @property
     def access_token_expires_seconds(self) -> int:

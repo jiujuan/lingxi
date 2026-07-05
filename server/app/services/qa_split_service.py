@@ -7,6 +7,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from server.app.core.errors import not_found
+from server.app.core.config import settings
 from server.app.core.secrets import decrypt_secret
 import server.app.db.base  # noqa: F401
 from server.app.integrations.model_providers.registry import build_provider_adapter
@@ -15,6 +16,7 @@ from server.app.models.import_job import ImportJob, ImportJobStatus
 from server.app.models.logs import TaskRun
 from server.app.models.model_config import ModelCapability, ModelConfig, ModelProvider
 from server.app.models.qa_pair import DocumentChunk, QaPair
+from server.app.services._batching import run_ordered
 from server.app.services.import_service import enqueue_embedding_task  # re-exported
 from server.app.services.qa_prompt_builder import build_qa_split_prompt
 
@@ -133,8 +135,8 @@ class QaSplitService:
                 model_name=model_config.model_name,
                 timeout_ms=model_config.timeout_ms,
             )
-            prompt = build_qa_split_prompt(document, chunks)
-            items = validate_qa_split_output(adapter.generate_qa_pairs(prompt))
+            prompt_batches = self._group_chunks(chunks)
+            items = self._generate_qa_items(adapter, document, prompt_batches)
             self._replace_qa_pairs(job, document, chunks, items)
 
             document.qa_pair_count = len(items)
@@ -197,6 +199,56 @@ class QaSplitService:
         if row is None:
             raise QaSplitValidationError("未配置默认 QA Split 模型")
         return row[0], row[1]
+
+    def _group_chunks(self, chunks: list[DocumentChunk]) -> list[list[DocumentChunk]]:
+        """Group chunks so each QA-split prompt stays within a size budget.
+
+        A single document can hold far more text than a model's context window,
+        so chunks are packed greedily into groups bounded by
+        ``qa_split_max_batch_chars`` (an approximate token proxy). A chunk larger
+        than the budget forms its own group.
+        """
+        max_chars = max(1, settings.qa_split_max_batch_chars)
+        groups: list[list[DocumentChunk]] = []
+        current: list[DocumentChunk] = []
+        current_chars = 0
+        for chunk in chunks:
+            chunk_chars = len(chunk.content or "")
+            if current and current_chars + chunk_chars > max_chars:
+                groups.append(current)
+                current = []
+                current_chars = 0
+            current.append(chunk)
+            current_chars += chunk_chars
+        if current:
+            groups.append(current)
+        return groups
+
+    def _generate_qa_items(
+        self,
+        adapter,
+        document: Document,
+        groups: list[list[DocumentChunk]],
+    ) -> list[ValidatedQaItem]:
+        """Run QA split per chunk-group (bounded concurrency) and merge results.
+
+        Each group is generated and validated independently; because every chunk
+        carries its global ``chunkIndex`` in the prompt, merged items still map
+        back to the correct source chunk in order.
+        """
+
+        def generate(group: list[DocumentChunk]) -> str:
+            # ProviderError bubbles to the caller's generic handler
+            # (QA_SPLIT_INTERNAL_ERROR, retryable) so the task layer retries.
+            return adapter.generate_qa_pairs(build_qa_split_prompt(document, group))
+
+        raw_outputs = run_ordered(
+            groups, generate, settings.qa_split_max_concurrency
+        )
+        items: list[ValidatedQaItem] = []
+        for raw in raw_outputs:
+            items.extend(validate_qa_split_output(raw))
+        return items
 
     def _list_chunks(self, document_id: str) -> list[DocumentChunk]:
         return list(
