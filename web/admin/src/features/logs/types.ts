@@ -73,4 +73,3 @@ export type LogFilters = {
   page: number;
   pageSize: number;
 };
-

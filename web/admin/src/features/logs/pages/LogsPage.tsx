@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 
 import { errorMessage } from '../../../api/client';
 import {
@@ -11,6 +12,7 @@ import {
 } from '../api/logsApi';
 import { LogDetailDrawer } from '../components/LogDetailDrawer';
 import { PermissionGate } from '../../../auth/PermissionGate';
+import { formatDateTime } from '../../../shared/format';
 import type { ApiCallLog, AuditLog, LogFilters, ModelCallLog, TaskRunLog } from '../types';
 
 type Tab = 'tasks' | 'models' | 'api' | 'audit';
@@ -42,7 +44,11 @@ export function LogsPage() {
   });
 
   function updateFilter(key: keyof LogFilters, value: string | number) {
-    setFilters((current) => ({ ...current, [key]: value, page: key === 'page' ? Number(value) : 1 }));
+    setFilters((current) => ({
+      ...current,
+      [key]: value,
+      page: key === 'page' ? Number(value) : 1,
+    }));
   }
 
   function applyFilters() {
@@ -109,7 +115,10 @@ export function LogsPage() {
           </label>
           <label>
             run_id
-            <input onChange={(event) => updateFilter('runId', event.target.value)} value={filters.runId} />
+            <input
+              onChange={(event) => updateFilter('runId', event.target.value)}
+              value={filters.runId}
+            />
           </label>
           <label>
             task_run_id
@@ -120,11 +129,17 @@ export function LogsPage() {
           </label>
           <label>
             状态 / HTTP
-            <input onChange={(event) => updateFilter('status', event.target.value)} value={filters.status} />
+            <input
+              onChange={(event) => updateFilter('status', event.target.value)}
+              value={filters.status}
+            />
           </label>
           <label>
             任务类型 / 动作
-            <input onChange={(event) => updateFilter('taskType', event.target.value)} value={filters.taskType} />
+            <input
+              onChange={(event) => updateFilter('taskType', event.target.value)}
+              value={filters.taskType}
+            />
           </label>
         </div>
         <div className="button-row">
@@ -142,11 +157,22 @@ export function LogsPage() {
         <h3>{TABS.find((item) => item.id === tab)?.label}</h3>
         {rows.length === 0 ? <p className="muted">暂无日志</p> : null}
         {tab === 'tasks' ? (
-          <TaskRows logs={rows as TaskRunLog[]} onCopy={copyRequestId} onDetail={setSelected} onRetry={retry} />
+          <TaskRows
+            logs={rows as TaskRunLog[]}
+            onCopy={copyRequestId}
+            onDetail={setSelected}
+            onRetry={retry}
+          />
         ) : null}
-        {tab === 'models' ? <ModelRows logs={rows as ModelCallLog[]} onCopy={copyRequestId} onDetail={setSelected} /> : null}
-        {tab === 'api' ? <ApiRows logs={rows as ApiCallLog[]} onCopy={copyRequestId} onDetail={setSelected} /> : null}
-        {tab === 'audit' ? <AuditRows logs={rows as AuditLog[]} onCopy={copyRequestId} onDetail={setSelected} /> : null}
+        {tab === 'models' ? (
+          <ModelRows logs={rows as ModelCallLog[]} onCopy={copyRequestId} onDetail={setSelected} />
+        ) : null}
+        {tab === 'api' ? (
+          <ApiRows logs={rows as ApiCallLog[]} onCopy={copyRequestId} onDetail={setSelected} />
+        ) : null}
+        {tab === 'audit' ? (
+          <AuditRows logs={rows as AuditLog[]} onCopy={copyRequestId} onDetail={setSelected} />
+        ) : null}
       </section>
 
       <LogDetailDrawer onClose={() => setSelected(null)} payload={selected} title="日志详情" />
@@ -164,6 +190,50 @@ async function fetchLogs(
   return (await listAuditLogs(filters)).data;
 }
 
+function LogRow({
+  primary,
+  secondary,
+  cells,
+  requestId,
+  onCopy,
+  onDetail,
+  action,
+}: {
+  primary: ReactNode;
+  secondary: ReactNode;
+  cells: ReactNode;
+  requestId: string | null;
+  onCopy: (requestId: string | null) => void;
+  onDetail: () => void;
+  action?: ReactNode;
+}) {
+  const detail = (
+    <button className="secondary-button" onClick={onDetail} type="button">
+      详情
+    </button>
+  );
+  return (
+    <article className="observability-row">
+      <div>
+        <strong>{primary}</strong>
+        <p className="muted">{secondary}</p>
+      </div>
+      {cells}
+      <button className="link-button" onClick={() => onCopy(requestId)} type="button">
+        {requestId || '-'}
+      </button>
+      {action ? (
+        <div className="button-row">
+          {detail}
+          {action}
+        </div>
+      ) : (
+        detail
+      )}
+    </article>
+  );
+}
+
 function TaskRows({
   logs,
   onCopy,
@@ -178,30 +248,30 @@ function TaskRows({
   return (
     <div className="observability-list">
       {logs.map((log) => (
-        <article className="observability-row" key={log.id}>
-          <div>
-            <strong>{log.taskType}</strong>
-            <p className="muted">{log.resourceType} · {log.resourceId}</p>
-          </div>
-          <span className={`status-tag status-${log.status.toLowerCase()}`}>{log.status}</span>
-          <span>{log.stage || '-'}</span>
-          <span>{log.errorCode || '-'}</span>
-          <button className="link-button" onClick={() => onCopy(log.requestId)} type="button">
-            {log.requestId || '-'}
-          </button>
-          <div className="button-row">
-            <button className="secondary-button" onClick={() => onDetail(log)} type="button">
-              详情
-            </button>
-            {log.retryable ? (
+        <LogRow
+          key={log.id}
+          primary={log.taskType}
+          secondary={`${log.resourceType} · ${log.resourceId}`}
+          cells={
+            <>
+              <span className={`status-tag status-${log.status.toLowerCase()}`}>{log.status}</span>
+              <span>{log.stage || '-'}</span>
+              <span>{log.errorCode || '-'}</span>
+            </>
+          }
+          requestId={log.requestId}
+          onCopy={onCopy}
+          onDetail={() => onDetail(log)}
+          action={
+            log.retryable ? (
               <PermissionGate permission="TASK_RETRY">
                 <button onClick={() => onRetry(log)} type="button">
                   重试
                 </button>
               </PermissionGate>
-            ) : null}
-          </div>
-        </article>
+            ) : undefined
+          }
+        />
       ))}
     </div>
   );
@@ -219,21 +289,21 @@ function ModelRows({
   return (
     <div className="observability-list">
       {logs.map((log) => (
-        <article className="observability-row" key={log.id}>
-          <div>
-            <strong>{log.providerName || 'Unknown Provider'}</strong>
-            <p className="muted">{log.modelName || '-'} · {log.capability}</p>
-          </div>
-          <span className={`status-tag status-${log.status.toLowerCase()}`}>{log.status}</span>
-          <span>{log.latencyMs ?? 0}ms</span>
-          <span>{log.errorCode || '-'}</span>
-          <button className="link-button" onClick={() => onCopy(log.requestId)} type="button">
-            {log.requestId || '-'}
-          </button>
-          <button className="secondary-button" onClick={() => onDetail(log)} type="button">
-            详情
-          </button>
-        </article>
+        <LogRow
+          key={log.id}
+          primary={log.providerName || 'Unknown Provider'}
+          secondary={`${log.modelName || '-'} · ${log.capability}`}
+          cells={
+            <>
+              <span className={`status-tag status-${log.status.toLowerCase()}`}>{log.status}</span>
+              <span>{log.latencyMs ?? 0}ms</span>
+              <span>{log.errorCode || '-'}</span>
+            </>
+          }
+          requestId={log.requestId}
+          onCopy={onCopy}
+          onDetail={() => onDetail(log)}
+        />
       ))}
     </div>
   );
@@ -251,21 +321,23 @@ function ApiRows({
   return (
     <div className="observability-list">
       {logs.map((log) => (
-        <article className="observability-row" key={log.id}>
-          <div>
-            <strong>{log.method} {log.path}</strong>
-            <p className="muted">{log.keyPrefix || '-'}</p>
-          </div>
-          <span className={`status-tag status-${log.statusCode >= 400 ? 'failed' : 'ready'}`}>{log.statusCode}</span>
-          <span>{log.latencyMs}ms</span>
-          <span>{log.errorCode || '-'}</span>
-          <button className="link-button" onClick={() => onCopy(log.requestId)} type="button">
-            {log.requestId || '-'}
-          </button>
-          <button className="secondary-button" onClick={() => onDetail(log)} type="button">
-            详情
-          </button>
-        </article>
+        <LogRow
+          key={log.id}
+          primary={`${log.method} ${log.path}`}
+          secondary={log.keyPrefix || '-'}
+          cells={
+            <>
+              <span className={`status-tag status-${log.statusCode >= 400 ? 'failed' : 'ready'}`}>
+                {log.statusCode}
+              </span>
+              <span>{log.latencyMs}ms</span>
+              <span>{log.errorCode || '-'}</span>
+            </>
+          }
+          requestId={log.requestId}
+          onCopy={onCopy}
+          onDetail={() => onDetail(log)}
+        />
       ))}
     </div>
   );
@@ -283,21 +355,21 @@ function AuditRows({
   return (
     <div className="observability-list">
       {logs.map((log) => (
-        <article className="observability-row" key={log.id}>
-          <div>
-            <strong>{log.action}</strong>
-            <p className="muted">{log.resourceType} · {log.resourceId || '-'}</p>
-          </div>
-          <span>{log.actorId || '-'}</span>
-          <span>{new Date(log.createdAt).toLocaleString()}</span>
-          <span>-</span>
-          <button className="link-button" onClick={() => onCopy(log.requestId)} type="button">
-            {log.requestId || '-'}
-          </button>
-          <button className="secondary-button" onClick={() => onDetail(log)} type="button">
-            详情
-          </button>
-        </article>
+        <LogRow
+          key={log.id}
+          primary={log.action}
+          secondary={`${log.resourceType} · ${log.resourceId || '-'}`}
+          cells={
+            <>
+              <span>{log.actorId || '-'}</span>
+              <span>{formatDateTime(log.createdAt)}</span>
+              <span>-</span>
+            </>
+          }
+          requestId={log.requestId}
+          onCopy={onCopy}
+          onDetail={() => onDetail(log)}
+        />
       ))}
     </div>
   );
@@ -324,4 +396,3 @@ function emptyFilters(): LogFilters {
     pageSize: 20,
   };
 }
-

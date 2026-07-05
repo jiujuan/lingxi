@@ -27,7 +27,9 @@ export function RetrievalExplanationPanel({ explanation, isLoading, onLoad }: Pr
         ? STAGES.map(([key, label]) => (
             <div className="explain-stage" key={key}>
               <strong>{label}</strong>
-              {(explanation.stages[key] || []).length === 0 ? <span className="muted">无候选</span> : null}
+              {(explanation.stages[key] || []).length === 0 ? (
+                <span className="muted">无候选</span>
+              ) : null}
               {(explanation.stages[key] || []).slice(0, 3).map((item, index) => (
                 <div className="explain-row" key={`${key}-${index}`}>
                   <span>{String(item.question || item.qaPairId || '-')}</span>

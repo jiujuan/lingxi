@@ -1,3 +1,4 @@
+import { formatDateTime } from '../../../shared/format';
 import type { ChatSession } from '../types';
 
 type Props = {
@@ -8,7 +9,13 @@ type Props = {
   onSelect: (sessionId: string) => void;
 };
 
-export function ChatSessionList({ sessions, activeSessionId, isLoading, onCreate, onSelect }: Props) {
+export function ChatSessionList({
+  sessions,
+  activeSessionId,
+  isLoading,
+  onCreate,
+  onSelect,
+}: Props) {
   return (
     <aside className="chat-sessions panel">
       <div className="toolbar-row compact">
@@ -33,7 +40,7 @@ export function ChatSessionList({ sessions, activeSessionId, isLoading, onCreate
             type="button"
           >
             <strong>{session.title || '新会话'}</strong>
-            <span>{new Date(session.updatedAt || session.createdAt).toLocaleString()}</span>
+            <span>{formatDateTime(session.updatedAt || session.createdAt)}</span>
           </button>
         ))}
       </div>

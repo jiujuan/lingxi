@@ -36,13 +36,25 @@ export function ChatMessageList({
           <p>{message.content}</p>
           {message.role === 'ASSISTANT' ? (
             <div className="button-row chat-message-actions">
-              <button className="secondary-button" onClick={() => onCopy(message.content)} type="button">
+              <button
+                className="secondary-button"
+                onClick={() => onCopy(message.content)}
+                type="button"
+              >
                 复制
               </button>
-              <button className="secondary-button" onClick={() => onFeedback(message.id, 'up')} type="button">
+              <button
+                className="secondary-button"
+                onClick={() => onFeedback(message.id, 'up')}
+                type="button"
+              >
                 赞
               </button>
-              <button className="secondary-button" onClick={() => onFeedback(message.id, 'down')} type="button">
+              <button
+                className="secondary-button"
+                onClick={() => onFeedback(message.id, 'down')}
+                type="button"
+              >
                 踩
               </button>
             </div>

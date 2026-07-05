@@ -11,4 +11,3 @@ export function saveSystemSettings(payload: SystemSettings) {
     body: JSON.stringify(payload),
   });
 }
-

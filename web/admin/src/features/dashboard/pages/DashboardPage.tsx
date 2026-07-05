@@ -25,7 +25,11 @@ export function DashboardPage() {
           <h2>系统总览</h2>
         </div>
         <div className="button-row">
-          <select aria-label="时间范围" onChange={(event) => setDays(Number(event.target.value))} value={days}>
+          <select
+            aria-label="时间范围"
+            onChange={(event) => setDays(Number(event.target.value))}
+            value={days}
+          >
             <option value={7}>近 7 天</option>
             <option value={30}>近 30 天</option>
             <option value={0}>全部</option>
@@ -35,14 +39,20 @@ export function DashboardPage() {
           </button>
         </div>
       </section>
-      {isError ? <div className="error-box">{errorMessage(error, 'Dashboard 加载失败')}</div> : null}
+      {isError ? (
+        <div className="error-box">{errorMessage(error, 'Dashboard 加载失败')}</div>
+      ) : null}
       {!summary ? <p className="muted">正在加载指标...</p> : null}
       {summary ? (
         <>
           <section className="metric-grid dashboard-metrics">
             <MetricCard href="#knowledge" label="文档数" value={summary.metrics.documentCount} />
             <MetricCard href="#knowledge" label="QA 对数" value={summary.metrics.qaPairCount} />
-            <MetricCard href="#logs?status=FAILED" label="任务失败率" value={`${summary.metrics.taskFailureRate}%`} />
+            <MetricCard
+              href="#logs?status=FAILED"
+              label="任务失败率"
+              value={`${summary.metrics.taskFailureRate}%`}
+            />
             <MetricCard href="#logs" label="API 调用量" value={summary.metrics.apiCallCount} />
           </section>
 
@@ -60,14 +70,18 @@ export function DashboardPage() {
                 </div>
               </div>
               <div className="trend-list">
-                {summary.ingestionHealth.stages.length === 0 ? <p className="muted">暂无入库任务</p> : null}
+                {summary.ingestionHealth.stages.length === 0 ? (
+                  <p className="muted">暂无入库任务</p>
+                ) : null}
                 {summary.ingestionHealth.stages.map((stage) => (
                   <div className="trend-row" key={stage.stage}>
                     <span>{stage.stage}</span>
                     <div className="progress-bar">
                       <i style={{ width: `${percent(stage.successCount, stage.totalCount)}%` }} />
                     </div>
-                    <code>{stage.successCount}/{stage.totalCount}</code>
+                    <code>
+                      {stage.successCount}/{stage.totalCount}
+                    </code>
                   </div>
                 ))}
               </div>
@@ -107,9 +121,15 @@ export function DashboardPage() {
               <div className="dashboard-list">
                 {summary.recentTasks.length === 0 ? <p className="muted">暂无任务</p> : null}
                 {summary.recentTasks.map((task) => (
-                  <a className="dashboard-row" href={task.requestId ? `#logs?requestId=${task.requestId}` : '#logs'} key={task.id}>
+                  <a
+                    className="dashboard-row"
+                    href={task.requestId ? `#logs?requestId=${task.requestId}` : '#logs'}
+                    key={task.id}
+                  >
                     <strong>{task.taskType}</strong>
-                    <span className={`status-tag status-${task.status.toLowerCase()}`}>{task.status}</span>
+                    <span className={`status-tag status-${task.status.toLowerCase()}`}>
+                      {task.status}
+                    </span>
                     <span>{task.stage || '-'}</span>
                   </a>
                 ))}
@@ -126,7 +146,9 @@ export function DashboardPage() {
                     key={`${event.type}-${event.createdAt}-${event.message}`}
                   >
                     <strong>{event.type}</strong>
-                    <span className={`status-tag ${event.severity === 'HIGH' ? 'status-failed' : 'status-uploaded'}`}>
+                    <span
+                      className={`status-tag ${event.severity === 'HIGH' ? 'status-failed' : 'status-uploaded'}`}
+                    >
                       {event.severity}
                     </span>
                     <span>{event.message}</span>
@@ -141,7 +163,15 @@ export function DashboardPage() {
   );
 }
 
-function MetricCard({ href, label, value }: { href: string; label: string; value: number | string }) {
+function MetricCard({
+  href,
+  label,
+  value,
+}: {
+  href: string;
+  label: string;
+  value: number | string;
+}) {
   return (
     <a className="metric dashboard-metric-link" href={href}>
       <span>{label}</span>
@@ -153,4 +183,3 @@ function MetricCard({ href, label, value }: { href: string; label: string; value
 function percent(value: number, total: number) {
   return total ? Math.round((value / total) * 100) : 0;
 }
-

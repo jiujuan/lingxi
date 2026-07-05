@@ -15,4 +15,3 @@ export function PermissionGate({ permission, children, fallback = null }: Props)
 
   return <>{children}</>;
 }
-

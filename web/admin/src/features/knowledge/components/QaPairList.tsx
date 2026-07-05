@@ -68,7 +68,9 @@ export function QaPairList({ documentId, onJobUpdated }: Props) {
       </div>
       {error ? <p className="error">{error}</p> : null}
       {loading ? <p className="muted">正在读取 QA 对...</p> : null}
-      {!loading && !items.length ? <p className="muted">暂无 QA 对，解析完成后可重新生成。</p> : null}
+      {!loading && !items.length ? (
+        <p className="muted">暂无 QA 对，解析完成后可重新生成。</p>
+      ) : null}
       <div className="qa-list">
         {items.map((item) => (
           <article className="qa-row" key={item.id}>

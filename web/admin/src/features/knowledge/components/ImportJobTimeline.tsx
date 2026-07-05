@@ -36,7 +36,11 @@ export function ImportJobTimeline({ job }: Props) {
       <p>
         当前状态：{job.status} · {job.stage} · {job.progress}%
       </p>
-      {job.errorMessage ? <p className="error">{job.errorCode} · {job.errorMessage}</p> : null}
+      {job.errorMessage ? (
+        <p className="error">
+          {job.errorCode} · {job.errorMessage}
+        </p>
+      ) : null}
     </div>
   );
 }

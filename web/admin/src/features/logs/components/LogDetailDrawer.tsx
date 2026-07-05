@@ -23,4 +23,3 @@ export function LogDetailDrawer({ title, payload, onClose }: Props) {
     </div>
   );
 }
-

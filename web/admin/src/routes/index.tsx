@@ -19,13 +19,33 @@ type Route = {
 
 // Each route declares the "read" permission that gates its menu entry.
 const ROUTES: Route[] = [
-  { hash: '#dashboard', label: '总览', permission: 'DASHBOARD_READ', render: () => <DashboardPage /> },
-  { hash: '#knowledge', label: '知识库中心', permission: 'DOCUMENT_READ', render: () => <ImportPage /> },
+  {
+    hash: '#dashboard',
+    label: '总览',
+    permission: 'DASHBOARD_READ',
+    render: () => <DashboardPage />,
+  },
+  {
+    hash: '#knowledge',
+    label: '知识库中心',
+    permission: 'DOCUMENT_READ',
+    render: () => <ImportPage />,
+  },
   { hash: '#chat', label: 'Chat', permission: 'CHAT_READ', render: () => <ChatPage /> },
   { hash: '#logs', label: '日志排障', permission: 'LOG_READ', render: () => <LogsPage /> },
   { hash: '#api-keys', label: 'API Key', permission: 'API_KEY_READ', render: () => <ApiKeyPage /> },
-  { hash: '#models', label: '模型配置', permission: 'MODEL_CONFIG_READ', render: () => <ModelConfigPage /> },
-  { hash: '#settings', label: '系统设置', permission: 'SETTING_READ', render: () => <SettingsPage /> },
+  {
+    hash: '#models',
+    label: '模型配置',
+    permission: 'MODEL_CONFIG_READ',
+    render: () => <ModelConfigPage />,
+  },
+  {
+    hash: '#settings',
+    label: '系统设置',
+    permission: 'SETTING_READ',
+    render: () => <SettingsPage />,
+  },
 ];
 
 export function AppRoutes() {
@@ -50,7 +70,11 @@ export function AppRoutes() {
         <h1>Lingxi</h1>
         <nav>
           {visibleRoutes.map((route) => (
-            <a className={routeHash === route.hash ? 'active' : ''} href={route.hash} key={route.hash}>
+            <a
+              className={routeHash === route.hash ? 'active' : ''}
+              href={route.hash}
+              key={route.hash}
+            >
               {route.label}
             </a>
           ))}

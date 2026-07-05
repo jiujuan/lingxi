@@ -62,7 +62,12 @@ export function ModelConfigPage() {
 
   const createModelMutation = useMutation({
     mutationFn: () =>
-      createModelConfig({ providerId: selectedProviderId, capability, modelName, isDefault: makeDefault }),
+      createModelConfig({
+        providerId: selectedProviderId,
+        capability,
+        modelName,
+        isDefault: makeDefault,
+      }),
     onSuccess: () => {
       invalidate();
       setNotice('模型实例已保存。');

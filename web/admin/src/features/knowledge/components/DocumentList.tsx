@@ -1,5 +1,6 @@
 import type { DocumentFilters, KnowledgeDocument, Pagination } from '../api/documentApi';
 import { PermissionGate } from '../../../auth/PermissionGate';
+import { formatBytes, formatDateTime as formatTime } from '../../../shared/format';
 
 type Props = {
   documents: KnowledgeDocument[];
@@ -67,7 +68,10 @@ export function DocumentList({
         </label>
         <label>
           类型
-          <select onChange={(event) => changeFilter('fileType', event.target.value)} value={filters.fileType}>
+          <select
+            onChange={(event) => changeFilter('fileType', event.target.value)}
+            value={filters.fileType}
+          >
             {TYPE_OPTIONS.map((item) => (
               <option key={item || 'ALL'} value={item}>
                 {item || '全部类型'}
@@ -77,7 +81,10 @@ export function DocumentList({
         </label>
         <label>
           状态
-          <select onChange={(event) => changeFilter('status', event.target.value)} value={filters.status}>
+          <select
+            onChange={(event) => changeFilter('status', event.target.value)}
+            value={filters.status}
+          >
             {STATUS_OPTIONS.map((item) => (
               <option key={item || 'ALL'} value={item}>
                 {item || '全部状态'}
@@ -128,15 +135,23 @@ export function DocumentList({
               key={document.id}
               role="row"
             >
-              <button className="link-button title-button" onClick={() => onSelect(document.id)} type="button">
+              <button
+                className="link-button title-button"
+                onClick={() => onSelect(document.id)}
+                type="button"
+              >
                 <strong>{document.title}</strong>
-                <span>{document.fileName || '未绑定文件'} · {formatBytes(document.fileSize)}</span>
+                <span>
+                  {document.fileName || '未绑定文件'} · {formatBytes(document.fileSize)}
+                </span>
               </button>
               <span className={`status-tag status-${document.status.toLowerCase()}`}>
                 {stageLabel(document.status)}
               </span>
               <span>{permissionText(document.permissions)}</span>
-              <span>{document.qaPairCount} / {document.chunkCount}</span>
+              <span>
+                {document.qaPairCount} / {document.chunkCount}
+              </span>
               <span>{formatTime(document.updatedAt)}</span>
               <div className="button-row table-actions">
                 <button onClick={() => onSelect(document.id)} type="button">
@@ -155,7 +170,11 @@ export function DocumentList({
                   </PermissionGate>
                 ) : null}
                 <PermissionGate permission="DOCUMENT_DELETE">
-                  <button className="danger-button" onClick={() => onDelete(document)} type="button">
+                  <button
+                    className="danger-button"
+                    onClick={() => onDelete(document)}
+                    type="button"
+                  >
                     删除
                   </button>
                 </PermissionGate>
@@ -209,21 +228,4 @@ function stageLabel(status: string) {
     DELETED: '已删除',
   };
   return map[status] || status;
-}
-
-function formatBytes(value: number) {
-  if (!value) {
-    return '0 B';
-  }
-  if (value < 1024) {
-    return `${value} B`;
-  }
-  if (value < 1024 * 1024) {
-    return `${(value / 1024).toFixed(1)} KB`;
-  }
-  return `${(value / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function formatTime(value: string) {
-  return new Date(value).toLocaleString();
 }

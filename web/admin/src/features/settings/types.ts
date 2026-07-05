@@ -29,4 +29,3 @@ export type SystemSettings = {
   };
   effectiveScopes: Record<string, string>;
 };
-

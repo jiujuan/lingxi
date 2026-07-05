@@ -30,10 +30,7 @@ type ApiRequestOptions = RequestInit & {
   skipAuthRedirect?: boolean;
 };
 
-export async function apiRequest<T>(
-  path: string,
-  options: ApiRequestOptions = {},
-): Promise<T> {
+export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   const { skipAuthRedirect, ...init } = options;
   const headers = new Headers(init.headers);
   const token = getToken();
@@ -48,7 +45,7 @@ export async function apiRequest<T>(
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
-  } catch (cause) {
+  } catch {
     // Network failure / CORS: surface a clear error instead of a raw TypeError.
     throw new ApiError(0, 'NETWORK_ERROR', '网络异常，请检查连接后重试');
   }
@@ -108,7 +105,11 @@ export async function toApiError(response: Response): Promise<ApiError> {
     }
   }
 
-  return new ApiError(response.status, 'REQUEST_ERROR', typeof body === 'string' && body ? body : fallback);
+  return new ApiError(
+    response.status,
+    'REQUEST_ERROR',
+    typeof body === 'string' && body ? body : fallback,
+  );
 }
 
 /** Best-effort human-readable message from any thrown value. */

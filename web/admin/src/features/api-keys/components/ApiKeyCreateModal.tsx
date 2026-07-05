@@ -35,7 +35,10 @@ export function ApiKeyCreateModal({ createdKey, onClose, onCreate }: Props) {
               event.preventDefault();
               void onCreate({
                 name,
-                scopes: scopes.split(',').map((item) => item.trim()).filter(Boolean),
+                scopes: scopes
+                  .split(',')
+                  .map((item) => item.trim())
+                  .filter(Boolean),
                 allowedDepartmentIds: [],
                 allowedRoleIds: [],
                 rateLimitPerMinute: rateLimit,

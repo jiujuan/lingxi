@@ -8,7 +8,12 @@ import type { SystemSettings } from '../types';
 
 export function SettingsPage() {
   const queryClient = useQueryClient();
-  const { data: saved, error: loadError, isError: loadFailed, refetch } = useQuery({
+  const {
+    data: saved,
+    error: loadError,
+    isError: loadFailed,
+    refetch,
+  } = useQuery({
     queryKey: queryKeys.settings(),
     queryFn: getSystemSettings,
   });
@@ -33,7 +38,10 @@ export function SettingsPage() {
 
   function submit() {
     if (!settings) return;
-    if (isHighRiskChange(saved ?? null, settings) && !window.confirm('高风险设置会影响新任务或线上会话，确认保存？')) {
+    if (
+      isHighRiskChange(saved ?? null, settings) &&
+      !window.confirm('高风险设置会影响新任务或线上会话，确认保存？')
+    ) {
       return;
     }
     setMessage(null);
@@ -83,12 +91,16 @@ export function SettingsPage() {
 
       <section className="two-column">
         <div className="panel form-grid">
-          <h3>文件策略 <small>{settings.effectiveScopes.filePolicy}</small></h3>
+          <h3>
+            文件策略 <small>{settings.effectiveScopes.filePolicy}</small>
+          </h3>
           <label>
             最大文件大小 MB
             <input
               min={1}
-              onChange={(event) => update('filePolicy', 'maxFileSizeMb', Number(event.target.value))}
+              onChange={(event) =>
+                update('filePolicy', 'maxFileSizeMb', Number(event.target.value))
+              }
               type="number"
               value={settings.filePolicy.maxFileSizeMb}
             />
@@ -96,7 +108,16 @@ export function SettingsPage() {
           <label>
             允许类型
             <input
-              onChange={(event) => update('filePolicy', 'allowedExtensions', event.target.value.split(',').map((item) => item.trim()).filter(Boolean))}
+              onChange={(event) =>
+                update(
+                  'filePolicy',
+                  'allowedExtensions',
+                  event.target.value
+                    .split(',')
+                    .map((item) => item.trim())
+                    .filter(Boolean),
+                )
+              }
               value={settings.filePolicy.allowedExtensions.join(',')}
             />
           </label>
@@ -129,25 +150,50 @@ export function SettingsPage() {
         </div>
 
         <div className="panel form-grid">
-          <h3>检索策略 <small>{settings.effectiveScopes.retrievalPolicy}</small></h3>
+          <h3>
+            检索策略 <small>{settings.effectiveScopes.retrievalPolicy}</small>
+          </h3>
           <label>
             Vector TopK
-            <input min={1} onChange={(event) => update('retrievalPolicy', 'vectorTopK', Number(event.target.value))} type="number" value={settings.retrievalPolicy.vectorTopK} />
+            <input
+              min={1}
+              onChange={(event) =>
+                update('retrievalPolicy', 'vectorTopK', Number(event.target.value))
+              }
+              type="number"
+              value={settings.retrievalPolicy.vectorTopK}
+            />
           </label>
           <label>
             Text TopK
-            <input min={1} onChange={(event) => update('retrievalPolicy', 'textTopK', Number(event.target.value))} type="number" value={settings.retrievalPolicy.textTopK} />
+            <input
+              min={1}
+              onChange={(event) =>
+                update('retrievalPolicy', 'textTopK', Number(event.target.value))
+              }
+              type="number"
+              value={settings.retrievalPolicy.textTopK}
+            />
           </label>
           <label>
             Final TopK
-            <input min={1} onChange={(event) => update('retrievalPolicy', 'finalTopK', Number(event.target.value))} type="number" value={settings.retrievalPolicy.finalTopK} />
+            <input
+              min={1}
+              onChange={(event) =>
+                update('retrievalPolicy', 'finalTopK', Number(event.target.value))
+              }
+              type="number"
+              value={settings.retrievalPolicy.finalTopK}
+            />
           </label>
           <label>
             低置信阈值
             <input
               max={2}
               min={0}
-              onChange={(event) => update('retrievalPolicy', 'lowConfidenceThreshold', Number(event.target.value))}
+              onChange={(event) =>
+                update('retrievalPolicy', 'lowConfidenceThreshold', Number(event.target.value))
+              }
               step={0.01}
               type="number"
               value={settings.retrievalPolicy.lowConfidenceThreshold}
@@ -158,42 +204,94 @@ export function SettingsPage() {
 
       <section className="two-column">
         <div className="panel form-grid">
-          <h3>限流与存储 <small>{settings.effectiveScopes.rateLimitPolicy}</small></h3>
+          <h3>
+            限流与存储 <small>{settings.effectiveScopes.rateLimitPolicy}</small>
+          </h3>
           <label>
             API Key 默认限流 / min
-            <input min={1} onChange={(event) => update('rateLimitPolicy', 'apiKeyDefaultPerMinute', Number(event.target.value))} type="number" value={settings.rateLimitPolicy.apiKeyDefaultPerMinute} />
+            <input
+              min={1}
+              onChange={(event) =>
+                update('rateLimitPolicy', 'apiKeyDefaultPerMinute', Number(event.target.value))
+              }
+              type="number"
+              value={settings.rateLimitPolicy.apiKeyDefaultPerMinute}
+            />
           </label>
           <label>
             Chat 限流 / min
-            <input min={1} onChange={(event) => update('rateLimitPolicy', 'chatPerMinute', Number(event.target.value))} type="number" value={settings.rateLimitPolicy.chatPerMinute} />
+            <input
+              min={1}
+              onChange={(event) =>
+                update('rateLimitPolicy', 'chatPerMinute', Number(event.target.value))
+              }
+              type="number"
+              value={settings.rateLimitPolicy.chatPerMinute}
+            />
           </label>
           <label>
             存储后端
-            <input onChange={(event) => update('storagePolicy', 'backend', event.target.value)} value={settings.storagePolicy.backend} />
+            <input
+              onChange={(event) => update('storagePolicy', 'backend', event.target.value)}
+              value={settings.storagePolicy.backend}
+            />
           </label>
           <label>
             存储前缀
-            <input onChange={(event) => update('storagePolicy', 'prefix', event.target.value)} value={settings.storagePolicy.prefix} />
+            <input
+              onChange={(event) => update('storagePolicy', 'prefix', event.target.value)}
+              value={settings.storagePolicy.prefix}
+            />
           </label>
         </div>
 
         <div className="panel form-grid">
-          <h3>数据保留 <small>{settings.effectiveScopes.retentionPolicy}</small></h3>
+          <h3>
+            数据保留 <small>{settings.effectiveScopes.retentionPolicy}</small>
+          </h3>
           <label>
             API 调用日志天数
-            <input min={1} onChange={(event) => update('retentionPolicy', 'apiCallLogDays', Number(event.target.value))} type="number" value={settings.retentionPolicy.apiCallLogDays} />
+            <input
+              min={1}
+              onChange={(event) =>
+                update('retentionPolicy', 'apiCallLogDays', Number(event.target.value))
+              }
+              type="number"
+              value={settings.retentionPolicy.apiCallLogDays}
+            />
           </label>
           <label>
             审计日志天数
-            <input min={30} onChange={(event) => update('retentionPolicy', 'auditLogDays', Number(event.target.value))} type="number" value={settings.retentionPolicy.auditLogDays} />
+            <input
+              min={30}
+              onChange={(event) =>
+                update('retentionPolicy', 'auditLogDays', Number(event.target.value))
+              }
+              type="number"
+              value={settings.retentionPolicy.auditLogDays}
+            />
           </label>
           <label>
             任务日志天数
-            <input min={1} onChange={(event) => update('retentionPolicy', 'taskRunDays', Number(event.target.value))} type="number" value={settings.retentionPolicy.taskRunDays} />
+            <input
+              min={1}
+              onChange={(event) =>
+                update('retentionPolicy', 'taskRunDays', Number(event.target.value))
+              }
+              type="number"
+              value={settings.retentionPolicy.taskRunDays}
+            />
           </label>
           <label>
             软删除保留天数
-            <input min={1} onChange={(event) => update('retentionPolicy', 'softDeleteDays', Number(event.target.value))} type="number" value={settings.retentionPolicy.softDeleteDays} />
+            <input
+              min={1}
+              onChange={(event) =>
+                update('retentionPolicy', 'softDeleteDays', Number(event.target.value))
+              }
+              type="number"
+              value={settings.retentionPolicy.softDeleteDays}
+            />
           </label>
         </div>
       </section>
@@ -222,9 +320,9 @@ function isHighRiskChange(previous: SystemSettings | null, next: SystemSettings)
   if (!previous) return true;
   return (
     previous.filePolicy.maxFileSizeMb !== next.filePolicy.maxFileSizeMb ||
-    previous.retrievalPolicy.lowConfidenceThreshold !== next.retrievalPolicy.lowConfidenceThreshold ||
+    previous.retrievalPolicy.lowConfidenceThreshold !==
+      next.retrievalPolicy.lowConfidenceThreshold ||
     previous.retentionPolicy.apiCallLogDays !== next.retentionPolicy.apiCallLogDays ||
     previous.retentionPolicy.auditLogDays !== next.retentionPolicy.auditLogDays
   );
 }
-

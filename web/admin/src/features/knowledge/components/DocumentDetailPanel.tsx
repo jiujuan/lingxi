@@ -1,6 +1,7 @@
 import type { DocumentChunk, KnowledgeDocumentDetail } from '../api/documentApi';
 import type { ImportJob } from '../api/importJobApi';
 import { PermissionGate } from '../../../auth/PermissionGate';
+import { formatDateTime } from '../../../shared/format';
 import { ImportJobTimeline } from './ImportJobTimeline';
 import { QaPairList } from './QaPairList';
 
@@ -51,7 +52,9 @@ export function DocumentDetailPanel({
     <section className="panel detail-panel">
       <div className="toolbar-row compact">
         <div>
-          <p className="eyebrow">{detail.fileType} · {detail.status}</p>
+          <p className="eyebrow">
+            {detail.fileType} · {detail.status}
+          </p>
           <h3>{detail.title}</h3>
           <p className="muted">{detail.fileName || detail.objectKey}</p>
         </div>
@@ -88,15 +91,19 @@ export function DocumentDetailPanel({
         </div>
         <div>
           <span className="field-label">解析器</span>
-          <strong>{detail.parserName || '-'} {detail.parserVersion || ''}</strong>
+          <strong>
+            {detail.parserName || '-'} {detail.parserVersion || ''}
+          </strong>
         </div>
         <div>
           <span className="field-label">QA / Chunk</span>
-          <strong>{detail.qaPairCount} / {detail.chunkCount}</strong>
+          <strong>
+            {detail.qaPairCount} / {detail.chunkCount}
+          </strong>
         </div>
         <div>
           <span className="field-label">更新时间</span>
-          <strong>{new Date(detail.updatedAt).toLocaleString()}</strong>
+          <strong>{formatDateTime(detail.updatedAt)}</strong>
         </div>
       </div>
 
@@ -119,7 +126,9 @@ export function DocumentDetailPanel({
             {chunks.map((chunk) => (
               <article className="chunk-row" key={chunk.id}>
                 <div className="toolbar-row compact">
-                  <strong>#{chunk.chunkIndex + 1} {chunk.titlePath.join(' / ') || '未命名片段'}</strong>
+                  <strong>
+                    #{chunk.chunkIndex + 1} {chunk.titlePath.join(' / ') || '未命名片段'}
+                  </strong>
                   <span>page {chunk.pageNo ?? '-'}</span>
                 </div>
                 <p>{chunk.content}</p>
@@ -140,7 +149,9 @@ export function DocumentDetailPanel({
             {detail.processingLogs.map((log) => (
               <div className="log-row" key={log.id}>
                 <strong>{log.taskType}</strong>
-                <span>{log.status} · {log.stage || '-'}</span>
+                <span>
+                  {log.status} · {log.stage || '-'}
+                </span>
                 {log.requestId ? (
                   <a href={`#logs?requestId=${log.requestId}`}>
                     <code>{log.requestId}</code>
@@ -148,7 +159,11 @@ export function DocumentDetailPanel({
                 ) : (
                   <code>-</code>
                 )}
-                {log.error ? <p className="error">{String(log.error.message || log.error.code || '任务失败')}</p> : null}
+                {log.error ? (
+                  <p className="error">
+                    {String(log.error.message || log.error.code || '任务失败')}
+                  </p>
+                ) : null}
               </div>
             ))}
           </div>

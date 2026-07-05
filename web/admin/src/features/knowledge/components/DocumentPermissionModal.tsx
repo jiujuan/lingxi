@@ -43,7 +43,11 @@ export function DocumentPermissionModal({ document, onClose, onSaved }: Props) {
       roleIds: splitIds(roleIds),
       userIds: splitIds(userIds),
     };
-    const noAccessScope = !payload.allAuthenticated && !payload.departmentIds?.length && !payload.roleIds?.length && !payload.userIds?.length;
+    const noAccessScope =
+      !payload.allAuthenticated &&
+      !payload.departmentIds?.length &&
+      !payload.roleIds?.length &&
+      !payload.userIds?.length;
     const message = noAccessScope
       ? '当前权限为空，保存后该文档仅系统管理员可见。确认保存？'
       : '权限变更会立即影响新检索，确认保存？';
@@ -65,7 +69,12 @@ export function DocumentPermissionModal({ document, onClose, onSaved }: Props) {
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <form aria-modal="true" className="modal-panel" onSubmit={(event) => void submit(event)} role="dialog">
+      <form
+        aria-modal="true"
+        className="modal-panel"
+        onSubmit={(event) => void submit(event)}
+        role="dialog"
+      >
         <div className="toolbar-row compact">
           <div>
             <h3>编辑权限</h3>

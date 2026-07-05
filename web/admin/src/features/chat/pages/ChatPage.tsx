@@ -1,12 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import { errorMessage } from '../../../api/client';
 import {
   createChatSession,
   listChatMessages,
   listChatSessions,
   sendFeedback,
-  streamChatMessage,
 } from '../api/chatApi';
 import { getCitationSource, getRetrievalExplanation } from '../api/citationApi';
 import { ChatComposer } from '../components/ChatComposer';
@@ -15,39 +13,29 @@ import { ChatSessionList } from '../components/ChatSessionList';
 import { CitationPanel } from '../components/CitationPanel';
 import { CitationSourceDrawer } from '../components/CitationSourceDrawer';
 import { RetrievalExplanationPanel } from '../components/RetrievalExplanationPanel';
-import type {
-  ChatCitation,
-  ChatMessage,
-  ChatSession,
-  CitationSource,
-  RetrievalExplanation,
-} from '../types';
+import { useChatStream } from '../hooks/useChatStream';
+import type { ChatMessage, ChatSession, CitationSource, RetrievalExplanation } from '../types';
 
 export function ChatPage() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [citations, setCitations] = useState<ChatCitation[]>([]);
-  const [streamingText, setStreamingText] = useState('');
-  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [source, setSource] = useState<CitationSource | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [explanation, setExplanation] = useState<RetrievalExplanation | null>(null);
   const [isExplanationLoading, setIsExplanationLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const streamAbortRef = useRef<AbortController | null>(null);
+  const { streamingText, isStreaming, currentRunId, citations, setCitations, start, stop, reset } =
+    useChatStream();
 
   useEffect(() => {
     void refreshSessions();
-    // Cancel any in-flight stream when the page unmounts.
-    return () => streamAbortRef.current?.abort();
   }, []);
 
   useEffect(() => {
     // Switching sessions cancels a stream still running for the previous one.
-    streamAbortRef.current?.abort();
+    reset();
     if (activeSessionId) {
       void refreshMessages(activeSessionId);
     }
@@ -85,7 +73,7 @@ export function ChatPage() {
     setSessions((current) => [session, ...current]);
     setActiveSessionId(session.id);
     setMessages([]);
-    setCitations([]);
+    reset();
   }
 
   async function submitMessage(content: string) {
@@ -96,10 +84,11 @@ export function ChatPage() {
       setActiveSessionId(session.id);
       sessionId = session.id;
     }
+    const targetSessionId = sessionId;
 
     const localUserMessage: ChatMessage = {
       id: `local-${Date.now()}`,
-      sessionId,
+      sessionId: targetSessionId,
       role: 'USER',
       content,
       status: 'CREATED',
@@ -107,51 +96,19 @@ export function ChatPage() {
       createdAt: new Date().toISOString(),
     };
     setMessages((current) => [...current, localUserMessage]);
-    setStreamingText('');
-    setCitations([]);
-    setIsStreaming(true);
     setError(null);
 
-    const controller = new AbortController();
-    streamAbortRef.current = controller;
-    try {
-      await streamChatMessage(
-        sessionId,
-        content,
-        {
-          onEvent: (event) => {
-            if (event.type === 'run_started') {
-              setCurrentRunId(String(event.data.runId || ''));
-            }
-            if (event.type === 'delta') {
-              setStreamingText((current) => current + String(event.data.content ?? ''));
-            }
-            if (event.type === 'error') {
-              setError(`${String(event.data.message ?? '模型调用失败')} (${String(event.data.requestId ?? '')})`);
-            }
-          },
-          onCitation: (citation) => setCitations((current) => [...current, citation]),
-        },
-        { signal: controller.signal },
-      );
-      await refreshMessages(sessionId, true);
-      await refreshSessions();
-    } catch (err) {
-      if ((err as Error)?.name === 'AbortError') {
-        // User stopped generation — sync whatever the server persisted, no error.
-        await refreshMessages(sessionId, true);
-      } else {
-        setError(errorMessage(err, '发送失败，请稍后重试'));
-      }
-    } finally {
-      streamAbortRef.current = null;
-      setIsStreaming(false);
-      setStreamingText('');
-    }
-  }
-
-  function stopStreaming() {
-    streamAbortRef.current?.abort();
+    await start(targetSessionId, content, {
+      onCompleted: async () => {
+        await refreshMessages(targetSessionId, true);
+        await refreshSessions();
+      },
+      onAborted: async () => {
+        // User stopped generation — sync whatever the server persisted.
+        await refreshMessages(targetSessionId, true);
+      },
+      onError: setError,
+    });
   }
 
   async function copyMessage(content: string) {
@@ -215,10 +172,18 @@ export function ChatPage() {
             onFeedback={(messageId, value) => void feedback(messageId, value)}
             streamingText={streamingText}
           />
-          <ChatComposer disabled={isStreaming} isStreaming={isStreaming} onStop={stopStreaming} onSubmit={submitMessage} />
+          <ChatComposer
+            disabled={isStreaming}
+            isStreaming={isStreaming}
+            onStop={stop}
+            onSubmit={submitMessage}
+          />
         </div>
         <div className="chat-side-stack">
-          <CitationPanel citations={citations} onOpenSource={(citationId) => void openSource(citationId)} />
+          <CitationPanel
+            citations={citations}
+            onOpenSource={(citationId) => void openSource(citationId)}
+          />
           <RetrievalExplanationPanel
             explanation={explanation}
             isLoading={isExplanationLoading}

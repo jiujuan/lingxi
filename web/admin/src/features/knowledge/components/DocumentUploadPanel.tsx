@@ -38,7 +38,12 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
       return;
     }
     const permission = buildPermission();
-    if (!permission.allAuthenticated && !permission.departmentIds?.length && !permission.roleIds?.length && !permission.userIds?.length) {
+    if (
+      !permission.allAuthenticated &&
+      !permission.departmentIds?.length &&
+      !permission.roleIds?.length &&
+      !permission.userIds?.length
+    ) {
       setError('至少选择一种访问范围。');
       return;
     }

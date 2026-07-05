@@ -88,7 +88,9 @@ export function ApiKeyPage() {
       {keysQuery.isError || logsQuery.isError ? (
         <div className="error-box">{errorMessage(loadError, 'API Key 数据加载失败')}</div>
       ) : null}
-      {actionError ? <div className="error-box">{errorMessage(actionError, '操作失败')}</div> : null}
+      {actionError ? (
+        <div className="error-box">{errorMessage(actionError, '操作失败')}</div>
+      ) : null}
       <section className="panel">
         <h3>Key 列表</h3>
         <div className="api-key-list">
@@ -97,7 +99,9 @@ export function ApiKeyPage() {
             <article className="api-key-row" key={key.id}>
               <div>
                 <strong>{key.name}</strong>
-                <p className="muted">{key.keyPrefix} · {key.scopes.join(', ') || '无 scope'}</p>
+                <p className="muted">
+                  {key.keyPrefix} · {key.scopes.join(', ') || '无 scope'}
+                </p>
               </div>
               <span className={`status-tag status-${key.status.toLowerCase()}`}>{key.status}</span>
               <span>{key.rateLimitPerMinute}/min</span>
@@ -116,7 +120,9 @@ export function ApiKeyPage() {
       <section className="panel">
         <div className="toolbar-row compact">
           <h3>调用示例</h3>
-          <a className="secondary-link" href="#logs">查看统一日志</a>
+          <a className="secondary-link" href="#logs">
+            查看统一日志
+          </a>
         </div>
         <pre>{`curl -H "Authorization: Bearer lk_live_****" https://example.com/v1/chat/completions`}</pre>
       </section>
