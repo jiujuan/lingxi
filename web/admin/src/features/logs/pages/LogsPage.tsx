@@ -8,6 +8,7 @@ import {
   retryTaskRun,
 } from '../api/logsApi';
 import { LogDetailDrawer } from '../components/LogDetailDrawer';
+import { PermissionGate } from '../../../auth/PermissionGate';
 import type { ApiCallLog, AuditLog, LogFilters, ModelCallLog, TaskRunLog } from '../types';
 
 type Tab = 'tasks' | 'models' | 'api' | 'audit';
@@ -190,9 +191,11 @@ function TaskRows({
               详情
             </button>
             {log.retryable ? (
-              <button onClick={() => onRetry(log)} type="button">
-                重试
-              </button>
+              <PermissionGate permission="TASK_RETRY">
+                <button onClick={() => onRetry(log)} type="button">
+                  重试
+                </button>
+              </PermissionGate>
             ) : null}
           </div>
         </article>

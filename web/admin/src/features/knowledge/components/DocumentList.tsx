@@ -1,4 +1,5 @@
 import type { DocumentFilters, KnowledgeDocument, Pagination } from '../api/documentApi';
+import { PermissionGate } from '../../../auth/PermissionGate';
 
 type Props = {
   documents: KnowledgeDocument[];
@@ -141,17 +142,23 @@ export function DocumentList({
                 <button onClick={() => onSelect(document.id)} type="button">
                   查看
                 </button>
-                <button onClick={() => onEditPermissions(document)} type="button">
-                  权限
-                </button>
-                {document.latestJob?.retryable ? (
-                  <button onClick={() => onRetry(document)} type="button">
-                    重试
+                <PermissionGate permission="DOCUMENT_PERMISSION_WRITE">
+                  <button onClick={() => onEditPermissions(document)} type="button">
+                    权限
                   </button>
+                </PermissionGate>
+                {document.latestJob?.retryable ? (
+                  <PermissionGate permission="TASK_RETRY">
+                    <button onClick={() => onRetry(document)} type="button">
+                      重试
+                    </button>
+                  </PermissionGate>
                 ) : null}
-                <button className="danger-button" onClick={() => onDelete(document)} type="button">
-                  删除
-                </button>
+                <PermissionGate permission="DOCUMENT_DELETE">
+                  <button className="danger-button" onClick={() => onDelete(document)} type="button">
+                    删除
+                  </button>
+                </PermissionGate>
               </div>
             </div>
           ))}

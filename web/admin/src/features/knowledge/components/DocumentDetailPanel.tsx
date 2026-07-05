@@ -1,5 +1,6 @@
 import type { DocumentChunk, KnowledgeDocumentDetail } from '../api/documentApi';
 import type { ImportJob } from '../api/importJobApi';
+import { PermissionGate } from '../../../auth/PermissionGate';
 import { ImportJobTimeline } from './ImportJobTimeline';
 import { QaPairList } from './QaPairList';
 
@@ -58,17 +59,23 @@ export function DocumentDetailPanel({
           <button onClick={onRefresh} type="button">
             刷新
           </button>
-          <button onClick={() => onEditPermissions(detail)} type="button">
-            编辑权限
-          </button>
-          {detail.latestJob?.retryable ? (
-            <button onClick={() => onRetry(detail)} type="button">
-              重试失败阶段
+          <PermissionGate permission="DOCUMENT_PERMISSION_WRITE">
+            <button onClick={() => onEditPermissions(detail)} type="button">
+              编辑权限
             </button>
+          </PermissionGate>
+          {detail.latestJob?.retryable ? (
+            <PermissionGate permission="TASK_RETRY">
+              <button onClick={() => onRetry(detail)} type="button">
+                重试失败阶段
+              </button>
+            </PermissionGate>
           ) : null}
-          <button className="danger-button" onClick={() => onDelete(detail)} type="button">
-            删除
-          </button>
+          <PermissionGate permission="DOCUMENT_DELETE">
+            <button className="danger-button" onClick={() => onDelete(detail)} type="button">
+              删除
+            </button>
+          </PermissionGate>
         </div>
       </div>
 

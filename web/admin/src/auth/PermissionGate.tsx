@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { currentUser } from './authStore';
+import { hasPermission } from './authStore';
 
 type Props = {
   permission: string;
@@ -9,9 +9,7 @@ type Props = {
 };
 
 export function PermissionGate({ permission, children, fallback = null }: Props) {
-  const user = currentUser();
-
-  if (!user?.permissions.includes(permission)) {
+  if (!hasPermission(permission)) {
     return <>{fallback}</>;
   }
 

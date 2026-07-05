@@ -27,6 +27,7 @@ export function LoginPage() {
       const result = await apiRequest<LoginResponse>('/api/v1/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
+        skipAuthRedirect: true,
       });
       saveAuth(result.accessToken, result.user);
       window.location.reload();
