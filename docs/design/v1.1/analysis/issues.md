@@ -25,6 +25,7 @@
 | #3 密钥 fail-fast | ✅ 已完成（2026-07-06） | 取消加密密钥→JWT 密钥的静默回退，两把密钥各自独立 dev 默认值；新增 `validate_secret_config`：生产环境校验两把密钥均已设置、≥32 字符、且互不相同，否则抛 `ConfigurationError` 拒绝启动；接入 `create_app()` 与 `celery_app` 启动期；`.env.example` 拆分两键并附生成命令。 |
 | #5 任务重试/幂等 | ✅ 已完成（2026-07-06） | Celery 任务改 `bind=True`+`acks_late=True`+`max_retries`，失败时经 `handle_failure` 真正抛异常（可重试则 `self.retry`+指数退避，否则终态 `TaskProcessingError`），retryable 由持久化 `TaskRun.error` 读取；`enqueue_*` 不再静默 `return False`（log+raise），API 路径入队失败标记 job FAILED(retryable) 并返回 503；三个 service 的 `except` 加 `logger.exception` 保留堆栈；COMPLETED 任务重复投递短路（幂等）。新增 `test_task_reliability.py`；全量 90 passed。 |
 | #6 分批处理 | ✅ 已完成（2026-07-06） | QA 拆分按字符预算（token 代理）将 chunk 分组、逐组生成再合并（chunk 全局 index 保序）；Embedding 按 `EMBEDDING_BATCH_SIZE` 分批，批内瞬时失败按 `EMBEDDING_BATCH_MAX_RETRIES` 重试、彻底失败交由任务层重跑；两者经 `_batching.run_ordered` 支持有界并发（DB 写仍在主线程，Session 不并发）。新增 5 项配置 + `.env.example`；新增 `test_batching_pipeline.py`；全量 95 passed。 |
+| #7 连接池 | ✅ 已完成（2026-07-06） | `db/session.py` 显式配置 `pool_size/max_overflow/pool_recycle/pool_timeout/pool_pre_ping`（`build_db_engine_options`，全部环境变量可覆盖）；API 与 Celery worker 按 `DB_ROLE` 分离，worker 进程启动即 `DB_ROLE=worker` 并可用 `WORKER_DB_*` 独立调参；SQLite 走默认池（不传 QueuePool 参数）。async SQLAlchemy 评估后暂缓（现有同步栈 + 同步 Celery worker，迁移成本大）。新增 4 项配置测试；全量 99 passed。 |
 
 ---
 

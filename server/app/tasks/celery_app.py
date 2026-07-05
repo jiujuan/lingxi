@@ -1,5 +1,11 @@
+import os
+
 from celery import Celery
 from kombu import Queue
+
+# Default this process to the "worker" DB pool profile before any task module
+# imports the engine, so workers size their pool independently from the API.
+os.environ.setdefault("DB_ROLE", "worker")
 
 from server.app.core.config import settings, validate_secret_config
 

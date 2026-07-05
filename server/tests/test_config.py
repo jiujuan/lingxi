@@ -5,6 +5,7 @@ from server.app.core.config import (
     DEV_ENCRYPTION_SECRET_DEFAULT,
     Settings,
     build_database_url,
+    build_db_engine_options,
     build_redis_url,
     load_env_file,
     parse_csv_env,
@@ -214,3 +215,69 @@ def test_validate_secret_config_accepts_strong_distinct_production_secrets(monke
         monkeypatch, jwt="J" * 40, enc="E" * 40
     )
     validate_secret_config(settings)  # must not raise
+
+
+def _clear_db_pool_env(monkeypatch):
+    for name in (
+        "DB_POOL_SIZE",
+        "DB_MAX_OVERFLOW",
+        "DB_POOL_RECYCLE",
+        "DB_POOL_TIMEOUT",
+        "DB_POOL_PRE_PING",
+        "WORKER_DB_POOL_SIZE",
+        "WORKER_DB_MAX_OVERFLOW",
+        "WORKER_DB_POOL_RECYCLE",
+        "WORKER_DB_POOL_TIMEOUT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_db_engine_options_defaults_for_postgres(monkeypatch):
+    _clear_db_pool_env(monkeypatch)
+    options = build_db_engine_options("api", url="postgresql+psycopg://x@localhost/db")
+
+    assert options == {
+        "pool_size": 5,
+        "max_overflow": 10,
+        "pool_recycle": 1800,
+        "pool_timeout": 30,
+        "pool_pre_ping": True,
+    }
+
+
+def test_db_engine_options_env_overrides(monkeypatch):
+    _clear_db_pool_env(monkeypatch)
+    monkeypatch.setenv("DB_POOL_SIZE", "20")
+    monkeypatch.setenv("DB_MAX_OVERFLOW", "40")
+    monkeypatch.setenv("DB_POOL_RECYCLE", "600")
+    monkeypatch.setenv("DB_POOL_TIMEOUT", "15")
+    monkeypatch.setenv("DB_POOL_PRE_PING", "false")
+
+    options = build_db_engine_options("api", url="postgresql+psycopg://x@localhost/db")
+
+    assert options["pool_size"] == 20
+    assert options["max_overflow"] == 40
+    assert options["pool_recycle"] == 600
+    assert options["pool_timeout"] == 15
+    assert options["pool_pre_ping"] is False
+
+
+def test_db_engine_options_worker_role_overrides_then_falls_back(monkeypatch):
+    _clear_db_pool_env(monkeypatch)
+    monkeypatch.setenv("DB_POOL_SIZE", "5")
+    monkeypatch.setenv("WORKER_DB_POOL_SIZE", "12")  # worker-specific override
+
+    worker = build_db_engine_options("worker", url="postgresql+psycopg://x@localhost/db")
+    api = build_db_engine_options("api", url="postgresql+psycopg://x@localhost/db")
+
+    assert worker["pool_size"] == 12  # uses worker override
+    assert api["pool_size"] == 5  # api uses shared base
+    assert worker["max_overflow"] == 10  # no worker override -> falls back to default
+
+
+def test_db_engine_options_sqlite_uses_default_pool(monkeypatch):
+    _clear_db_pool_env(monkeypatch)
+    options = build_db_engine_options("api", url="sqlite+pysqlite:///:memory:")
+
+    # SQLite rejects QueuePool sizing args -> only pre_ping is passed
+    assert options == {"pool_pre_ping": True}

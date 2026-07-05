@@ -58,6 +58,45 @@ def parse_csv_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     return values or default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off", "")
+
+
+def build_db_engine_options(role: str = "api", *, url: str | None = None) -> dict:
+    """Explicit SQLAlchemy pool configuration, tunable per process role.
+
+    The API and Celery worker run in separate processes and size their pools
+    independently: the worker reads ``WORKER_DB_*`` env vars (falling back to the
+    shared ``DB_*`` values) so a busy worker fleet does not starve the API — or
+    vice versa. SQLite (tests/local) uses its default pool since it rejects
+    QueuePool sizing arguments.
+    """
+
+    resolved_url = url or build_database_url()
+    if resolved_url.startswith("sqlite"):
+        return {"pool_pre_ping": _env_bool("DB_POOL_PRE_PING", True)}
+
+    worker = role == "worker"
+
+    def pick_int(base_env: str, worker_env: str, default: int) -> int:
+        if worker:
+            override = os.getenv(worker_env)
+            if override is not None:
+                return int(override)
+        return int(os.getenv(base_env, str(default)))
+
+    return {
+        "pool_size": pick_int("DB_POOL_SIZE", "WORKER_DB_POOL_SIZE", 5),
+        "max_overflow": pick_int("DB_MAX_OVERFLOW", "WORKER_DB_MAX_OVERFLOW", 10),
+        "pool_recycle": pick_int("DB_POOL_RECYCLE", "WORKER_DB_POOL_RECYCLE", 1800),
+        "pool_timeout": pick_int("DB_POOL_TIMEOUT", "WORKER_DB_POOL_TIMEOUT", 30),
+        "pool_pre_ping": _env_bool("DB_POOL_PRE_PING", True),
+    }
+
+
 def build_secret_encryption_key() -> str:
     # Independent from JWT_SECRET_KEY: never fall back to the JWT key so the two
     # secrets can be rotated separately and a leak of one does not compromise the
