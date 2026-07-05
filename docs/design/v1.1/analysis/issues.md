@@ -28,6 +28,7 @@
 | #7 连接池 | ✅ 已完成（2026-07-06） | `db/session.py` 显式配置 `pool_size/max_overflow/pool_recycle/pool_timeout/pool_pre_ping`（`build_db_engine_options`，全部环境变量可覆盖）；API 与 Celery worker 按 `DB_ROLE` 分离，worker 进程启动即 `DB_ROLE=worker` 并可用 `WORKER_DB_*` 独立调参；SQLite 走默认池（不传 QueuePool 参数）。async SQLAlchemy 评估后暂缓（现有同步栈 + 同步 Celery worker，迁移成本大）。新增 4 项配置测试；全量 99 passed。 |
 | #8 SSE 校验前移+心跳 | ✅ 已完成（2026-07-06） | `stream_message_run` 拆为「同步前置校验 + 返回生成器」，会话不存在/空消息在 StreamingResponse 发 200 前正确返回 404/400；新增 `SseService.stream_with_heartbeat`：源生成器在后台线程跑，主线程在静默超过 `SSE_HEARTBEAT_SECONDS` 时注入 `: heartbeat` 注释帧（仅 worker 线程持有 Session，无并发访问），异常回传主线程。新增 4 项 SSE 测试；全量 103 passed。 |
 | #9 JWT 可吊销 | ✅ 已完成（2026-07-06） | User 新增 `token_version`（迁移 0002），token 内嵌 `ver`；`assert_token_current` 在鉴权与 refresh 时比对，登出（`AuthService.logout`）/改密/禁用调 `revoke_tokens` 自增版本即刻吊销所有已签发 token；`decode_token` 校验 `iss`/`aud`；refresh 默认收紧至 14 天。新增 2 项测试（登出吊销 access+refresh、错误 aud 拒绝）；全量 105 passed。 |
+| #10 AEAD 加密+迁移 | ✅ 已完成（2026-07-06） | `secrets.py` 换用 `cryptography` 的 **AES-256-GCM**（`enc:v2`，随机 nonce），保留 `enc:v1` 兼容解密（读旧写新）；`encrypt/decrypt` 支持 `secret_key` 参数以支持轮换。新增 `scripts/reencrypt_secrets.py`（格式迁移 + 密钥轮换，`OLD_SECRET_ENCRYPTION_KEY`）与轮换文档；`env.py` 开 `compare_type/compare_server_default`，0001 作 baseline、后续增量 autogenerate。`requirements` 加 `cryptography`。新增 `test_secrets_crypto.py`（6 项）；全量 111 passed。 |
 
 ---
 

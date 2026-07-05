@@ -1,6 +1,7 @@
 alembic
 bcrypt
 celery
+cryptography
 fastapi
 httpx
 python-jose
