@@ -31,6 +31,7 @@
 | #10 AEAD 加密+迁移 | ✅ 已完成（2026-07-06） | `secrets.py` 换用 `cryptography` 的 **AES-256-GCM**（`enc:v2`，随机 nonce），保留 `enc:v1` 兼容解密（读旧写新）；`encrypt/decrypt` 支持 `secret_key` 参数以支持轮换。新增 `scripts/reencrypt_secrets.py`（格式迁移 + 密钥轮换，`OLD_SECRET_ENCRYPTION_KEY`）与轮换文档；`env.py` 开 `compare_type/compare_server_default`，0001 作 baseline、后续增量 autogenerate。`requirements` 加 `cryptography`。新增 `test_secrets_crypto.py`（6 项）；全量 111 passed。 |
 | #11 前端 401/RBAC | ✅ 已完成（2026-07-06） | `apiRequest` 归一化 `ApiError`（保留 code/requestId、兼容非 JSON/网络错误），带 token 的 401 → `clearAuth`+跳登录（登录请求 `skipAuthRedirect` 避免回环）；`authStore` 增 `clearAuth/getToken/hasPermission/redirectToLogin`，`currentUser` 解析加 try/catch 防脏数据白屏；`routes` 按 `user.permissions` 过滤菜单/路由并给无权兜底页；`PermissionGate` 接线到文档删除/权限/重试与日志任务重试等敏感操作。`vite build` 通过（66 模块）。 |
 | #12 TanStack Query | ✅ 已完成（2026-07-06） | 引入 `@tanstack/react-query`（装进 `web/admin`），`main.tsx` 挂 `QueryClientProvider`；`queryClient.ts` 配置：4xx 不重试、瞬时错误重试 1 次、`staleTime 30s`（切页命中缓存）、`queryKeys` 工厂。Dashboard/Settings/ApiKeys/ModelConfig/Logs 迁移到 `useQuery`/`useMutation` + 失效刷新，错误经 `ApiError`/`errorMessage` 展示。Chat（SSE→#14）与 Knowledge（体量大）保留 useState 作后续。`vite build` 通过（114 模块）。 |
+| #13 类型 codegen | ✅ 已完成（2026-07-06） | `server/scripts/export_openapi.py` 从 FastAPI 导出 `openapi.json`（47 路径/74 schema）；`web/admin` 装 `openapi-typescript`，`npm run gen:api` 生成 `src/api/schema.d.ts`；`schema-helpers.ts` 暴露 `Schemas[...]` 便捷别名，`LoginPage` 示范用生成的 `TokenResponse`；文档含两步生成流程 + CI 防漂移（`git diff --exit-code`）。`openapi.json`/`schema.d.ts` 入库便于免后端重生成。`vite build` 通过（114 模块）。 |
 
 ---
 

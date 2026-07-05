@@ -1,18 +1,11 @@
 import { FormEvent, useState } from 'react';
 
 import { apiRequest } from '../../api/client';
+import type { TokenResponse } from '../../api/schema-helpers';
 import { saveAuth } from '../../auth/authStore';
 
-type LoginResponse = {
-  accessToken: string;
-  user: {
-    id: string;
-    email: string;
-    name: string;
-    roles: string[];
-    permissions: string[];
-  };
-};
+// Response shape comes straight from the generated OpenAPI contract.
+type LoginResponse = TokenResponse;
 
 export function LoginPage() {
   const [email, setEmail] = useState(import.meta.env.VITE_DEFAULT_LOGIN_EMAIL);
