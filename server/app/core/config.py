@@ -245,6 +245,11 @@ class Settings:
     sse_heartbeat_seconds: float = field(
         default_factory=lambda: float(os.getenv("SSE_HEARTBEAT_SECONDS", "15"))
     )
+    cors_allow_origins: tuple[str, ...] = field(
+        default_factory=lambda: parse_csv_env(
+            "CORS_ALLOW_ORIGINS", ("http://localhost:5173", "http://localhost:3000")
+        )
+    )
 
     @property
     def access_token_expires_seconds(self) -> int:

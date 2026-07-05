@@ -1,7 +1,13 @@
+import logging
+
 from fastapi import HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from server.app.core.ids import current_request_id
+
+logger = logging.getLogger(__name__)
 
 
 def error_payload(code: str, message: str, details: dict | None = None) -> dict:
@@ -65,4 +71,31 @@ async def http_exception_handler(
     return JSONResponse(
         status_code=exc.status_code,
         content=error_payload(code, str(exc.detail)),
+    )
+
+
+async def validation_exception_handler(
+    _request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    # Uniform envelope for request-body/query validation failures (422).
+    return JSONResponse(
+        status_code=422,
+        content=error_payload(
+            "VALIDATION_ERROR",
+            "请求参数校验失败",
+            {"errors": jsonable_encoder(exc.errors())},
+        ),
+    )
+
+
+async def unhandled_exception_handler(
+    request: Request, _exc: Exception
+) -> JSONResponse:
+    # Last-resort 500 handler: log the stack server-side, never leak it to clients.
+    logger.exception(
+        "Unhandled error on %s %s", request.method, request.url.path
+    )
+    return JSONResponse(
+        status_code=500,
+        content=error_payload("INTERNAL_ERROR", "服务器内部错误"),
     )
