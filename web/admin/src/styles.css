@@ -595,6 +595,16 @@ label {
   height: 100%;
 }
 
+.upload-progress {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.upload-progress .progress-bar {
+  flex: 1;
+}
+
 .success-text {
   color: #15803d;
 }

@@ -116,6 +116,49 @@ def test_bind_import_file_validates_object_key_and_enqueues_parser(monkeypatch, 
     assert queued == [job["id"]]
 
 
+def test_upload_import_file_via_multipart_enqueues_parser(monkeypatch, tmp_path):
+    client, _ = build_test_client()
+    headers = login_admin(client)
+    queued: list[str] = []
+
+    from server.app.integrations.storage.local import LocalObjectStorage
+    from server.app.services import import_service
+
+    monkeypatch.setattr(
+        import_service,
+        "get_storage_adapter",
+        lambda: LocalObjectStorage(tmp_path),
+    )
+    monkeypatch.setattr(import_service, "enqueue_parse_task", lambda job_id: queued.append(job_id))
+
+    job = client.post(
+        "/api/v1/import-jobs",
+        headers=headers,
+        json={
+            "title": "Multipart Guide",
+            "permission": {"allAuthenticated": True},
+            "parseOptions": {"preferredParser": "LIGHTWEIGHT"},
+            "processingOptions": {"enableQaSplit": True, "enableEmbedding": True},
+        },
+    ).json()
+
+    content = b"# Guide\n\nUse the refund flow."
+    response = client.post(
+        f"/api/v1/import-jobs/{job['id']}/file",
+        headers=headers,
+        files={"file": ("multipart-guide.md", content, "text/markdown")},
+        data={"object_key": "uploads/multipart-guide.md", "checksum": "sha256:multipart-guide"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "RUNNING"
+    assert body["stage"] == "PARSING"
+    assert body["file"]["fileName"] == "multipart-guide.md"
+    assert body["file"]["fileSize"] == len(content)
+    assert queued == [job["id"]]
+
+
 def test_import_job_rejects_duplicate_checksum(monkeypatch, tmp_path):
     client, _ = build_test_client()
     headers = login_admin(client)

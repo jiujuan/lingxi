@@ -1,6 +1,12 @@
 import { FormEvent, useState } from 'react';
 
-import { bindImportJobFile, createImportJob, type ImportJob, type PermissionPayload } from '../api/importJobApi';
+import { errorMessage } from '../../../api/client';
+import {
+  createImportJob,
+  uploadImportJobFile,
+  type ImportJob,
+  type PermissionPayload,
+} from '../api/importJobApi';
 
 type Props = {
   onUploaded: (job: ImportJob) => void;
@@ -17,6 +23,7 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
   const [userIds, setUserIds] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   async function submit(event: FormEvent) {
@@ -37,6 +44,7 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
     }
 
     setBusy(true);
+    setProgress(0);
     setError(null);
     try {
       const created = await createImportJob({
@@ -45,22 +53,19 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
         parseOptions: { preferredParser: 'LIGHTWEIGHT' },
         processingOptions: { enableQaSplit: true, enableEmbedding: true },
       });
-      const contentBase64 = await fileToBase64(file);
       const checksum = await checksumFile(file);
       const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '-');
-      const bound = await bindImportJobFile(created.id, {
+      const bound = await uploadImportJobFile(created.id, file, {
         objectKey: `uploads/${Date.now()}-${safeName}`,
-        fileName: file.name,
-        mimeType: file.type || fallbackMime(file.name),
-        fileSize: file.size,
         checksum,
-        contentBase64,
+        onProgress: setProgress,
       });
       onUploaded(bound);
     } catch (caught) {
-      setError(readError(caught));
+      setError(errorMessage(caught, '请求失败。'));
     } finally {
       setBusy(false);
+      setProgress(0);
     }
   }
 
@@ -138,6 +143,14 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
       <button disabled={busy} type="submit">
         {busy ? '提交中' : '创建导入任务'}
       </button>
+      {busy ? (
+        <div className="upload-progress">
+          <div className="progress-bar">
+            <i style={{ width: `${progress}%` }} />
+          </div>
+          <span className="muted">{progress}%</span>
+        </div>
+      ) : null}
       {error ? <p className="error">{error}</p> : null}
     </form>
   );
@@ -154,27 +167,11 @@ function validateFile(file: File) {
   return null;
 }
 
-function fallbackMime(fileName: string) {
-  return fileName.endsWith('.txt') ? 'text/plain' : 'text/markdown';
-}
-
 function splitIds(value: string) {
   return value
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
-}
-
-function fileToBase64(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const value = String(reader.result);
-      resolve(value.includes(',') ? value.split(',')[1] : value);
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
 }
 
 async function checksumFile(file: File) {
@@ -183,12 +180,4 @@ async function checksumFile(file: File) {
   return `sha256:${Array.from(new Uint8Array(digest))
     .map((item) => item.toString(16).padStart(2, '0'))
     .join('')}`;
-}
-
-function readError(error: unknown) {
-  if (typeof error === 'object' && error && 'error' in error) {
-    const payload = error as { error?: { message?: string } };
-    return payload.error?.message || '请求失败。';
-  }
-  return '请求失败。';
 }

@@ -33,6 +33,7 @@
 | #12 TanStack Query | ✅ 已完成（2026-07-06） | 引入 `@tanstack/react-query`（装进 `web/admin`），`main.tsx` 挂 `QueryClientProvider`；`queryClient.ts` 配置：4xx 不重试、瞬时错误重试 1 次、`staleTime 30s`（切页命中缓存）、`queryKeys` 工厂。Dashboard/Settings/ApiKeys/ModelConfig/Logs 迁移到 `useQuery`/`useMutation` + 失效刷新，错误经 `ApiError`/`errorMessage` 展示。Chat（SSE→#14）与 Knowledge（体量大）保留 useState 作后续。`vite build` 通过（114 模块）。 |
 | #13 类型 codegen | ✅ 已完成（2026-07-06） | `server/scripts/export_openapi.py` 从 FastAPI 导出 `openapi.json`（47 路径/74 schema）；`web/admin` 装 `openapi-typescript`，`npm run gen:api` 生成 `src/api/schema.d.ts`；`schema-helpers.ts` 暴露 `Schemas[...]` 便捷别名，`LoginPage` 示范用生成的 `TokenResponse`；文档含两步生成流程 + CI 防漂移（`git diff --exit-code`）。`openapi.json`/`schema.d.ts` 入库便于免后端重生成。`vite build` 通过（114 模块）。 |
 | #14 SSE 中断+健壮解析 | ✅ 已完成（2026-07-06） | `streamChatMessage` 支持 `AbortSignal`；`ChatPage` 用 `AbortController` ref 提供"停止生成"、切会话/卸载即取消，`AbortError` 不报错只同步服务端状态；`parseSseBlock` 加 try/catch（畸形帧不崩流）、跳过 `:` 心跳注释、兼容多行 `data:` 拼接；非 JSON/网络错误经 `toApiError`/`ApiError` 归一化，401 跳登录；新增 60s 空闲看门狗（心跳 15s，静默超时提示"响应超时"）。`ChatComposer` 流式期显示停止按钮。`vite build` 通过（114 模块）。 |
+| #15 上传 multipart+进度 | ✅ 已完成（2026-07-06） | 后端新增 `POST /import-jobs/{id}/file`（`UploadFile`+`Form`，`bind_file` 增 `content: bytes` 直传路径，免 base64），加 `python-multipart` 依赖；前端 `uploadImportJobFile` 用 XHR + `upload.onprogress` 上报进度，`DocumentUploadPanel` 改 multipart + 进度条、去掉 base64、保留前端 SHA-256 校验；错误经 `ApiError`/`errorMessage`，401 跳登录。重生成 `openapi.json`（48 路径）+ 类型。后端新增 1 项测试（全量 112 passed），`vite build` 通过（114 模块）。 |
 
 ---
 

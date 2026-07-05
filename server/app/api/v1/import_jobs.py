@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 from sqlalchemy.orm import Session
 
 from server.app.core.permissions import AccessContext, require_permission
@@ -49,6 +49,34 @@ def bind_import_job_file(
         file_size=payload.file_size,
         checksum=payload.checksum,
         content_base64=payload.content_base64,
+    )
+    return ImportService.job_to_dict(job, job_file)
+
+
+@router.post(
+    "/{job_id}/file",
+    response_model=ImportJobResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def upload_import_job_file(
+    job_id: str,
+    file: UploadFile = File(...),
+    object_key: str = Form(...),
+    checksum: str = Form(...),
+    context: AccessContext = Depends(require_permission("DOCUMENT_UPLOAD")),
+    db: Session = Depends(get_db),
+) -> dict:
+    # Multipart upload: raw bytes streamed via form-data (no base64 bloat).
+    content = file.file.read()
+    job, job_file = ImportService(db).bind_file(
+        context,
+        job_id,
+        object_key=object_key,
+        file_name=file.filename or "upload",
+        mime_type=file.content_type or "application/octet-stream",
+        file_size=len(content),
+        checksum=checksum,
+        content=content,
     )
     return ImportService.job_to_dict(job, job_file)
 

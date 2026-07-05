@@ -6,6 +6,7 @@ fastapi
 httpx
 python-jose
 psycopg[binary]
+python-multipart
 redis
 sqlalchemy
 uvicorn

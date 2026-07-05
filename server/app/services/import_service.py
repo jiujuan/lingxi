@@ -135,7 +135,8 @@ class ImportService:
         mime_type: str,
         file_size: int,
         checksum: str,
-        content_base64: str | None,
+        content_base64: str | None = None,
+        content: bytes | None = None,
     ) -> tuple[ImportJob, ImportJobFile]:
         job = self._get_job(context, job_id)
         document = self.session.get(Document, job.document_id)
@@ -145,14 +146,18 @@ class ImportService:
         self._validate_file_limits(file_name, file_size)
         self._ensure_unique_checksum(context.tenant_id, checksum, document.id)
 
-        try:
-            data = (
-                b64decode(content_base64, validate=True)
-                if content_base64 is not None
-                else None
-            )
-        except (binascii.Error, ValueError) as exc:
-            raise bad_request("INVALID_FILE_CONTENT", "文件内容不是合法 base64") from exc
+        if content is not None:
+            # Raw bytes from a multipart upload — no base64 round-trip needed.
+            data: bytes | None = content
+        else:
+            try:
+                data = (
+                    b64decode(content_base64, validate=True)
+                    if content_base64 is not None
+                    else None
+                )
+            except (binascii.Error, ValueError) as exc:
+                raise bad_request("INVALID_FILE_CONTENT", "文件内容不是合法 base64") from exc
 
         try:
             if data is not None:

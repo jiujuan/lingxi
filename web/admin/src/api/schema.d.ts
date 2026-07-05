@@ -466,6 +466,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/import-jobs/{job_id}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Import Job File */
+        post: operations["upload_import_job_file_api_v1_import_jobs__job_id__file_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/import-jobs/{job_id}/files": {
         parameters: {
             query?: never;
@@ -920,6 +937,15 @@ export interface components {
             resourceId: string | null;
             /** Resourcetype */
             resourceType: string;
+        };
+        /** Body_upload_import_job_file_api_v1_import_jobs__job_id__file_post */
+        Body_upload_import_job_file_api_v1_import_jobs__job_id__file_post: {
+            /** Checksum */
+            checksum: string;
+            /** File */
+            file: string;
+            /** Object Key */
+            object_key: string;
         };
         /** ChatFeedbackRequest */
         ChatFeedbackRequest: {
@@ -2804,6 +2830,41 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_import_job_file_api_v1_import_jobs__job_id__file_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_import_job_file_api_v1_import_jobs__job_id__file_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -364,6 +364,30 @@
         "title": "AuditLogResponse",
         "type": "object"
       },
+      "Body_upload_import_job_file_api_v1_import_jobs__job_id__file_post": {
+        "properties": {
+          "checksum": {
+            "title": "Checksum",
+            "type": "string"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "object_key": {
+            "title": "Object Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "object_key",
+          "checksum"
+        ],
+        "title": "Body_upload_import_job_file_api_v1_import_jobs__job_id__file_post",
+        "type": "object"
+      },
       "ChatFeedbackRequest": {
         "properties": {
           "feedback": {
@@ -4908,6 +4932,63 @@
           }
         ],
         "summary": "Get Import Job",
+        "tags": [
+          "import-jobs"
+        ]
+      }
+    },
+    "/api/v1/import-jobs/{job_id}/file": {
+      "post": {
+        "operationId": "upload_import_job_file_api_v1_import_jobs__job_id__file_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_import_job_file_api_v1_import_jobs__job_id__file_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upload Import Job File",
         "tags": [
           "import-jobs"
         ]
