@@ -139,6 +139,22 @@ class DocumentRepository:
         )
 
     def list_authorized_qa_pairs(self, context: AccessContext) -> list[QaPair]:
+        statement = (
+            select(QaPair)
+            .join(Document, Document.id == QaPair.document_id)
+            .where(*self.authorized_qa_filters(context))
+            .order_by(QaPair.document_id, QaPair.pair_index)
+        )
+        return list(self.session.scalars(statement).unique().all())
+
+    def authorized_qa_filters(self, context: AccessContext) -> list:
+        """WHERE conditions selecting QA pairs the context may retrieve.
+
+        Shared by the in-Python fallback (``list_authorized_qa_pairs``) and the
+        dialect-specific vector/full-text SQL in ``RetrievalRepository`` so the
+        authorization boundary is defined exactly once and pushed down to the DB.
+        Callers must join ``Document`` on ``Document.id == QaPair.document_id``.
+        """
         filters = [
             Document.tenant_id == context.tenant_id,
             QaPair.tenant_id == context.tenant_id,
@@ -149,13 +165,7 @@ class DocumentRepository:
         ]
         if not self._is_system_admin(context):
             filters.append(self._access_exists(context))
-        statement = (
-            select(QaPair)
-            .join(Document, Document.id == QaPair.document_id)
-            .where(*filters)
-            .order_by(QaPair.document_id, QaPair.pair_index)
-        )
-        return list(self.session.scalars(statement).unique().all())
+        return filters
 
     def _document_filters(
         self,

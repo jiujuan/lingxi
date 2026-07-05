@@ -1,4 +1,3 @@
-from math import sqrt
 from time import perf_counter
 
 from sqlalchemy.orm import Session
@@ -6,7 +5,10 @@ from sqlalchemy.orm import Session
 from server.app.core.ids import current_request_id
 from server.app.core.permissions import AccessContext
 from server.app.core.retrieval_config import RetrievalConfig, get_retrieval_config
+from server.app.core.secrets import decrypt_secret
 from server.app.integrations.model_providers.registry import build_provider_adapter
+from server.app.integrations.tokenizers.base import SearchTextTokenizer
+from server.app.integrations.tokenizers.jieba_tokenizer import JiebaTokenizer
 from server.app.repositories.missed_question_repo import MissedQuestionRepository
 from server.app.repositories.retrieval_repo import RetrievalRepository
 from server.app.schemas.retrieval import (
@@ -24,11 +26,13 @@ class RetrievalService:
         session: Session,
         config: RetrievalConfig | None = None,
         reranker: RerankService | None = None,
+        tokenizer: SearchTextTokenizer | None = None,
     ) -> None:
         self.session = session
         self.config = config or get_retrieval_config()
         self.repo = RetrievalRepository(session)
         self.reranker = reranker or RerankService()
+        self.tokenizer = tokenizer or JiebaTokenizer()
 
     def retrieve(
         self,
@@ -38,27 +42,14 @@ class RetrievalService:
     ) -> RetrievalResult:
         started = perf_counter()
         query_vector = self._embed_query(context.tenant_id, question)
-        qa_pairs = self.repo.list_authorized_candidates(context, access_scope=access_scope)
+        query_tokens = self.tokenizer.tokenize(question)
 
-        vector_ranked = sorted(
-            [
-                (
-                    item,
-                    self._cosine(query_vector, item.question_embedding or []),
-                )
-                for item in qa_pairs
-                if item.question_embedding
-            ],
-            key=lambda row: row[1],
-            reverse=True,
-        )[: self.config.vector_top_k]
-        text_ranked = [
-            (item, self._text_score(question, item.search_text or item.question))
-            for item in qa_pairs
-        ]
-        text_ranked = sorted(text_ranked, key=lambda row: row[1], reverse=True)[
-            : self.config.text_top_k
-        ]
+        vector_ranked = self.repo.vector_search(
+            context, query_vector, self.config.vector_top_k, access_scope
+        )
+        text_ranked = self.repo.text_search(
+            context, query_tokens, question, self.config.text_top_k, access_scope
+        )
 
         fused = self._rrf(vector_ranked, text_ranked)
         reranked = self.reranker.rerank(question, fused)[: self.config.final_top_k]
@@ -74,7 +65,6 @@ class RetrievalService:
                 "rerank": [item.to_snapshot() for item in reranked],
             },
             "filters": {
-                "authorizedCandidates": len(qa_pairs),
                 "scopeDocumentIds": sorted(access_scope.document_ids)
                 if access_scope and access_scope.document_ids
                 else None,
@@ -108,11 +98,15 @@ class RetrievalService:
             adapter = build_provider_adapter(
                 provider.provider_type,
                 provider.base_url,
-                None,
+                decrypt_secret(provider.encrypted_api_key),
                 {**(provider.config or {}), **(model_config.config or {})},
+                model_name=model_config.model_name,
+                timeout_ms=model_config.timeout_ms,
             )
             return adapter.embed_texts([question])[0]
         except Exception:
+            # Degraded local/test path: no embedding model configured or the
+            # provider is unreachable. Real deployments never reach this.
             return self._fallback_embedding(question, 4)
 
     def _rrf(
@@ -145,25 +139,6 @@ class RetrievalService:
             candidate.vector_score = vector_scores.get(candidate.qa_pair_id, 0.0)
             candidate.text_score = text_scores.get(candidate.qa_pair_id, 0.0)
         return sorted(by_id.values(), key=lambda item: item.rrf_score, reverse=True)
-
-    @staticmethod
-    def _cosine(left: list[float], right: list[float]) -> float:
-        if not left or not right or len(left) != len(right):
-            return 0.0
-        dot = sum(a * b for a, b in zip(left, right, strict=True))
-        left_norm = sqrt(sum(a * a for a in left))
-        right_norm = sqrt(sum(b * b for b in right))
-        if not left_norm or not right_norm:
-            return 0.0
-        return dot / (left_norm * right_norm)
-
-    @staticmethod
-    def _text_score(query: str, search_text: str) -> float:
-        query_terms = {char for char in query.lower() if not char.isspace()}
-        doc_terms = {char for char in search_text.lower() if not char.isspace()}
-        if not query_terms:
-            return 0.0
-        return len(query_terms & doc_terms) / len(query_terms)
 
     @staticmethod
     def _fallback_embedding(text: str, dimension: int) -> list[float]:

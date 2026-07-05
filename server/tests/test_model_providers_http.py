@@ -1,0 +1,167 @@
+import httpx
+import pytest
+
+from server.app.integrations.model_providers import base as base_module
+from server.app.integrations.model_providers.base import MockProvider, ProviderError
+from server.app.integrations.model_providers.claude import ClaudeProvider
+from server.app.integrations.model_providers.ollama import OllamaProvider
+from server.app.integrations.model_providers.openai_compatible import (
+    OpenAICompatibleProvider,
+)
+from server.app.integrations.model_providers.registry import build_provider_adapter
+
+
+def _patch_transport(monkeypatch, handler):
+    real_client = httpx.Client
+
+    def factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(base_module.httpx, "Client", factory)
+    monkeypatch.setattr(base_module.time, "sleep", lambda *_: None)
+
+
+def test_openai_compatible_complete_chat_and_embeddings(monkeypatch):
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        assert request.headers["Authorization"] == "Bearer sk-test"
+        if request.url.path.endswith("/chat/completions"):
+            return httpx.Response(
+                200, json={"choices": [{"message": {"content": "真实回答"}}]}
+            )
+        if request.url.path.endswith("/embeddings"):
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {"index": 1, "embedding": [0.3, 0.4]},
+                        {"index": 0, "embedding": [0.1, 0.2]},
+                    ]
+                },
+            )
+        return httpx.Response(404)
+
+    _patch_transport(monkeypatch, handler)
+    provider = OpenAICompatibleProvider(
+        "https://api.example.com/v1", "sk-test", {"modelName": "gpt-x"}
+    )
+
+    assert provider.complete_chat("hi") == "真实回答"
+    vectors = provider.embed_texts(["a", "b"])
+    assert vectors == [[0.1, 0.2], [0.3, 0.4]]  # reordered by index
+    assert any(path.endswith("/chat/completions") for path in seen)
+
+
+def test_openai_compatible_stream_chat_parses_sse(monkeypatch):
+    body = (
+        b'data: {"choices":[{"delta":{"content":"\xe4\xbd\xa0"}}]}\n\n'
+        b'data: {"choices":[{"delta":{"content":"\xe5\xa5\xbd"}}]}\n\n'
+        b"data: [DONE]\n\n"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body)
+
+    _patch_transport(monkeypatch, handler)
+    provider = OpenAICompatibleProvider(
+        "https://api.example.com/v1", "sk-test", {"modelName": "gpt-x"}
+    )
+    assert "".join(provider.stream_chat("hi")) == "你好"
+
+
+def test_ollama_chat_uses_native_shape(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/chat"
+        return httpx.Response(200, json={"message": {"content": "ollama 回答"}})
+
+    _patch_transport(monkeypatch, handler)
+    provider = OllamaProvider("http://localhost:11434", None, {"modelName": "qwen"})
+    assert provider.complete_chat("hi") == "ollama 回答"
+
+
+def test_claude_uses_messages_api_and_rejects_embeddings(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/messages"
+        assert request.headers["x-api-key"] == "ak-test"
+        assert request.headers["anthropic-version"]
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "claude"}]})
+
+    _patch_transport(monkeypatch, handler)
+    provider = ClaudeProvider(None, "ak-test", {"modelName": "claude-x"})
+    assert provider.complete_chat("hi") == "claude"
+
+    with pytest.raises(ProviderError) as excinfo:
+        provider.embed_texts(["a"])
+    assert excinfo.value.code == "PROVIDER_EMBEDDING_UNSUPPORTED"
+
+
+def test_http_provider_retries_transient_5xx_then_succeeds(monkeypatch):
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return httpx.Response(503, json={"error": {"message": "overloaded"}})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    _patch_transport(monkeypatch, handler)
+    provider = OpenAICompatibleProvider(
+        "https://api.example.com/v1", "sk", {"modelName": "gpt-x", "maxRetries": 2}
+    )
+    assert provider.complete_chat("hi") == "ok"
+    assert calls["n"] == 3
+
+
+def test_http_provider_maps_auth_error_and_does_not_retry(monkeypatch):
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(401, json={"error": {"message": "bad key"}})
+
+    _patch_transport(monkeypatch, handler)
+    provider = OpenAICompatibleProvider(
+        "https://api.example.com/v1", "sk", {"modelName": "gpt-x", "maxRetries": 3}
+    )
+    with pytest.raises(ProviderError) as excinfo:
+        provider.complete_chat("hi")
+    assert excinfo.value.code == "PROVIDER_UNAUTHORIZED"
+    assert excinfo.value.retryable is False
+    assert calls["n"] == 1  # 401 is terminal, no retry
+
+
+def test_registry_dispatches_mock_vs_real():
+    # mock:// scheme -> deterministic mock
+    assert isinstance(
+        build_provider_adapter("OPENAI_COMPATIBLE", "mock://success", None), MockProvider
+    )
+    # explicit fixture marker -> mock even with a real-looking URL
+    assert isinstance(
+        build_provider_adapter(
+            "OPENAI_COMPATIBLE", "https://api.example.com/v1", None, {"chatResponse": "x"}
+        ),
+        MockProvider,
+    )
+    # real URL + no markers -> real HTTP adapter
+    assert isinstance(
+        build_provider_adapter(
+            "OPENAI_COMPATIBLE", "https://api.example.com/v1", "sk", {"modelName": "m"}
+        ),
+        OpenAICompatibleProvider,
+    )
+
+
+def test_registry_injects_model_name_and_timeout():
+    adapter = build_provider_adapter(
+        "OLLAMA",
+        "http://localhost:11434",
+        None,
+        {},
+        model_name="qwen",
+        timeout_ms=12000,
+    )
+    assert adapter.model_name == "qwen"
+    assert adapter.timeout_seconds == 12.0

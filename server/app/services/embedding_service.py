@@ -73,6 +73,8 @@ class EmbeddingService:
                 provider.base_url,
                 decrypt_secret(provider.encrypted_api_key),
                 {**(provider.config or {}), **(model_config.config or {})},
+                model_name=model_config.model_name,
+                timeout_ms=model_config.timeout_ms,
             )
             vectors = adapter.embed_texts([item.question for item in qa_pairs])
             self._validate_vectors(vectors, expected_dimension, len(qa_pairs))

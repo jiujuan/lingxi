@@ -192,6 +192,8 @@ class OpenAICompatibleService:
             provider.base_url,
             decrypt_secret(provider.encrypted_api_key),
             {**(provider.config or {}), **(model_config.config or {})},
+            model_name=model_config.model_name,
+            timeout_ms=model_config.timeout_ms,
         )
 
     @staticmethod
