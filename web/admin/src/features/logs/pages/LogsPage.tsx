@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 
+import { errorMessage } from '../../../api/client';
 import {
   listApiCallLogs,
   listAuditLogs,
@@ -21,49 +23,36 @@ const TABS: Array<{ id: Tab; label: string }> = [
 ];
 
 export function LogsPage() {
+  const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>('tasks');
   const [filters, setFilters] = useState<LogFilters>(() => initialFilters());
-  const [taskLogs, setTaskLogs] = useState<TaskRunLog[]>([]);
-  const [modelLogs, setModelLogs] = useState<ModelCallLog[]>([]);
-  const [apiLogs, setApiLogs] = useState<ApiCallLog[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [appliedFilters, setAppliedFilters] = useState<LogFilters>(() => initialFilters());
   const [selected, setSelected] = useState<unknown>(null);
-  const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
-  useEffect(() => {
-    void refresh();
-  }, [tab, filters.page]);
+  const logsQuery = useQuery({
+    queryKey: ['logs', tab, appliedFilters] as const,
+    queryFn: () => fetchLogs(tab, appliedFilters),
+  });
+  const rows = logsQuery.data ?? [];
 
-  const currentRows = useMemo(() => {
-    if (tab === 'tasks') return taskLogs;
-    if (tab === 'models') return modelLogs;
-    if (tab === 'api') return apiLogs;
-    return auditLogs;
-  }, [apiLogs, auditLogs, modelLogs, tab, taskLogs]);
-
-  async function refresh() {
-    try {
-      if (tab === 'tasks') {
-        setTaskLogs((await listTaskRunLogs(filters)).data);
-      }
-      if (tab === 'models') {
-        setModelLogs((await listModelCallLogs(filters)).data);
-      }
-      if (tab === 'api') {
-        setApiLogs((await listApiCallLogs(filters)).data);
-      }
-      if (tab === 'audit') {
-        setAuditLogs((await listAuditLogs(filters)).data);
-      }
-      setError(null);
-    } catch {
-      setError('日志加载失败');
-    }
-  }
+  const retryMutation = useMutation({
+    mutationFn: (log: TaskRunLog) => retryTaskRun(log.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['logs'] }),
+  });
 
   function updateFilter(key: keyof LogFilters, value: string | number) {
     setFilters((current) => ({ ...current, [key]: value, page: key === 'page' ? Number(value) : 1 }));
+  }
+
+  function applyFilters() {
+    setAppliedFilters(filters);
+  }
+
+  function clearFilters() {
+    const cleared = emptyFilters();
+    setFilters(cleared);
+    setAppliedFilters(cleared);
   }
 
   async function copyRequestId(requestId: string | null) {
@@ -73,12 +62,11 @@ export function LogsPage() {
     window.setTimeout(() => setCopied(null), 1200);
   }
 
-  async function retry(log: TaskRunLog) {
+  function retry(log: TaskRunLog) {
     if (!window.confirm(`确认重试任务 ${log.taskType}？`)) {
       return;
     }
-    await retryTaskRun(log.id);
-    await refresh();
+    retryMutation.mutate(log);
   }
 
   return (
@@ -88,11 +76,16 @@ export function LogsPage() {
           <p className="eyebrow">Observability</p>
           <h2>日志与任务排障</h2>
         </div>
-        <button onClick={() => void refresh()} type="button">
+        <button onClick={() => void logsQuery.refetch()} type="button">
           刷新
         </button>
       </section>
-      {error ? <div className="error-box">{error}</div> : null}
+      {logsQuery.isError ? (
+        <div className="error-box">{errorMessage(logsQuery.error, '日志加载失败')}</div>
+      ) : null}
+      {retryMutation.isError ? (
+        <div className="error-box">{errorMessage(retryMutation.error, '任务重试失败')}</div>
+      ) : null}
       <section className="panel">
         <div className="tab-row">
           {TABS.map((item) => (
@@ -135,10 +128,10 @@ export function LogsPage() {
           </label>
         </div>
         <div className="button-row">
-          <button onClick={() => void refresh()} type="button">
+          <button onClick={applyFilters} type="button">
             查询
           </button>
-          <button className="secondary-button" onClick={() => setFilters(emptyFilters())} type="button">
+          <button className="secondary-button" onClick={clearFilters} type="button">
             清空
           </button>
           {copied ? <span className="success-text">已复制 {copied}</span> : null}
@@ -147,18 +140,28 @@ export function LogsPage() {
 
       <section className="panel">
         <h3>{TABS.find((item) => item.id === tab)?.label}</h3>
-        {currentRows.length === 0 ? <p className="muted">暂无日志</p> : null}
+        {rows.length === 0 ? <p className="muted">暂无日志</p> : null}
         {tab === 'tasks' ? (
-          <TaskRows logs={taskLogs} onCopy={copyRequestId} onDetail={setSelected} onRetry={(log) => void retry(log)} />
+          <TaskRows logs={rows as TaskRunLog[]} onCopy={copyRequestId} onDetail={setSelected} onRetry={retry} />
         ) : null}
-        {tab === 'models' ? <ModelRows logs={modelLogs} onCopy={copyRequestId} onDetail={setSelected} /> : null}
-        {tab === 'api' ? <ApiRows logs={apiLogs} onCopy={copyRequestId} onDetail={setSelected} /> : null}
-        {tab === 'audit' ? <AuditRows logs={auditLogs} onCopy={copyRequestId} onDetail={setSelected} /> : null}
+        {tab === 'models' ? <ModelRows logs={rows as ModelCallLog[]} onCopy={copyRequestId} onDetail={setSelected} /> : null}
+        {tab === 'api' ? <ApiRows logs={rows as ApiCallLog[]} onCopy={copyRequestId} onDetail={setSelected} /> : null}
+        {tab === 'audit' ? <AuditRows logs={rows as AuditLog[]} onCopy={copyRequestId} onDetail={setSelected} /> : null}
       </section>
 
       <LogDetailDrawer onClose={() => setSelected(null)} payload={selected} title="日志详情" />
     </div>
   );
+}
+
+async function fetchLogs(
+  tab: Tab,
+  filters: LogFilters,
+): Promise<Array<TaskRunLog | ModelCallLog | ApiCallLog | AuditLog>> {
+  if (tab === 'tasks') return (await listTaskRunLogs(filters)).data;
+  if (tab === 'models') return (await listModelCallLogs(filters)).data;
+  if (tab === 'api') return (await listApiCallLogs(filters)).data;
+  return (await listAuditLogs(filters)).data;
 }
 
 function TaskRows({

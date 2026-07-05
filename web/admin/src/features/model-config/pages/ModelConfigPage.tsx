@@ -1,9 +1,10 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FormEvent, useEffect, useState } from 'react';
 
+import { errorMessage } from '../../../api/client';
+import { queryKeys } from '../../../api/queryClient';
 import {
   ConnectionTestResult,
-  ModelConfig,
-  ModelProvider,
   createModelConfig,
   createModelProvider,
   listModelConfigs,
@@ -13,8 +14,19 @@ import {
 } from '../api/modelConfigApi';
 
 export function ModelConfigPage() {
-  const [providers, setProviders] = useState<ModelProvider[]>([]);
-  const [configs, setConfigs] = useState<ModelConfig[]>([]);
+  const queryClient = useQueryClient();
+  const providersQuery = useQuery({
+    queryKey: queryKeys.modelProviders(),
+    queryFn: () => listModelProviders(),
+  });
+  const configsQuery = useQuery({
+    queryKey: queryKeys.modelConfigs(),
+    queryFn: () => listModelConfigs(),
+  });
+
+  const providers = providersQuery.data?.data ?? [];
+  const configs = configsQuery.data?.data ?? [];
+
   const [providerName, setProviderName] = useState('DeepSeek Gateway');
   const [providerType, setProviderType] = useState('OPENAI_COMPATIBLE');
   const [baseUrl, setBaseUrl] = useState('mock://success');
@@ -26,62 +38,76 @@ export function ModelConfigPage() {
   const [connectionResult, setConnectionResult] = useState<ConnectionTestResult | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  async function refresh() {
-    const [providerResult, configResult] = await Promise.all([
-      listModelProviders(),
-      listModelConfigs(),
-    ]);
-    setProviders(providerResult.data);
-    setConfigs(configResult.data);
-    setSelectedProviderId((current) => current || providerResult.data[0]?.id || '');
+  // Default the selected provider to the first one once loaded.
+  useEffect(() => {
+    setSelectedProviderId((current) => current || providers[0]?.id || '');
+  }, [providers]);
+
+  function invalidate() {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.modelProviders() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.modelConfigs() });
   }
 
-  useEffect(() => {
-    refresh().catch(() => setNotice('模型配置加载失败。'));
-  }, []);
+  const createProviderMutation = useMutation({
+    mutationFn: () =>
+      createModelProvider({ providerType, name: providerName, baseUrl, apiKey, status: 'ACTIVE' }),
+    onSuccess: (provider) => {
+      setApiKey('');
+      setSelectedProviderId(provider.id);
+      invalidate();
+      setNotice('模型供应商已保存。');
+    },
+    onError: (err) => setNotice(errorMessage(err, '供应商保存失败。')),
+  });
 
-  async function submitProvider(event: FormEvent) {
+  const createModelMutation = useMutation({
+    mutationFn: () =>
+      createModelConfig({ providerId: selectedProviderId, capability, modelName, isDefault: makeDefault }),
+    onSuccess: () => {
+      invalidate();
+      setNotice('模型实例已保存。');
+    },
+    onError: (err) => setNotice(errorMessage(err, '模型实例保存失败。')),
+  });
+
+  const testMutation = useMutation({
+    mutationFn: (providerId: string) => testModelProvider(providerId),
+    onSuccess: (result) => setConnectionResult(result),
+    onError: (err) => setNotice(errorMessage(err, '连接测试失败。')),
+  });
+
+  const setDefaultMutation = useMutation({
+    mutationFn: (configId: string) => setDefaultModelConfig(configId),
+    onSuccess: invalidate,
+    onError: (err) => setNotice(errorMessage(err, '设置默认失败。')),
+  });
+
+  function submitProvider(event: FormEvent) {
     event.preventDefault();
     setNotice(null);
-    const provider = await createModelProvider({
-      providerType,
-      name: providerName,
-      baseUrl,
-      apiKey,
-      status: 'ACTIVE',
-    });
-    setApiKey('');
-    setSelectedProviderId(provider.id);
-    await refresh();
-    setNotice('模型供应商已保存。');
+    createProviderMutation.mutate();
   }
 
-  async function submitModel(event: FormEvent) {
+  function submitModel(event: FormEvent) {
     event.preventDefault();
     if (!selectedProviderId) {
       setNotice('请先创建或选择供应商。');
       return;
     }
-    await createModelConfig({
-      providerId: selectedProviderId,
-      capability,
-      modelName,
-      isDefault: makeDefault,
-    });
-    await refresh();
-    setNotice('模型实例已保存。');
+    setNotice(null);
+    createModelMutation.mutate();
   }
 
-  async function runConnectionTest(providerId: string) {
+  function runConnectionTest(providerId: string) {
     setConnectionResult(null);
-    const result = await testModelProvider(providerId);
-    setConnectionResult(result);
+    testMutation.mutate(providerId);
   }
 
-  async function setDefault(configId: string) {
-    await setDefaultModelConfig(configId);
-    await refresh();
+  function setDefault(configId: string) {
+    setDefaultMutation.mutate(configId);
   }
+
+  const loadFailed = providersQuery.isError || configsQuery.isError;
 
   return (
     <div className="page-stack">
@@ -91,6 +117,7 @@ export function ModelConfigPage() {
           <h2>供应商与模型实例</h2>
         </div>
         {notice ? <span className="status-pill">{notice}</span> : null}
+        {loadFailed && !notice ? <span className="status-pill">模型配置加载失败。</span> : null}
       </section>
 
       <section className="two-column">

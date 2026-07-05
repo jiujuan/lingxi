@@ -1,25 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 
+import { errorMessage } from '../../../api/client';
+import { queryKeys } from '../../../api/queryClient';
 import { getDashboardSummary } from '../api/dashboardApi';
-import type { DashboardSummary } from '../types';
 
 export function DashboardPage() {
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [days, setDays] = useState(7);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    void refresh();
-  }, [days]);
-
-  async function refresh() {
-    try {
-      setSummary(await getDashboardSummary(days));
-      setError(null);
-    } catch {
-      setError('Dashboard 加载失败');
-    }
-  }
+  const {
+    data: summary,
+    error,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: queryKeys.dashboard(days),
+    queryFn: () => getDashboardSummary(days),
+  });
 
   return (
     <div className="page-stack dashboard-page">
@@ -34,12 +30,12 @@ export function DashboardPage() {
             <option value={30}>近 30 天</option>
             <option value={0}>全部</option>
           </select>
-          <button onClick={() => void refresh()} type="button">
+          <button onClick={() => void refetch()} type="button">
             刷新
           </button>
         </div>
       </section>
-      {error ? <div className="error-box">{error}</div> : null}
+      {isError ? <div className="error-box">{errorMessage(error, 'Dashboard 加载失败')}</div> : null}
       {!summary ? <p className="muted">正在加载指标...</p> : null}
       {summary ? (
         <>

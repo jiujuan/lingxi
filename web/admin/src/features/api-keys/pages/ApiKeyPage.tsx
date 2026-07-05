@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 
+import { errorMessage } from '../../../api/client';
+import { queryKeys } from '../../../api/queryClient';
 import {
   createApiKey,
   disableApiKey,
@@ -9,52 +12,61 @@ import {
 } from '../api/apiKeyApi';
 import { ApiCallLogTable } from '../components/ApiCallLogTable';
 import { ApiKeyCreateModal } from '../components/ApiKeyCreateModal';
-import type { ApiCallLog, ApiKey, ApiKeyCreatePayload, ApiKeyCreateResult } from '../types';
+import type { ApiKey, ApiKeyCreatePayload, ApiKeyCreateResult } from '../types';
 
 export function ApiKeyPage() {
-  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
-  const [logs, setLogs] = useState<ApiCallLog[]>([]);
+  const queryClient = useQueryClient();
+  const keysQuery = useQuery({ queryKey: queryKeys.apiKeys(), queryFn: listApiKeys });
+  const logsQuery = useQuery({ queryKey: queryKeys.apiCallLogs(), queryFn: listApiCallLogs });
   const [showCreate, setShowCreate] = useState(false);
   const [oneTimeKey, setOneTimeKey] = useState<ApiKeyCreateResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    void refresh();
-  }, []);
+  const apiKeys = keysQuery.data?.data ?? [];
+  const logs = logsQuery.data?.data ?? [];
+  const loadError = keysQuery.error ?? logsQuery.error;
 
-  async function refresh() {
-    try {
-      const [keysResult, logsResult] = await Promise.all([listApiKeys(), listApiCallLogs()]);
-      setApiKeys(keysResult.data);
-      setLogs(logsResult.data);
-      setError(null);
-    } catch {
-      setError('API Key 数据加载失败');
-    }
+  function invalidate() {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.apiCallLogs() });
   }
+
+  const createMutation = useMutation({
+    mutationFn: (payload: ApiKeyCreatePayload) => createApiKey(payload),
+    onSuccess: (created) => {
+      setOneTimeKey(created);
+      invalidate();
+    },
+  });
+  const disableMutation = useMutation({
+    mutationFn: (keyId: string) => disableApiKey(keyId),
+    onSuccess: invalidate,
+  });
+  const rotateMutation = useMutation({
+    mutationFn: (keyId: string) => rotateApiKey(keyId),
+    onSuccess: (result) => {
+      setOneTimeKey(result);
+      setShowCreate(true);
+      invalidate();
+    },
+  });
 
   async function createKey(payload: ApiKeyCreatePayload) {
-    const created = await createApiKey(payload);
-    setOneTimeKey(created);
-    await refresh();
+    await createMutation.mutateAsync(payload);
   }
 
-  async function disableKey(key: ApiKey) {
-    if (!window.confirm(`确认禁用 ${key.name}？`)) {
-      return;
+  function disableKey(key: ApiKey) {
+    if (window.confirm(`确认禁用 ${key.name}？`)) {
+      disableMutation.mutate(key.id);
     }
-    await disableApiKey(key.id);
-    await refresh();
   }
 
-  async function rotateKey(key: ApiKey) {
-    if (!window.confirm(`确认轮换 ${key.name}？旧 Key 会立即失效。`)) {
-      return;
+  function rotateKey(key: ApiKey) {
+    if (window.confirm(`确认轮换 ${key.name}？旧 Key 会立即失效。`)) {
+      rotateMutation.mutate(key.id);
     }
-    setOneTimeKey(await rotateApiKey(key.id));
-    setShowCreate(true);
-    await refresh();
   }
+
+  const actionError = disableMutation.error ?? rotateMutation.error;
 
   return (
     <div className="page-stack api-key-page">
@@ -73,7 +85,10 @@ export function ApiKeyPage() {
           创建 Key
         </button>
       </section>
-      {error ? <div className="error-box">{error}</div> : null}
+      {keysQuery.isError || logsQuery.isError ? (
+        <div className="error-box">{errorMessage(loadError, 'API Key 数据加载失败')}</div>
+      ) : null}
+      {actionError ? <div className="error-box">{errorMessage(actionError, '操作失败')}</div> : null}
       <section className="panel">
         <h3>Key 列表</h3>
         <div className="api-key-list">
@@ -87,10 +102,10 @@ export function ApiKeyPage() {
               <span className={`status-tag status-${key.status.toLowerCase()}`}>{key.status}</span>
               <span>{key.rateLimitPerMinute}/min</span>
               <div className="button-row">
-                <button className="secondary-button" onClick={() => void rotateKey(key)} type="button">
+                <button className="secondary-button" onClick={() => rotateKey(key)} type="button">
                   轮换
                 </button>
-                <button className="danger-button" onClick={() => void disableKey(key)} type="button">
+                <button className="danger-button" onClick={() => disableKey(key)} type="button">
                   禁用
                 </button>
               </div>

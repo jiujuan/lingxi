@@ -1,43 +1,43 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
+import { errorMessage } from '../../../api/client';
+import { queryKeys } from '../../../api/queryClient';
 import { getSystemSettings, saveSystemSettings } from '../api/settingsApi';
 import type { SystemSettings } from '../types';
 
 export function SettingsPage() {
+  const queryClient = useQueryClient();
+  const { data: saved, error: loadError, isError: loadFailed, refetch } = useQuery({
+    queryKey: queryKeys.settings(),
+    queryFn: getSystemSettings,
+  });
   const [settings, setSettings] = useState<SystemSettings | null>(null);
-  const [saved, setSaved] = useState<SystemSettings | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
+  // Keep the editable draft in sync with freshly loaded/saved server state.
   useEffect(() => {
-    void load();
-  }, []);
-
-  async function load() {
-    try {
-      const result = await getSystemSettings();
-      setSettings(result);
-      setSaved(result);
-      setError(null);
-    } catch {
-      setError('系统设置加载失败');
+    if (saved) {
+      setSettings(saved);
     }
-  }
+  }, [saved]);
 
-  async function submit() {
+  const saveMutation = useMutation({
+    mutationFn: (payload: SystemSettings) => saveSystemSettings(payload),
+    onSuccess: (result) => {
+      queryClient.setQueryData(queryKeys.settings(), result);
+      setSettings(result);
+      setMessage('设置已保存');
+    },
+  });
+
+  function submit() {
     if (!settings) return;
-    if (isHighRiskChange(saved, settings) && !window.confirm('高风险设置会影响新任务或线上会话，确认保存？')) {
+    if (isHighRiskChange(saved ?? null, settings) && !window.confirm('高风险设置会影响新任务或线上会话，确认保存？')) {
       return;
     }
-    try {
-      const result = await saveSystemSettings(settings);
-      setSettings(result);
-      setSaved(result);
-      setError(null);
-      setMessage('设置已保存');
-    } catch {
-      setError('保存失败，请检查字段；当前输入已保留');
-    }
+    setMessage(null);
+    saveMutation.mutate(settings);
   }
 
   if (!settings) {
@@ -49,7 +49,11 @@ export function SettingsPage() {
             <h2>系统设置</h2>
           </div>
         </section>
-        {error ? <div className="error-box">{error}</div> : <p className="muted">正在加载设置...</p>}
+        {loadFailed ? (
+          <div className="error-box">{errorMessage(loadError, '系统设置加载失败')}</div>
+        ) : (
+          <p className="muted">正在加载设置...</p>
+        )}
       </div>
     );
   }
@@ -62,15 +66,19 @@ export function SettingsPage() {
           <h2>系统设置</h2>
         </div>
         <div className="button-row">
-          <button className="secondary-button" onClick={() => void load()} type="button">
+          <button className="secondary-button" onClick={() => void refetch()} type="button">
             重新加载
           </button>
-          <button onClick={() => void submit()} type="button">
+          <button disabled={saveMutation.isPending} onClick={submit} type="button">
             保存设置
           </button>
         </div>
       </section>
-      {error ? <div className="error-box">{error}</div> : null}
+      {saveMutation.isError ? (
+        <div className="error-box">
+          {errorMessage(saveMutation.error, '保存失败，请检查字段；当前输入已保留')}
+        </div>
+      ) : null}
       {message ? <p className="success-text">{message}</p> : null}
 
       <section className="two-column">
