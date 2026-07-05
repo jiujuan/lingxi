@@ -238,6 +238,9 @@ class Settings:
     qa_split_max_concurrency: int = field(
         default_factory=lambda: int(os.getenv("QA_SPLIT_MAX_CONCURRENCY", "4"))
     )
+    sse_heartbeat_seconds: float = field(
+        default_factory=lambda: float(os.getenv("SSE_HEARTBEAT_SECONDS", "15"))
+    )
 
     @property
     def access_token_expires_seconds(self) -> int:

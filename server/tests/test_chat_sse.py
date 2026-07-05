@@ -131,6 +131,75 @@ def test_chat_model_failure_returns_error_event_without_leaking_prompt():
     assert "参考资料" not in response.text
 
 
+def test_message_run_returns_404_before_streaming_for_missing_session():
+    client, SessionLocal = build_test_client()
+    _seed_chat_data(SessionLocal)
+    headers = login_employee(client)
+
+    response = client.post(
+        "/api/v1/chat/sessions/does-not-exist/message-runs",
+        headers=headers,
+        json={"content": "退款需要谁审批？"},
+    )
+
+    # The precondition check must run before the 200 event-stream starts.
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_message_run_returns_400_for_whitespace_only_content():
+    client, SessionLocal = build_test_client()
+    _seed_chat_data(SessionLocal)
+    headers = login_employee(client)
+    session_id = client.post(
+        "/api/v1/chat/sessions", headers=headers, json={}
+    ).json()["id"]
+
+    response = client.post(
+        f"/api/v1/chat/sessions/{session_id}/message-runs",
+        headers=headers,
+        json={"content": "    "},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "EMPTY_MESSAGE"
+
+
+def test_stream_with_heartbeat_injects_comment_during_gaps():
+    import time
+
+    from server.app.services.sse_service import SseService
+
+    def slow_source():
+        yield "event: run_started\ndata: {}\n\n"
+        time.sleep(0.25)  # gap longer than the heartbeat interval
+        yield "event: done\ndata: {}\n\n"
+
+    frames = list(SseService().stream_with_heartbeat(slow_source(), interval=0.05))
+    text = "".join(frames)
+
+    assert ": heartbeat" in text  # keep-alive emitted during the gap
+    assert "event: run_started" in text
+    assert "event: done" in text
+    # heartbeat lands between the two real events, not after done
+    assert text.index("event: run_started") < text.index(": heartbeat")
+    assert text.index(": heartbeat") < text.index("event: done")
+
+
+def test_stream_with_heartbeat_propagates_source_errors():
+    import pytest
+
+    from server.app.services.sse_service import SseService
+
+    def failing_source():
+        yield "event: run_started\ndata: {}\n\n"
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        list(SseService().stream_with_heartbeat(failing_source(), interval=5))
+
+
 def test_feedback_cannot_mutate_message_from_another_tenant():
     import pytest
     from fastapi import HTTPException

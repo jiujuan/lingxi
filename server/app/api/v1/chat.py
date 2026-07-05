@@ -55,9 +55,11 @@ def create_message_run(
     context: AccessContext = Depends(require_permission("CHAT_WRITE")),
     db: Session = Depends(get_db),
 ):
-    stream = ChatService(db).stream_message_run(context, session_id, payload.content)
+    service = ChatService(db)
+    # Validation happens here and raises 404/400 before streaming begins.
+    stream = service.stream_message_run(context, session_id, payload.content)
     return StreamingResponse(
-        stream,
+        service.sse.stream_with_heartbeat(stream),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

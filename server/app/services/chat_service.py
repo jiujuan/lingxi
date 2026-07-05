@@ -56,25 +56,39 @@ class ChatService:
     def stream_message_run(
         self, context: AccessContext, session_id: str, content: str
     ) -> Iterator[str]:
-        chat_session = self.chat_repo.get_session(context.tenant_id, context.user_id, session_id)
+        """Validate preconditions eagerly, then return the streaming generator.
+
+        Validation runs here (not inside the generator) so a missing session or
+        empty message raises 404/400 *before* the StreamingResponse sends its 200
+        headers. A generator body cannot do this: its code only runs once the
+        response is already being iterated.
+        """
+        chat_session = self.chat_repo.get_session(
+            context.tenant_id, context.user_id, session_id
+        )
         if chat_session is None:
             raise not_found("会话不存在")
-        if not content.strip():
+        content = content.strip()
+        if not content:
             raise bad_request("EMPTY_MESSAGE", "消息内容不能为空")
+        return self._run_stream(context, session_id, content)
 
+    def _run_stream(
+        self, context: AccessContext, session_id: str, content: str
+    ) -> Iterator[str]:
         request_id = current_request_id()
         started = perf_counter()
         user_message = self.chat_repo.add_message(
-            context.tenant_id, session_id, "USER", content.strip(), request_id
+            context.tenant_id, session_id, "USER", content, request_id
         )
-        retrieval = RetrievalService(self.session).retrieve(context, content.strip())
+        retrieval = RetrievalService(self.session).retrieve(context, content)
         run_public_id = f"run_{uuid4().hex}"
         run = self.run_repo.create_run(
             tenant_id=context.tenant_id,
             run_id=run_public_id,
             session_id=session_id,
             user_message_id=user_message.id,
-            question=content.strip(),
+            question=content,
             request_id=request_id,
             retrieval_snapshot=retrieval.snapshot,
         )
