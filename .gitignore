@@ -1,0 +1,9 @@
+.env
+.env.local
+.env.*.local
+*.db
+__pycache__/
+.pytest_cache/
+web/admin/node_modules/
+web/admin/dist/
+

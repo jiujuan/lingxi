@@ -1,0 +1,10 @@
+alembic
+bcrypt
+celery
+fastapi
+httpx
+python-jose
+psycopg[binary]
+redis
+sqlalchemy
+uvicorn

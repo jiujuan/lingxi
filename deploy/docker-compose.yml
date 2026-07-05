@@ -1,0 +1,140 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-lingxi}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-lingxi}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: >
+      sh -c 'if [ -n "$$REDIS_PASSWORD" ]; then
+      redis-server --requirepass "$$REDIS_PASSWORD";
+      else redis-server; fi'
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$${REDIS_PASSWORD}\" ]; then redis-cli -a \"$${REDIS_PASSWORD}\" ping; else redis-cli ping; fi"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    environment:
+      APP_NAME: ${APP_NAME:-Lingxi Knowledge Base}
+      APP_ENV: ${APP_ENV:-development}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-lingxi}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_CELERY_BROKER_DB: ${REDIS_CELERY_BROKER_DB:-1}
+      REDIS_CELERY_RESULT_DB: ${REDIS_CELERY_RESULT_DB:-2}
+      CELERY_QUEUE_NAMES: ${CELERY_QUEUE_NAMES:-parse,qa,embedding,maintenance}
+      CELERY_DEFAULT_QUEUE: ${CELERY_DEFAULT_QUEUE:-maintenance}
+      OBJECT_STORAGE_BACKEND: ${OBJECT_STORAGE_BACKEND:-local}
+      LOCAL_STORAGE_ROOT: ${LOCAL_STORAGE_ROOT:-/app/.data/object-storage}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-only-change-before-deployment}
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:-dev-only-change-before-deployment}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-30}
+      REFRESH_TOKEN_MINUTES: ${REFRESH_TOKEN_MINUTES:-43200}
+    command: >
+      sh -c 'alembic upgrade head &&
+      uvicorn server.app.main:app --host 0.0.0.0 --port 8000'
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - object_storage:/app/.data/object-storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    command: >
+      sh -c 'celery -A server.app.tasks.celery_app.celery_app worker
+      -Q "$$CELERY_QUEUE_NAMES" --loglevel="$${CELERY_LOG_LEVEL:-INFO}"'
+    environment:
+      APP_NAME: ${APP_NAME:-Lingxi Knowledge Base}
+      APP_ENV: ${APP_ENV:-development}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-lingxi}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_CELERY_BROKER_DB: ${REDIS_CELERY_BROKER_DB:-1}
+      REDIS_CELERY_RESULT_DB: ${REDIS_CELERY_RESULT_DB:-2}
+      CELERY_QUEUE_NAMES: ${CELERY_QUEUE_NAMES:-parse,qa,embedding,maintenance}
+      CELERY_DEFAULT_QUEUE: ${CELERY_DEFAULT_QUEUE:-maintenance}
+      CELERY_LOG_LEVEL: ${CELERY_LOG_LEVEL:-INFO}
+      OBJECT_STORAGE_BACKEND: ${OBJECT_STORAGE_BACKEND:-local}
+      LOCAL_STORAGE_ROOT: ${LOCAL_STORAGE_ROOT:-/app/.data/object-storage}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-only-change-before-deployment}
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:-dev-only-change-before-deployment}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-30}
+      REFRESH_TOKEN_MINUTES: ${REFRESH_TOKEN_MINUTES:-43200}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    volumes:
+      - object_storage:/app/.data/object-storage
+
+  web-admin:
+    build:
+      context: ../web/admin
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+      VITE_DEFAULT_LOGIN_EMAIL: ${VITE_DEFAULT_LOGIN_EMAIL:-admin@example.com}
+      VITE_DEFAULT_LOGIN_PASSWORD: ${VITE_DEFAULT_LOGIN_PASSWORD:-Admin123!}
+    ports:
+      - "${WEB_ADMIN_PORT:-5173}:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5173 >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  object_storage:

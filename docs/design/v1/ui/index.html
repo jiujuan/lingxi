@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Customer Service Hub - V1 UI Blueprint</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell" data-sidebar="open">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">CS</div>
+          <div class="brand-copy">
+            <strong>AI Customer Service Hub</strong>
+            <span>企业客服知识中心 V1</span>
+          </div>
+        </div>
+
+        <nav class="nav-list" aria-label="一级模块">
+          <button class="nav-item is-active" type="button" data-view="dashboard">
+            <span class="nav-icon" aria-hidden="true">01</span>
+            <span>首页 Dashboard</span>
+          </button>
+          <button class="nav-item" type="button" data-view="knowledge">
+            <span class="nav-icon" aria-hidden="true">02</span>
+            <span>知识中心</span>
+          </button>
+          <button class="nav-item" type="button" data-view="chat">
+            <span class="nav-icon" aria-hidden="true">03</span>
+            <span>AI 客服</span>
+          </button>
+          <button class="nav-item" type="button" data-view="tickets">
+            <span class="nav-icon" aria-hidden="true">04</span>
+            <span>工单中心</span>
+          </button>
+          <button class="nav-item" type="button" data-view="operations">
+            <span class="nav-icon" aria-hidden="true">05</span>
+            <span>知识运营</span>
+          </button>
+          <button class="nav-item" type="button" data-view="ai-config">
+            <span class="nav-icon" aria-hidden="true">06</span>
+            <span>AI 配置</span>
+          </button>
+          <button class="nav-item" type="button" data-view="access">
+            <span class="nav-icon" aria-hidden="true">07</span>
+            <span>用户权限</span>
+          </button>
+          <button class="nav-item" type="button" data-view="settings">
+            <span class="nav-icon" aria-hidden="true">08</span>
+            <span>系统设置</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-status">
+          <div>
+            <span class="status-dot is-ok" aria-hidden="true"></span>
+            私有部署环境
+          </div>
+          <div class="muted">PostgreSQL + pgvector / Redis / MinIO</div>
+        </div>
+      </aside>
+
+      <div class="main-shell">
+        <header class="topbar">
+          <div class="topbar-left">
+            <button class="icon-button" type="button" id="sidebarToggle" aria-label="折叠侧边栏">☰</button>
+            <div>
+              <h1 id="pageTitle">首页 Dashboard</h1>
+              <p id="pageSubtitle">今日客服运行、AI 命中、知识增长与风险摘要</p>
+            </div>
+            <button class="workspace-switcher" type="button" aria-label="切换工作空间">
+              <span class="workspace-logo" aria-hidden="true">L</span>
+              <span>Lingxi</span>
+              <span aria-hidden="true">⌄</span>
+            </button>
+            <button class="icon-button topbar-edit" type="button" aria-label="编辑团队信息">✎</button>
+          </div>
+          <div class="topbar-actions">
+            <span class="member-count">共 42 名成员</span>
+            <label class="search-box" for="globalSearch">
+              <span aria-hidden="true">⌕</span>
+              <input id="globalSearch" type="search" placeholder="搜索知识、工单、会话" />
+            </label>
+            <button class="ghost-button" type="button" data-action="open-modal" data-modal="webhook">Webhook</button>
+            <button class="primary-button" type="button" data-view-jump="knowledge" data-knowledge-tab="upload">上传知识</button>
+            <div class="user-chip" aria-label="当前用户">
+              <span class="avatar" aria-hidden="true">管</span>
+              <span>管理员</span>
+            </div>
+          </div>
+        </header>
+
+        <main class="content">
+          <section class="view is-active" id="view-dashboard" aria-labelledby="dashboardTitle">
+            <div class="section-head">
+              <div>
+                <h2 id="dashboardTitle">运行总览</h2>
+                <p>今日数据、趋势、未命中和审核队列集中呈现。</p>
+              </div>
+              <div class="segmented" role="group" aria-label="Dashboard 时间范围">
+                <button class="is-active" type="button" data-range="today">今日</button>
+                <button type="button" data-range="7d">7 天</button>
+                <button type="button" data-range="30d">30 天</button>
+              </div>
+            </div>
+
+            <div class="metric-grid">
+              <article class="metric-card accent-teal">
+                <span>今日咨询</span>
+                <strong data-metric="consults">1,248</strong>
+                <small>较昨日 +12.4%</small>
+              </article>
+              <article class="metric-card accent-blue">
+                <span>今日 AI 回答</span>
+                <strong data-metric="aiAnswers">1,094</strong>
+                <small>AI 回答率 87.7%</small>
+              </article>
+              <article class="metric-card accent-amber">
+                <span>AI 命中率</span>
+                <strong data-metric="hitRate">78.6%</strong>
+                <small>低于目标 1.4%</small>
+              </article>
+              <article class="metric-card accent-red">
+                <span>人工接管率</span>
+                <strong data-metric="handoff">12.3%</strong>
+                <small>紧急工单 8 个</small>
+              </article>
+              <article class="metric-card accent-green">
+                <span>今日新增知识</span>
+                <strong data-metric="knowledge">36</strong>
+                <small>待审核 11 条</small>
+              </article>
+            </div>
+
+            <div class="dashboard-grid">
+              <section class="panel panel-large">
+                <div class="panel-title">
+                  <h3>AI 回答 / 人工回答 / 工单趋势</h3>
+                  <button class="text-button" type="button" data-action="refresh-chart">刷新</button>
+                </div>
+                <div class="chart-bars" aria-label="趋势图">
+                  <div class="chart-row"><span>周一</span><i style="--a: 72%; --b: 19%; --c: 22%"></i></div>
+                  <div class="chart-row"><span>周二</span><i style="--a: 64%; --b: 26%; --c: 18%"></i></div>
+                  <div class="chart-row"><span>周三</span><i style="--a: 81%; --b: 18%; --c: 30%"></i></div>
+                  <div class="chart-row"><span>周四</span><i style="--a: 76%; --b: 22%; --c: 25%"></i></div>
+                  <div class="chart-row"><span>周五</span><i style="--a: 88%; --b: 16%; --c: 34%"></i></div>
+                </div>
+                <div class="legend">
+                  <span><b class="legend-ai"></b>AI 回答</span>
+                  <span><b class="legend-human"></b>人工回答</span>
+                  <span><b class="legend-ticket"></b>工单数量</span>
+                </div>
+              </section>
+
+              <section class="panel">
+                <div class="panel-title">
+                  <h3>最近未命中</h3>
+                  <button class="text-button" type="button" data-view-jump="operations">查看全部</button>
+                </div>
+                <div class="miss-list">
+                  <article>
+                    <strong>电子发票怎么下载？</strong>
+                    <span>出现 28 次 · 建议生成 FAQ</span>
+                    <button type="button" data-action="draft-faq">生成 FAQ</button>
+                  </article>
+                  <article>
+                    <strong>升级套餐后多久生效？</strong>
+                    <span>出现 16 次 · 缺少价格政策</span>
+                    <button type="button" data-action="draft-faq">生成 FAQ</button>
+                  </article>
+                  <article>
+                    <strong>海外客户能否开英文合同？</strong>
+                    <span>出现 9 次 · 高风险分类</span>
+                    <button type="button" data-action="draft-faq">生成 FAQ</button>
+                  </article>
+                </div>
+              </section>
+
+              <section class="panel">
+                <div class="panel-title">
+                  <h3>待审核知识</h3>
+                  <button class="text-button" type="button" data-view-jump="knowledge" data-knowledge-tab="review">审核队列</button>
+                </div>
+                <ol class="compact-list">
+                  <li><span>退款 SOP V3</span><b class="pill danger">管理员审核</b></li>
+                  <li><span>发票 FAQ 草稿</span><b class="pill warning">知识审核</b></li>
+                  <li><span>安装手册 Chunk 修正</span><b class="pill neutral">待发布</b></li>
+                </ol>
+              </section>
+            </div>
+          </section>
+
+          <section class="view" id="view-knowledge" aria-labelledby="knowledgeTitle">
+            <div class="section-head">
+              <div>
+                <h2 id="knowledgeTitle">知识中心</h2>
+                <p>知识接入、解析、审核、发布、FAQ 和 Chunk 治理。</p>
+              </div>
+              <div class="tabbar" role="tablist" aria-label="知识中心页面">
+                <button class="is-active" type="button" data-knowledge-tab="list">知识列表</button>
+                <button type="button" data-knowledge-tab="upload">上传中心</button>
+                <button type="button" data-knowledge-tab="detail">知识详情</button>
+                <button type="button" data-knowledge-tab="faq">FAQ</button>
+                <button type="button" data-knowledge-tab="review">知识审核</button>
+              </div>
+            </div>
+
+            <div class="knowledge-tab is-active" id="knowledge-list">
+              <div class="toolbar">
+                <label>
+                  <span>关键词</span>
+                  <input type="search" id="knowledgeSearch" placeholder="退款、安装、发票" />
+                </label>
+                <label>
+                  <span>分类</span>
+                  <select id="knowledgeCategory">
+                    <option value="all">全部分类</option>
+                    <option value="售后">售后</option>
+                    <option value="产品">产品</option>
+                    <option value="财务">财务</option>
+                  </select>
+                </label>
+                <label>
+                  <span>状态</span>
+                  <select id="knowledgeStatus">
+                    <option value="all">全部状态</option>
+                    <option value="PUBLISHED">已发布</option>
+                    <option value="PENDING_REVIEW">待审核</option>
+                    <option value="FAILED">失败</option>
+                  </select>
+                </label>
+                <button class="primary-button" type="button" data-knowledge-tab="upload">上传知识</button>
+              </div>
+
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>知识名称</th>
+                      <th>类型</th>
+                      <th>分类</th>
+                      <th>解析器</th>
+                      <th>状态</th>
+                      <th>更新时间</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="knowledgeRows">
+                    <tr data-category="售后" data-status="PUBLISHED">
+                      <td><strong>退款流程 SOP V3</strong><span>引用 342 次 · 42 Chunks</span></td>
+                      <td>PDF</td>
+                      <td>售后</td>
+                      <td>MinerU</td>
+                      <td><b class="pill success">已发布</b></td>
+                      <td>2026-07-04 09:30</td>
+                      <td><button class="text-button" type="button" data-knowledge-tab="detail">查看</button></td>
+                    </tr>
+                    <tr data-category="财务" data-status="PENDING_REVIEW">
+                      <td><strong>发票常见问题</strong><span>未命中生成 · FAQ 草稿</span></td>
+                      <td>FAQ</td>
+                      <td>财务</td>
+                      <td>FAQ Adapter</td>
+                      <td><b class="pill warning">待审核</b></td>
+                      <td>2026-07-04 08:15</td>
+                      <td><button class="text-button" type="button" data-knowledge-tab="review">审核</button></td>
+                    </tr>
+                    <tr data-category="产品" data-status="FAILED">
+                      <td><strong>CRM 安装手册</strong><span>Embedding 失败 · 可重试</span></td>
+                      <td>DOCX</td>
+                      <td>产品</td>
+                      <td>MinerU fallback</td>
+                      <td><b class="pill danger">失败</b></td>
+                      <td>2026-07-03 19:42</td>
+                      <td><button class="text-button" type="button" data-action="retry-import">重试</button></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="knowledge-tab" id="knowledge-upload">
+              <div class="upload-layout">
+                <section class="upload-zone" id="dropZone">
+                  <div class="upload-icon" aria-hidden="true">↑</div>
+                  <h3>上传知识文档</h3>
+                  <p>PDF、DOCX、PPTX、XLSX、图片走 MinerU；Markdown、TXT、FAQ 走轻量解析。</p>
+                  <button class="primary-button" type="button" id="startUpload">选择文件并开始</button>
+                </section>
+                <section class="panel">
+                  <div class="panel-title">
+                    <h3>解析流水线</h3>
+                    <b class="pill neutral" id="uploadMode">LocalFileStorageAdapter</b>
+                  </div>
+                  <div class="pipeline">
+                    <div class="pipeline-step is-done"><span>1</span><strong>上传</strong><em>MinIO / 本地路径</em></div>
+                    <div class="pipeline-step" data-step="parse"><span>2</span><strong>MinerU 解析</strong><em>Markdown / JSON blocks</em></div>
+                    <div class="pipeline-step" data-step="chunk"><span>3</span><strong>Chunk 切分</strong><em>结构优先语义切片</em></div>
+                    <div class="pipeline-step" data-step="embed"><span>4</span><strong>Embedding</strong><em>pgvector 索引</em></div>
+                    <div class="pipeline-step" data-step="review"><span>5</span><strong>审核</strong><em>分级发布策略</em></div>
+                  </div>
+                  <div class="progress-track" aria-label="上传处理进度"><i id="uploadProgress"></i></div>
+                  <div class="log-box" id="uploadLog">等待上传任务。</div>
+                </section>
+              </div>
+            </div>
+
+            <div class="knowledge-tab" id="knowledge-detail">
+              <div class="detail-layout">
+                <aside class="outline-panel">
+                  <h3>目录</h3>
+                  <button type="button" class="outline-link is-active">1. 退款适用范围</button>
+                  <button type="button" class="outline-link">2. 审核材料</button>
+                  <button type="button" class="outline-link">3. 退款时效</button>
+                  <button type="button" class="outline-link">4. 高风险例外</button>
+                </aside>
+                <section class="document-panel">
+                  <div class="doc-head">
+                    <div>
+                      <h3>退款流程 SOP V3</h3>
+                      <p>PDF · MinerU · 42 Chunks · 引用 342 次</p>
+                    </div>
+                    <div class="button-row">
+                      <button class="ghost-button" type="button" data-action="open-modal" data-modal="version">版本</button>
+                      <button class="primary-button" type="button" data-action="open-modal" data-modal="review">提交审核</button>
+                    </div>
+                  </div>
+                  <article class="doc-body">
+                    <h4>1. 退款适用范围</h4>
+                    <p>客户在订阅服务开通后 7 天内，且用量未超过套餐配额 10% 时，可申请原路退款。企业客户合同条款优先级高于通用退款规则。</p>
+                    <h4>2. 审核材料</h4>
+                    <p>客服需确认订单号、付款流水、企业主体和开票状态。已开具发票的订单必须先完成红冲流程。</p>
+                    <table>
+                      <thead><tr><th>场景</th><th>处理方式</th><th>风险等级</th></tr></thead>
+                      <tbody>
+                        <tr><td>7 天内未开票</td><td>客服主管审核</td><td>低</td></tr>
+                        <tr><td>已开票</td><td>财务审核后退款</td><td>高</td></tr>
+                      </tbody>
+                    </table>
+                  </article>
+                </section>
+                <aside class="chunk-panel">
+                  <h3>Chunk</h3>
+                  <article class="chunk-card is-active">
+                    <strong>Chunk 12</strong>
+                    <p>客户在订阅服务开通后 7 天内...</p>
+                    <span>score 0.91 · page 3</span>
+                  </article>
+                  <article class="chunk-card">
+                    <strong>Chunk 13</strong>
+                    <p>已开具发票的订单必须先完成红冲流程...</p>
+                    <span>score 0.88 · page 4</span>
+                  </article>
+                  <button class="ghost-button full" type="button" data-action="mark-reindex">标记重新向量化</button>
+                </aside>
+              </div>
+            </div>
+
+            <div class="knowledge-tab" id="knowledge-faq">
+              <div class="faq-grid">
+                <article class="faq-item">
+                  <div><strong>电子发票怎么下载？</strong><span>财务 · 未命中生成</span></div>
+                  <p>登录控制台后进入「账单与发票」，选择订单并下载电子发票。</p>
+                  <button class="primary-button" type="button" data-action="approve-faq">发布</button>
+                </article>
+                <article class="faq-item">
+                  <div><strong>升级套餐后多久生效？</strong><span>产品 · 草稿</span></div>
+                  <p>支付成功后 5 分钟内生效；企业合同订单以商务确认时间为准。</p>
+                  <button class="ghost-button" type="button" data-action="open-modal" data-modal="faq">编辑</button>
+                </article>
+              </div>
+            </div>
+
+            <div class="knowledge-tab" id="knowledge-review">
+              <div class="review-board">
+                <article class="review-card">
+                  <header><strong>退款 SOP V3</strong><b class="pill danger">高风险</b></header>
+                  <p>涉及退款承诺、开票红冲和合同优先级，需管理员审核。</p>
+                  <div class="button-row">
+                    <button class="primary-button" type="button" data-action="approve-review">通过并发布</button>
+                    <button class="ghost-button" type="button" data-action="reject-review">驳回</button>
+                  </div>
+                </article>
+                <article class="review-card">
+                  <header><strong>发票 FAQ 草稿</strong><b class="pill warning">普通</b></header>
+                  <p>由未命中问题生成，知识管理员审核后可立即发布。</p>
+                  <div class="button-row">
+                    <button class="primary-button" type="button" data-action="approve-review">通过并发布</button>
+                    <button class="ghost-button" type="button" data-action="reject-review">驳回</button>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" id="view-chat" aria-labelledby="chatTitle">
+            <div class="section-head">
+              <div>
+                <h2 id="chatTitle">AI 客服</h2>
+                <p>RAG 回答、引用来源、反馈和转人工。</p>
+              </div>
+              <button class="ghost-button" type="button" id="resetChat">新会话</button>
+            </div>
+            <div class="chat-layout">
+              <aside class="conversation-list">
+                <button class="conversation is-active" type="button"><strong>客户 A · 退款咨询</strong><span>刚刚 · AI 已命中</span></button>
+                <button class="conversation" type="button"><strong>客户 B · 发票下载</strong><span>12 分钟前 · 未命中</span></button>
+                <button class="conversation" type="button"><strong>客户 C · 安装失败</strong><span>33 分钟前 · 已转工单</span></button>
+              </aside>
+              <section class="chat-window">
+                <div class="messages" id="messages">
+                  <article class="message customer"><p>我刚买了套餐，现在想退款，要怎么处理？</p></article>
+                  <article class="message ai">
+                    <p>根据退款流程 SOP，订阅开通 7 天内且用量未超过套餐配额 10% 时，可以申请原路退款。已开票订单需先完成红冲流程。</p>
+                    <div class="citations">
+                      <button type="button">退款流程 SOP V3 · PDF 第 3 页</button>
+                      <button type="button">Chunk 12 · score 0.91</button>
+                    </div>
+                    <div class="message-actions">
+                      <button type="button" data-action="copy-answer">复制</button>
+                      <button type="button" data-action="regenerate">重新回答</button>
+                      <button type="button" data-action="positive">赞</button>
+                      <button type="button" data-action="negative">踩</button>
+                      <button type="button" data-action="handoff">转人工</button>
+                    </div>
+                  </article>
+                </div>
+                <form class="composer" id="chatForm">
+                  <input id="chatInput" type="text" value="如果已经开票，还能退款吗？" />
+                  <button class="primary-button" type="submit">发送</button>
+                </form>
+              </section>
+              <aside class="source-panel">
+                <h3>检索链路</h3>
+                <ol class="compact-list">
+                  <li><span>Rewrite</span><b class="pill neutral">完成</b></li>
+                  <li><span>Hybrid Search Top20</span><b class="pill neutral">86ms</b></li>
+                  <li><span>Rerank Top5</span><b class="pill neutral">214ms</b></li>
+                  <li><span>引用覆盖</span><b class="pill success">2 条</b></li>
+                </ol>
+                <button class="primary-button full" type="button" data-action="handoff">创建工单</button>
+              </aside>
+            </div>
+          </section>
+
+          <section class="view" id="view-tickets" aria-labelledby="ticketsTitle">
+            <div class="section-head">
+              <div>
+                <h2 id="ticketsTitle">工单中心</h2>
+                <p>人工接管、优先级、通知和处理记录。</p>
+              </div>
+              <button class="primary-button" type="button" data-action="open-modal" data-modal="ticket">新建工单</button>
+            </div>
+            <div class="tickets-layout">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>工单号</th><th>客户</th><th>问题</th><th>优先级</th><th>状态</th><th>负责人</th><th>更新时间</th></tr></thead>
+                  <tbody>
+                    <tr class="is-selected">
+                      <td>TK-20260704-008</td><td>客户 A</td><td>已开票退款</td><td><b class="pill danger">URGENT</b></td><td><b class="pill warning">处理中</b></td><td>李主管</td><td>10:24</td>
+                    </tr>
+                    <tr>
+                      <td>TK-20260704-007</td><td>客户 C</td><td>安装失败</td><td><b class="pill warning">HIGH</b></td><td><b class="pill neutral">未分配</b></td><td>-</td><td>09:51</td>
+                    </tr>
+                    <tr>
+                      <td>TK-20260703-044</td><td>客户 D</td><td>合同英文版</td><td><b class="pill neutral">MEDIUM</b></td><td><b class="pill success">已关闭</b></td><td>王客服</td><td>昨天</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <aside class="ticket-detail">
+                <h3>TK-20260704-008</h3>
+                <p>客户已开票后申请退款，AI 建议走财务红冲审核。</p>
+                <dl>
+                  <div><dt>引用知识</dt><dd>退款流程 SOP V3 · Chunk 13</dd></div>
+                  <div><dt>AI 建议</dt><dd>先确认发票状态，再提交财务审核。</dd></div>
+                  <div><dt>通知</dt><dd>已发送企业微信和飞书提醒。</dd></div>
+                </dl>
+                <div class="button-row">
+                  <button class="primary-button" type="button" data-action="close-ticket">关闭工单</button>
+                  <button class="ghost-button" type="button" data-action="assign-ticket">转派</button>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="view" id="view-operations" aria-labelledby="opsTitle">
+            <div class="section-head">
+              <div>
+                <h2 id="opsTitle">知识运营</h2>
+                <p>命中率、未命中、热门知识、热门问题和知识健康。</p>
+              </div>
+              <div class="segmented" role="group" aria-label="运营时间范围">
+                <button class="is-active" type="button">7 天</button>
+                <button type="button">30 天</button>
+              </div>
+            </div>
+            <div class="ops-grid">
+              <article class="score-panel">
+                <span>AI 命中率</span>
+                <strong>78.6%</strong>
+                <div class="ring" style="--score: 78%"></div>
+              </article>
+              <section class="panel">
+                <div class="panel-title"><h3>未命中聚类</h3><button class="text-button" type="button" data-action="draft-faq">生成 FAQ</button></div>
+                <ol class="compact-list">
+                  <li><span>发票下载</span><b>28</b></li>
+                  <li><span>升级生效时间</span><b>16</b></li>
+                  <li><span>英文合同</span><b>9</b></li>
+                </ol>
+              </section>
+              <section class="panel">
+                <div class="panel-title"><h3>知识健康</h3><button class="text-button" type="button">导出</button></div>
+                <ol class="compact-list">
+                  <li><span>重复知识</span><b class="pill warning">12</b></li>
+                  <li><span>疑似失效</span><b class="pill danger">6</b></li>
+                  <li><span>长期无人访问</span><b class="pill neutral">31</b></li>
+                </ol>
+              </section>
+              <section class="panel panel-wide">
+                <div class="panel-title"><h3>热门知识 TOP</h3><button class="text-button" type="button" data-view-jump="knowledge">打开知识</button></div>
+                <div class="rank-list">
+                  <span>1</span><strong>退款流程 SOP V3</strong><i style="--w: 92%"></i><em>342 引用</em>
+                  <span>2</span><strong>CRM 安装手册</strong><i style="--w: 73%"></i><em>256 引用</em>
+                  <span>3</span><strong>发票 FAQ</strong><i style="--w: 58%"></i><em>188 引用</em>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section class="view" id="view-ai-config" aria-labelledby="aiConfigTitle">
+            <div class="section-head">
+              <div>
+                <h2 id="aiConfigTitle">AI 配置</h2>
+                <p>模型供应商、Prompt、RAG 参数和标准测试集。</p>
+              </div>
+              <button class="primary-button" type="button" data-action="run-eval">运行测试集</button>
+            </div>
+            <div class="config-grid">
+              <section class="panel">
+                <div class="panel-title"><h3>模型供应商</h3><b class="pill success">2 已启用</b></div>
+                <div class="provider-list">
+                  <label><input type="checkbox" checked /> OpenAI <span>chat + embedding</span></label>
+                  <label><input type="checkbox" checked /> Qwen <span>rerank + chat</span></label>
+                  <label><input type="checkbox" /> Ollama <span>本地模型</span></label>
+                  <label><input type="checkbox" /> DeepSeek <span>chat</span></label>
+                </div>
+              </section>
+              <section class="panel">
+                <div class="panel-title"><h3>RAG 参数</h3><button class="text-button" type="button" data-action="reset-rag">默认值</button></div>
+                <label class="slider-row">TopK <input type="range" min="3" max="30" value="20" id="topK" /><b id="topKValue">20</b></label>
+                <label class="slider-row">Rerank TopK <input type="range" min="3" max="10" value="5" id="rerankTopK" /><b id="rerankValue">5</b></label>
+                <label class="slider-row">Temperature <input type="range" min="0" max="100" value="20" id="temperature" /><b id="temperatureValue">0.20</b></label>
+                <label class="slider-row">相似度阈值 <input type="range" min="40" max="95" value="68" id="threshold" /><b id="thresholdValue">0.68</b></label>
+              </section>
+              <section class="panel panel-wide">
+                <div class="panel-title"><h3>标准测试集</h3><b class="pill warning" id="evalStatus">待运行</b></div>
+                <div class="eval-grid">
+                  <div><span>Citation Hit Rate</span><strong id="evalCitation">-</strong></div>
+                  <div><span>Faithfulness</span><strong id="evalFaith">-</strong></div>
+                  <div><span>Refusal Accuracy</span><strong id="evalRefusal">-</strong></div>
+                  <div><span>P95 首字</span><strong id="evalLatency">-</strong></div>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section class="view" id="view-access" aria-labelledby="accessTitle">
+            <div class="section-head">
+              <div>
+                <h2 id="accessTitle">用户权限</h2>
+                <p>用户、部门、角色、RBAC 权限和审计。</p>
+              </div>
+              <button class="primary-button" type="button" data-action="open-modal" data-modal="user">邀请用户</button>
+            </div>
+            <div class="access-grid">
+              <section class="panel panel-wide">
+                <div class="panel-title"><h3>角色权限矩阵</h3><button class="text-button" type="button" data-action="save-permissions">保存</button></div>
+                <div class="matrix">
+                  <span></span><b>管理员</b><b>知识管理员</b><b>客服</b><b>访客</b>
+                  <strong>知识上传</strong><input type="checkbox" checked /><input type="checkbox" checked /><input type="checkbox" /><input type="checkbox" />
+                  <strong>审核发布</strong><input type="checkbox" checked /><input type="checkbox" checked /><input type="checkbox" /><input type="checkbox" />
+                  <strong>AI 聊天</strong><input type="checkbox" checked /><input type="checkbox" checked /><input type="checkbox" checked /><input type="checkbox" checked />
+                  <strong>工单处理</strong><input type="checkbox" checked /><input type="checkbox" /><input type="checkbox" checked /><input type="checkbox" />
+                  <strong>AI 配置</strong><input type="checkbox" checked /><input type="checkbox" /><input type="checkbox" /><input type="checkbox" />
+                </div>
+              </section>
+              <section class="panel">
+                <div class="panel-title"><h3>用户</h3><button class="text-button" type="button">同步</button></div>
+                <ol class="compact-list">
+                  <li><span>李主管</span><b class="pill success">管理员</b></li>
+                  <li><span>王知识</span><b class="pill neutral">知识管理员</b></li>
+                  <li><span>赵客服</span><b class="pill neutral">客服</b></li>
+                </ol>
+              </section>
+            </div>
+          </section>
+
+          <section class="view" id="view-settings" aria-labelledby="settingsTitle">
+            <div class="section-head">
+              <div>
+                <h2 id="settingsTitle">系统设置</h2>
+                <p>企业信息、对象存储、API、Webhook、渠道、日志和 Widget。</p>
+              </div>
+              <button class="primary-button" type="button" data-action="save-settings">保存设置</button>
+            </div>
+            <div class="settings-grid">
+              <section class="panel">
+                <div class="panel-title"><h3>企业信息</h3><b class="pill success">已配置</b></div>
+                <label>企业名称<input type="text" value="灵犀科技" /></label>
+                <label>默认时区<input type="text" value="Asia/Shanghai" /></label>
+                <label>客服品牌名<input type="text" value="灵犀客服" /></label>
+              </section>
+              <section class="panel">
+                <div class="panel-title"><h3>对象存储</h3><b class="pill neutral">开发/测试</b></div>
+                <label>当前 Adapter<select id="storageAdapter"><option>LocalFileStorageAdapter</option><option>MinioStorageAdapter</option></select></label>
+                <label>本地路径<input type="text" value="D:\\tmp\\lingxi-storage" /></label>
+                <label>MinIO Bucket<input type="text" value="lingxi-objects" /></label>
+              </section>
+              <section class="panel">
+                <div class="panel-title"><h3>渠道集成</h3><button class="text-button" type="button" data-action="test-channels">测试</button></div>
+                <div class="provider-list">
+                  <label><input type="checkbox" checked /> 企业微信 <span>工单通知</span></label>
+                  <label><input type="checkbox" checked /> 飞书 <span>审核通知</span></label>
+                  <label><input type="checkbox" checked /> 钉钉 <span>异常告警</span></label>
+                </div>
+              </section>
+              <section class="panel panel-wide">
+                <div class="panel-title"><h3>Widget 预览</h3><b class="pill success">域名白名单启用</b></div>
+                <div class="widget-preview">
+                  <div class="fake-page">
+                    <header>客户帮助中心</header>
+                    <main>产品文档、售后政策、常见问题</main>
+                    <button class="widget-bubble" type="button" id="widgetBubble">AI</button>
+                    <div class="widget-card" id="widgetCard">
+                      <strong>灵犀客服</strong>
+                      <p>您好，请描述您的问题。</p>
+                      <input type="text" value="怎么申请退款？" />
+                    </div>
+                  </div>
+                  <pre>&lt;script src="/widget/lingxi-widget.js" data-token="wgt_***"&gt;&lt;/script&gt;</pre>
+                </div>
+              </section>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div class="modal" id="modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-card">
+        <header>
+          <h2 id="modalTitle">操作确认</h2>
+          <button class="icon-button" type="button" id="modalClose" aria-label="关闭">×</button>
+        </header>
+        <div id="modalBody"></div>
+        <footer>
+          <button class="ghost-button" type="button" id="modalCancel">取消</button>
+          <button class="primary-button" type="button" id="modalConfirm">确认</button>
+        </footer>
+      </div>
+    </div>
+
+    <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
