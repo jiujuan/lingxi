@@ -56,13 +56,19 @@ class RetrievalService:
         confidence = reranked[0].rerank_score if reranked else 0.0
         has_answer = bool(reranked and confidence >= self.config.low_confidence_threshold)
 
+        # Cap stored per-stage items so QueryRun.retrieval_snapshot stays small.
+        cap = self.config.snapshot_max_items_per_stage
         snapshot = {
             "question": question,
             "stages": {
-                "vector": [self._rank_snapshot(item, score) for item, score in vector_ranked],
-                "text": [self._rank_snapshot(item, score) for item, score in text_ranked],
-                "rrf": [item.to_snapshot() for item in fused],
-                "rerank": [item.to_snapshot() for item in reranked],
+                "vector": [
+                    self._rank_snapshot(item, score) for item, score in vector_ranked
+                ][:cap],
+                "text": [
+                    self._rank_snapshot(item, score) for item, score in text_ranked
+                ][:cap],
+                "rrf": [item.to_snapshot() for item in fused][:cap],
+                "rerank": [item.to_snapshot() for item in reranked][:cap],
             },
             "filters": {
                 "scopeDocumentIds": sorted(access_scope.document_ids)

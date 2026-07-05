@@ -227,6 +227,11 @@ class Settings:
             os.getenv("RETRIEVAL_LOW_CONFIDENCE_THRESHOLD", "1.35")
         )
     )
+    retrieval_snapshot_max_items_per_stage: int = field(
+        default_factory=lambda: int(
+            os.getenv("RETRIEVAL_SNAPSHOT_MAX_ITEMS_PER_STAGE", "10")
+        )
+    )
     embedding_batch_size: int = field(
         default_factory=lambda: int(os.getenv("EMBEDDING_BATCH_SIZE", "64"))
     )

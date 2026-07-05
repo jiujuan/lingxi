@@ -46,22 +46,28 @@ def get_current_access_context(
         raise unauthenticated("用户不可用")
     assert_token_current(payload, user.token_version)
 
-    role_rows = db.execute(
-        select(Role.id, Role.code)
-        .join(UserRole, UserRole.role_id == Role.id)
+    # One query joins the user's roles and their permissions, instead of a
+    # separate roles query followed by a permissions query.
+    rows = db.execute(
+        select(Role.id, Role.code, Permission.code)
+        .select_from(UserRole)
+        .join(Role, Role.id == UserRole.role_id)
+        .outerjoin(RolePermission, RolePermission.role_id == Role.id)
+        .outerjoin(Permission, Permission.id == RolePermission.permission_id)
         .where(UserRole.user_id == user.id)
     ).all()
-    role_ids = [row.id for row in role_rows]
-    role_codes = {row.code for row in role_rows}
 
-    permissions = set()
-    if role_ids:
-        permission_rows = db.execute(
-            select(Permission.code)
-            .join(RolePermission, RolePermission.permission_id == Permission.id)
-            .where(RolePermission.role_id.in_(role_ids))
-        ).all()
-        permissions = {row.code for row in permission_rows}
+    role_ids: list[str] = []
+    role_codes: set[str] = set()
+    permissions: set[str] = set()
+    seen_roles: set[str] = set()
+    for role_id, role_code, permission_code in rows:
+        if role_id not in seen_roles:
+            seen_roles.add(role_id)
+            role_ids.append(role_id)
+            role_codes.add(role_code)
+        if permission_code:
+            permissions.add(permission_code)
 
     return AccessContext(
         tenant_id=user.tenant_id,

@@ -173,6 +173,24 @@ def test_retrieval_filters_unauthorized_and_api_key_scope_before_scoring():
     assert {item.document_id for item in scoped.candidates} == {ids["refund_doc"]}
 
 
+def test_snapshot_stages_are_capped_per_config():
+    from dataclasses import replace
+
+    session, identity = build_session()
+    _seed_retrieval_dataset(session, identity)
+
+    from server.app.core.retrieval_config import get_retrieval_config
+    from server.app.services.retrieval_service import RetrievalService
+
+    capped_config = replace(get_retrieval_config(), snapshot_max_items_per_stage=1)
+    result = RetrievalService(session, config=capped_config).retrieve(
+        _employee_context(identity), "已开票订单退款前要做什么？"
+    )
+
+    for stage in ("vector", "text", "rrf", "rerank"):
+        assert len(result.snapshot["stages"][stage]) <= 1
+
+
 def test_low_confidence_records_missed_question():
     session, identity = build_session()
     _seed_retrieval_dataset(session, identity)

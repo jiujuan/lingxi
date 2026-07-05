@@ -169,6 +169,7 @@ class ChatService:
         run.status = "COMPLETED"
         run.assistant_message_id = assistant_message.id
         run.latency_ms = int((perf_counter() - started) * 1000)
+        titles = self._document_titles({c.document_id for c in retrieval.candidates})
         for rank, candidate in enumerate(retrieval.candidates, start=1):
             citation = self.run_repo.add_citation(
                 tenant_id=context.tenant_id,
@@ -187,7 +188,7 @@ class ChatService:
                     "citationId": citation.id,
                     "documentId": candidate.document_id,
                     "qaPairId": candidate.qa_pair_id,
-                    "title": self._document_title(candidate.document_id),
+                    "title": titles.get(candidate.document_id),
                     "quote": citation.quote,
                     "rank": rank,
                     "pageNo": candidate.page_no,
@@ -231,6 +232,10 @@ class ChatService:
             timeout_ms=model_config.timeout_ms,
         )
 
-    def _document_title(self, document_id: str) -> str | None:
-        document = self.session.get(Document, document_id)
-        return document.title if document is not None else None
+    def _document_titles(self, document_ids: set[str]) -> dict[str, str | None]:
+        if not document_ids:
+            return {}
+        rows = self.session.execute(
+            select(Document.id, Document.title).where(Document.id.in_(document_ids))
+        ).all()
+        return {row.id: row.title for row in rows}

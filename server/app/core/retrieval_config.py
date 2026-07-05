@@ -10,6 +10,7 @@ class RetrievalConfig:
     final_top_k: int
     rrf_k: int
     low_confidence_threshold: float
+    snapshot_max_items_per_stage: int
 
 
 def get_retrieval_config() -> RetrievalConfig:
@@ -19,4 +20,5 @@ def get_retrieval_config() -> RetrievalConfig:
         final_top_k=settings.retrieval_final_top_k,
         rrf_k=settings.retrieval_rrf_k,
         low_confidence_threshold=settings.retrieval_low_confidence_threshold,
+        snapshot_max_items_per_stage=settings.retrieval_snapshot_max_items_per_stage,
     )
