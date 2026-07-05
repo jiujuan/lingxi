@@ -27,6 +27,7 @@
 | #6 分批处理 | ✅ 已完成（2026-07-06） | QA 拆分按字符预算（token 代理）将 chunk 分组、逐组生成再合并（chunk 全局 index 保序）；Embedding 按 `EMBEDDING_BATCH_SIZE` 分批，批内瞬时失败按 `EMBEDDING_BATCH_MAX_RETRIES` 重试、彻底失败交由任务层重跑；两者经 `_batching.run_ordered` 支持有界并发（DB 写仍在主线程，Session 不并发）。新增 5 项配置 + `.env.example`；新增 `test_batching_pipeline.py`；全量 95 passed。 |
 | #7 连接池 | ✅ 已完成（2026-07-06） | `db/session.py` 显式配置 `pool_size/max_overflow/pool_recycle/pool_timeout/pool_pre_ping`（`build_db_engine_options`，全部环境变量可覆盖）；API 与 Celery worker 按 `DB_ROLE` 分离，worker 进程启动即 `DB_ROLE=worker` 并可用 `WORKER_DB_*` 独立调参；SQLite 走默认池（不传 QueuePool 参数）。async SQLAlchemy 评估后暂缓（现有同步栈 + 同步 Celery worker，迁移成本大）。新增 4 项配置测试；全量 99 passed。 |
 | #8 SSE 校验前移+心跳 | ✅ 已完成（2026-07-06） | `stream_message_run` 拆为「同步前置校验 + 返回生成器」，会话不存在/空消息在 StreamingResponse 发 200 前正确返回 404/400；新增 `SseService.stream_with_heartbeat`：源生成器在后台线程跑，主线程在静默超过 `SSE_HEARTBEAT_SECONDS` 时注入 `: heartbeat` 注释帧（仅 worker 线程持有 Session，无并发访问），异常回传主线程。新增 4 项 SSE 测试；全量 103 passed。 |
+| #9 JWT 可吊销 | ✅ 已完成（2026-07-06） | User 新增 `token_version`（迁移 0002），token 内嵌 `ver`；`assert_token_current` 在鉴权与 refresh 时比对，登出（`AuthService.logout`）/改密/禁用调 `revoke_tokens` 自增版本即刻吊销所有已签发 token；`decode_token` 校验 `iss`/`aud`；refresh 默认收紧至 14 天。新增 2 项测试（登出吊销 access+refresh、错误 aud 拒绝）；全量 105 passed。 |
 
 ---
 

@@ -185,11 +185,15 @@ class Settings:
         default_factory=build_secret_encryption_key
     )
     jwt_algorithm: str = field(default_factory=lambda: os.getenv("JWT_ALGORITHM", "HS256"))
+    jwt_issuer: str = field(default_factory=lambda: os.getenv("JWT_ISSUER", "lingxi"))
+    jwt_audience: str = field(
+        default_factory=lambda: os.getenv("JWT_AUDIENCE", "lingxi-api")
+    )
     access_token_minutes: int = field(
         default_factory=lambda: int(os.getenv("ACCESS_TOKEN_MINUTES", "30"))
     )
     refresh_token_minutes: int = field(
-        default_factory=lambda: int(os.getenv("REFRESH_TOKEN_MINUTES", "43200"))
+        default_factory=lambda: int(os.getenv("REFRESH_TOKEN_MINUTES", "20160"))
     )
     seed_tenant_name: str = field(
         default_factory=lambda: os.getenv("SEED_TENANT_NAME", "Default Tenant")

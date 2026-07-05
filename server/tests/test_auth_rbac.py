@@ -111,3 +111,61 @@ def test_refresh_and_logout_endpoints_are_available():
     )
     assert logout.status_code == 200
     assert logout.json() == {"ok": True}
+
+
+def test_logout_revokes_outstanding_access_and_refresh_tokens():
+    client, _ = build_test_client()
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.com", "password": "Admin123!"},
+    ).json()
+    access = login["accessToken"]
+    refresh_token = login["refreshToken"]
+
+    # token works before logout
+    assert client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {access}"}).status_code == 200
+
+    logout = client.post("/api/v1/auth/logout", headers={"Authorization": f"Bearer {access}"})
+    assert logout.status_code == 200
+
+    # the same access token is now revoked (token_version bumped)
+    me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {access}"})
+    assert me.status_code == 401
+
+    # the paired refresh token is revoked too -> cannot mint new tokens
+    refreshed = client.post("/api/v1/auth/refresh", json={"refreshToken": refresh_token})
+    assert refreshed.status_code == 401
+
+
+def test_token_with_wrong_audience_is_rejected():
+    from datetime import UTC, datetime, timedelta
+
+    from jose import jwt
+
+    from server.app.core.config import settings
+
+    client, _ = build_test_client()
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.com", "password": "Admin123!"},
+    ).json()
+    user_id = login["user"]["id"]
+
+    now = datetime.now(UTC)
+    forged = jwt.encode(
+        {
+            "sub": user_id,
+            "type": "access",
+            "ver": 1,
+            "iss": settings.jwt_issuer,
+            "aud": "someone-else",  # wrong audience
+            "iat": int(now.timestamp()),
+            "exp": now + timedelta(minutes=5),
+        },
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+    response = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {forged}"})
+    assert response.status_code == 401

@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.app.db.base import Base, IdMixin, TimestampMixin
@@ -40,6 +40,11 @@ class User(IdMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="ACTIVE")
+    # Bumped on logout / password change / disable to revoke all outstanding
+    # tokens: a token whose "ver" claim no longer matches is rejected.
+    token_version: Mapped[int] = mapped_column(
+        Integer, default=1, server_default="1", nullable=False
+    )
 
     __table_args__ = (UniqueConstraint("tenant_id", "email"),)
 

@@ -21,8 +21,11 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/logout")
-def logout(_context: AccessContext = Depends(get_current_access_context)) -> dict:
-    return {"ok": True}
+def logout(
+    context: AccessContext = Depends(get_current_access_context),
+    db: Session = Depends(get_db),
+) -> dict:
+    return AuthService(db).logout(context.user_id)
 
 
 @router.get("/me")

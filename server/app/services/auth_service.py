@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from server.app.core.errors import unauthenticated
 from server.app.core.config import settings
 from server.app.core.security import (
+    assert_token_current,
     create_access_token,
     create_refresh_token,
     decode_token,
@@ -46,8 +47,8 @@ class AuthService:
             )
 
         return {
-            "accessToken": create_access_token(user.id),
-            "refreshToken": create_refresh_token(user.id),
+            "accessToken": create_access_token(user.id, user.token_version),
+            "refreshToken": create_refresh_token(user.id, user.token_version),
             "expiresIn": settings.access_token_expires_seconds,
             "user": {
                 "id": user.id,
@@ -69,6 +70,7 @@ class AuthService:
         user = self.session.get(User, user_id)
         if user is None or user.status != "ACTIVE":
             raise unauthenticated("用户不可用")
+        assert_token_current(payload, user.token_version)
 
         role_rows = self.session.execute(
             select(Role.id, Role.code)
@@ -88,8 +90,8 @@ class AuthService:
             )
 
         return {
-            "accessToken": create_access_token(user.id),
-            "refreshToken": create_refresh_token(user.id),
+            "accessToken": create_access_token(user.id, user.token_version),
+            "refreshToken": create_refresh_token(user.id, user.token_version),
             "expiresIn": settings.access_token_expires_seconds,
             "user": {
                 "id": user.id,
@@ -101,3 +103,15 @@ class AuthService:
                 "permissions": permissions,
             },
         }
+
+    def logout(self, user_id: str) -> dict:
+        """Revoke all outstanding tokens for the user by bumping token_version."""
+        self.revoke_tokens(user_id)
+        return {"ok": True}
+
+    def revoke_tokens(self, user_id: str) -> None:
+        """Invalidate every token issued so far (logout / password change / disable)."""
+        user = self.session.get(User, user_id)
+        if user is not None:
+            user.token_version += 1
+            self.session.commit()

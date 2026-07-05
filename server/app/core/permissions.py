@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from server.app.core.errors import forbidden, unauthenticated
-from server.app.core.security import decode_token
+from server.app.core.security import assert_token_current, decode_token
 from server.app.db.session import get_db
 from server.app.models.role import Role, RolePermission, UserRole
 from server.app.models.permission import Permission
@@ -44,6 +44,7 @@ def get_current_access_context(
     user = db.get(User, user_id)
     if user is None or user.status != "ACTIVE":
         raise unauthenticated("用户不可用")
+    assert_token_current(payload, user.token_version)
 
     role_rows = db.execute(
         select(Role.id, Role.code)
