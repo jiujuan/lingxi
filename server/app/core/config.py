@@ -59,14 +59,35 @@ def parse_csv_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def build_secret_encryption_key() -> str:
-    return (
-        os.getenv("SECRET_ENCRYPTION_KEY")
-        or os.getenv("JWT_SECRET_KEY")
-        or "dev-only-change-before-deployment"
-    )
+    # Independent from JWT_SECRET_KEY: never fall back to the JWT key so the two
+    # secrets can be rotated separately and a leak of one does not compromise the
+    # other. In non-production a distinct dev default keeps local setup friction low;
+    # production is enforced by validate_secret_config().
+    return os.getenv("SECRET_ENCRYPTION_KEY") or DEV_ENCRYPTION_SECRET_DEFAULT
 
 
 load_env_file()
+
+
+# Well-known development-only secret defaults. Production must override these;
+# validate_secret_config() refuses to start if any survive into production.
+DEV_JWT_SECRET_DEFAULT = "dev-only-change-before-deployment"
+DEV_ENCRYPTION_SECRET_DEFAULT = "dev-only-encryption-change-before-deployment"
+_WEAK_SECRET_VALUES = frozenset(
+    {
+        "",
+        DEV_JWT_SECRET_DEFAULT,
+        DEV_ENCRYPTION_SECRET_DEFAULT,
+        "change-me-in-local-dev",
+        "change-me-in-local-dev-encryption",
+        "change-me",
+    }
+)
+MIN_SECRET_LENGTH = 32
+
+
+class ConfigurationError(RuntimeError):
+    """Raised at startup when runtime configuration is unsafe for production."""
 
 
 @dataclass(frozen=True)
@@ -119,9 +140,7 @@ class Settings:
         default_factory=lambda: int(os.getenv("IMPORT_MAX_FILES_PER_JOB", "1"))
     )
     jwt_secret_key: str = field(
-        default_factory=lambda: os.getenv(
-            "JWT_SECRET_KEY", "dev-only-change-before-deployment"
-        )
+        default_factory=lambda: os.getenv("JWT_SECRET_KEY", DEV_JWT_SECRET_DEFAULT)
     )
     secret_encryption_key: str = field(
         default_factory=build_secret_encryption_key
@@ -172,3 +191,41 @@ class Settings:
 
 
 settings = Settings()
+
+
+def _secret_problems(current: "Settings") -> list[str]:
+    problems: list[str] = []
+    checks = (
+        ("JWT_SECRET_KEY", current.jwt_secret_key),
+        ("SECRET_ENCRYPTION_KEY", current.secret_encryption_key),
+    )
+    for name, value in checks:
+        if value in _WEAK_SECRET_VALUES:
+            problems.append(f"{name} 未设置或仍为开发默认值，生产环境必须设置强随机值")
+        elif len(value) < MIN_SECRET_LENGTH:
+            problems.append(f"{name} 长度须不少于 {MIN_SECRET_LENGTH} 个字符")
+    if (
+        current.jwt_secret_key == current.secret_encryption_key
+        and current.jwt_secret_key not in _WEAK_SECRET_VALUES
+    ):
+        problems.append("SECRET_ENCRYPTION_KEY 必须与 JWT_SECRET_KEY 不同（职责分离）")
+    return problems
+
+
+def validate_secret_config(current: "Settings | None" = None) -> None:
+    """Fail-fast guard for production secret hygiene.
+
+    In non-production environments this is a no-op (dev defaults are allowed).
+    In production it raises :class:`ConfigurationError` unless both the JWT and
+    the secret-encryption keys are explicitly set, sufficiently long, and
+    distinct from each other. Call it once at application/worker startup.
+    """
+
+    current = current or settings
+    if current.environment.strip().lower() != "production":
+        return
+    problems = _secret_problems(current)
+    if problems:
+        raise ConfigurationError(
+            "生产环境密钥配置不合法，拒绝启动：\n- " + "\n- ".join(problems)
+        )

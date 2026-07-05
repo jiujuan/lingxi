@@ -1,7 +1,10 @@
 from celery import Celery
 from kombu import Queue
 
-from server.app.core.config import settings
+from server.app.core.config import settings, validate_secret_config
+
+# Fail fast if production secrets are misconfigured before workers start.
+validate_secret_config()
 
 QUEUE_NAMES = settings.celery_queue_names
 

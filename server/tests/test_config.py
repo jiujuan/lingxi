@@ -1,9 +1,14 @@
+import pytest
+
 from server.app.core.config import (
+    ConfigurationError,
+    DEV_ENCRYPTION_SECRET_DEFAULT,
     Settings,
     build_database_url,
     build_redis_url,
     load_env_file,
     parse_csv_env,
+    validate_secret_config,
 )
 
 
@@ -151,10 +156,61 @@ def test_settings_read_runtime_and_seed_values_from_environment(monkeypatch):
     assert settings.seed_employee_password == "Staff123!"
 
 
-def test_empty_secret_encryption_key_falls_back_to_jwt_secret(monkeypatch):
+def test_empty_secret_encryption_key_uses_independent_dev_default(monkeypatch):
+    # The encryption key no longer falls back to JWT_SECRET_KEY: an unset value
+    # resolves to its own dev default so the two secrets stay independent.
     monkeypatch.setenv("JWT_SECRET_KEY", "jwt-secret")
     monkeypatch.setenv("SECRET_ENCRYPTION_KEY", "")
 
     settings = Settings()
 
-    assert settings.secret_encryption_key == "jwt-secret"
+    assert settings.secret_encryption_key == DEV_ENCRYPTION_SECRET_DEFAULT
+    assert settings.secret_encryption_key != settings.jwt_secret_key
+
+
+def _production_settings(monkeypatch, *, jwt: str, enc: str) -> Settings:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("JWT_SECRET_KEY", jwt)
+    monkeypatch.setenv("SECRET_ENCRYPTION_KEY", enc)
+    return Settings()
+
+
+def test_validate_secret_config_is_noop_in_development(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+    monkeypatch.delenv("SECRET_ENCRYPTION_KEY", raising=False)
+
+    # dev defaults must not raise
+    validate_secret_config(Settings())
+
+
+def test_validate_secret_config_rejects_weak_production_secrets(monkeypatch):
+    settings = _production_settings(
+        monkeypatch, jwt="dev-only-change-before-deployment", enc=""
+    )
+    with pytest.raises(ConfigurationError) as excinfo:
+        validate_secret_config(settings)
+    assert "JWT_SECRET_KEY" in str(excinfo.value)
+    assert "SECRET_ENCRYPTION_KEY" in str(excinfo.value)
+
+
+def test_validate_secret_config_rejects_short_production_secrets(monkeypatch):
+    settings = _production_settings(monkeypatch, jwt="short", enc="alsoshort")
+    with pytest.raises(ConfigurationError) as excinfo:
+        validate_secret_config(settings)
+    assert "长度" in str(excinfo.value)
+
+
+def test_validate_secret_config_rejects_identical_production_secrets(monkeypatch):
+    shared = "x" * 40
+    settings = _production_settings(monkeypatch, jwt=shared, enc=shared)
+    with pytest.raises(ConfigurationError) as excinfo:
+        validate_secret_config(settings)
+    assert "职责分离" in str(excinfo.value)
+
+
+def test_validate_secret_config_accepts_strong_distinct_production_secrets(monkeypatch):
+    settings = _production_settings(
+        monkeypatch, jwt="J" * 40, enc="E" * 40
+    )
+    validate_secret_config(settings)  # must not raise

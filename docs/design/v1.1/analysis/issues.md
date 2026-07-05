@@ -22,6 +22,7 @@
 |---|---|---|
 | #1 真实 Provider | ✅ 已完成（2026-07-06） | httpx 实现 openai_compatible / ollama / claude / internal_gateway；`HttpProvider` 统一超时+重试(指数退避)+错误映射；mock 抽为 `MockProvider` 由 registry 按 `mock://`/fixture 标记分发；新增 `test_model_providers_http.py`（httpx MockTransport 打桩）。 |
 | #2 检索下推 | ✅ 已完成（2026-07-06） | `RetrievalRepository` 方言感知：PostgreSQL 走 pgvector `<=>`+HNSW 与 `to_tsquery`/`ts_rank`（GIN，jieba 分词），DB 内取 top-k；SQLite 保留 Python 兜底（测试用）。修复查询期 `api_key=None` bug。**遗留**：`has_answer` 阈值重标定与 1万+QA P95 基准需真实 PG 环境 → 归入 #20。 |
+| #3 密钥 fail-fast | ✅ 已完成（2026-07-06） | 取消加密密钥→JWT 密钥的静默回退，两把密钥各自独立 dev 默认值；新增 `validate_secret_config`：生产环境校验两把密钥均已设置、≥32 字符、且互不相同，否则抛 `ConfigurationError` 拒绝启动；接入 `create_app()` 与 `celery_app` 启动期；`.env.example` 拆分两键并附生成命令。 |
 
 ---
 
