@@ -1,3 +1,5 @@
+from typing import Protocol
+
 from server.app.integrations.model_providers.base import BaseProvider, MockProvider
 from server.app.integrations.model_providers.claude import ClaudeProvider
 from server.app.integrations.model_providers.internal_gateway import (
@@ -7,6 +9,26 @@ from server.app.integrations.model_providers.ollama import OllamaProvider
 from server.app.integrations.model_providers.openai_compatible import (
     OpenAICompatibleProvider,
 )
+
+
+class ProviderFactory(Protocol):
+    """Callable that builds a provider adapter.
+
+    Services depend on this instead of the concrete ``build_provider_adapter``
+    so a fake factory can be injected in tests without monkeypatching module
+    globals. ``build_provider_adapter`` is the default implementation.
+    """
+
+    def __call__(
+        self,
+        provider_type: str,
+        base_url: str | None,
+        api_key: str | None,
+        config: dict | None = None,
+        *,
+        model_name: str | None = None,
+        timeout_ms: int | None = None,
+    ) -> BaseProvider: ...
 
 
 PROVIDER_TYPES: dict[str, type[BaseProvider]] = {

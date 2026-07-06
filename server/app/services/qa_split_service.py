@@ -10,7 +10,10 @@ from server.app.core.errors import not_found
 from server.app.core.config import settings
 from server.app.core.secrets import decrypt_secret
 import server.app.db.base  # noqa: F401
-from server.app.integrations.model_providers.registry import build_provider_adapter
+from server.app.integrations.model_providers.registry import (
+    ProviderFactory,
+    build_provider_adapter,
+)
 from server.app.models.document import Document, DocumentStatus
 from server.app.models.import_job import ImportJob, ImportJobStatus
 from server.app.models.logs import TaskRun
@@ -87,8 +90,13 @@ def validate_qa_split_output(raw_output: str) -> list[ValidatedQaItem]:
 
 
 class QaSplitService:
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        provider_factory: ProviderFactory = build_provider_adapter,
+    ) -> None:
         self.session = session
+        self._build_adapter = provider_factory
 
     def split_import_job(self, job_id: str) -> ImportJob:
         job = self.session.get(ImportJob, job_id)
@@ -127,7 +135,7 @@ class QaSplitService:
             if not chunks:
                 raise QaSplitValidationError("文档没有可拆分的 Chunk")
             model_config, provider = self._default_model(job.tenant_id)
-            adapter = build_provider_adapter(
+            adapter = self._build_adapter(
                 provider.provider_type,
                 provider.base_url,
                 decrypt_secret(provider.encrypted_api_key),

@@ -6,7 +6,10 @@ from server.app.core.errors import bad_request, not_found
 from server.app.core.ids import current_request_id
 from server.app.core.permissions import AccessContext
 from server.app.core.secrets import decrypt_secret, encrypt_secret, has_secret
-from server.app.integrations.model_providers.registry import build_provider_adapter
+from server.app.integrations.model_providers.registry import (
+    ProviderFactory,
+    build_provider_adapter,
+)
 from server.app.models.model_config import (
     ModelCallLog,
     ModelCapability,
@@ -23,10 +26,15 @@ from server.app.repositories.model_config_repo import (
 
 
 class ModelConfigService:
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        provider_factory: ProviderFactory = build_provider_adapter,
+    ) -> None:
         self.session = session
         self.providers = ModelProviderRepository(session)
         self.configs = ModelConfigRepository(session)
+        self._build_adapter = provider_factory
 
     def create_provider(
         self,
@@ -88,7 +96,7 @@ class ModelConfigService:
     ) -> dict:
         provider = self._get_provider(context.tenant_id, provider_id)
         api_key = decrypt_secret(provider.encrypted_api_key)
-        adapter = build_provider_adapter(
+        adapter = self._build_adapter(
             provider.provider_type,
             base_url=provider.base_url,
             api_key=api_key,

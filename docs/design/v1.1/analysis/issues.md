@@ -39,6 +39,7 @@
 | #18 数据访问优化 | ✅ 已完成（2026-07-06） | `get_current_access_context` 把角色+权限两次查询合并为一条 join（每请求 3→2 次查库），保持实时权限语义；`chat_service` citation 标题改批量查询（`_document_titles`，消除 N+1）；`retrieval_snapshot` 各 stage 按 `RETRIEVAL_SNAPSHOT_MAX_ITEMS_PER_STAGE`（默认 10）截断瘦身，检索解释仍可用。新增快照截断测试；全量 119 passed。 |
 | #21 前端构建修正 | ✅ 已完成（2026-07-06） | 装 `@vitejs/plugin-react@5`（兼容 vite7，启用 HMR/Fast Refresh）、`@types/react`/`@types/react-dom`；`vite.config` 挂 react 插件；`tsconfig` `moduleResolution` 改 `Bundler`；加 `src/vite-env.d.ts`（`vite/client` 类型，`import.meta.env` 可类型化）。**`tsc --noEmit` 从满屏报错变为 0 报错**，`build` 改为 `tsc --noEmit && vite build` 类型门禁，新增 `typecheck` 脚本。构建通过（114 模块）。 |
 | #22 前端重构+门禁 | ✅ 已完成（2026-07-06） | 建 `shared/format.ts`（formatDateTime/formatBytes）收敛 4 处重复；`LogsPage` 抽公共 `LogRow` 消除 4 份重复行渲染；`ChatPage` 抽 `useChatStream` hook（AbortController/流式态/citations 收口，页面减 5 个 useState）；接入 **ESLint**（flat config，0 error）+ **Prettier**（全量归一 31 文件）+ `typecheck`；新增 `.github/workflows/ci.yml`（后端 pytest + 前端 typecheck/lint/format/build + OpenAPI 契约漂移检查）。`currentUser` 兜底已在 #11 完成。CSS Modules/Tailwind 因需逐组件迁移、风险高暂缓（文档标注）。四门禁全绿。 |
+| #19 DI 彻底化 | ✅ 已完成（2026-07-06） | 新增 `ProviderFactory` Protocol（默认 `build_provider_adapter`）；6 个 service（retrieval/embedding/qa_split/chat/openai_compatible/model_config）构造函数注入 `provider_factory`，内部 `build_provider_adapter(...)` 硬调用改为 `self._build_adapter(...)`，ChatService 把工厂透传给它创建的 RetrievalService；RerankService/tokenizer 本已可注入。可不打 monkeypatch 直接注入假工厂 mock。新增 `test_service_di.py`（2 项）；全量 122 passed。 |
 
 ---
 

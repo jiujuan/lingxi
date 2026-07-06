@@ -10,7 +10,10 @@ from server.app.core.config import settings
 from server.app.core.secrets import decrypt_secret
 import server.app.db.base  # noqa: F401
 from server.app.integrations.model_providers.base import ProviderError
-from server.app.integrations.model_providers.registry import build_provider_adapter
+from server.app.integrations.model_providers.registry import (
+    ProviderFactory,
+    build_provider_adapter,
+)
 from server.app.integrations.tokenizers.base import SearchTextTokenizer
 from server.app.integrations.tokenizers.jieba_tokenizer import JiebaTokenizer
 from server.app.models.document import Document, DocumentStatus
@@ -35,9 +38,11 @@ class EmbeddingService:
         self,
         session: Session,
         tokenizer: SearchTextTokenizer | None = None,
+        provider_factory: ProviderFactory = build_provider_adapter,
     ) -> None:
         self.session = session
         self.tokenizer = tokenizer or JiebaTokenizer()
+        self._build_adapter = provider_factory
 
     def embed_import_job(self, job_id: str) -> ImportJob:
         job = self.session.get(ImportJob, job_id)
@@ -79,7 +84,7 @@ class EmbeddingService:
                 )
             model_config, provider = self._default_model(job.tenant_id)
             expected_dimension = int(model_config.embedding_dimension or 1536)
-            adapter = build_provider_adapter(
+            adapter = self._build_adapter(
                 provider.provider_type,
                 provider.base_url,
                 decrypt_secret(provider.encrypted_api_key),

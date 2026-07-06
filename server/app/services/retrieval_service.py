@@ -6,7 +6,10 @@ from server.app.core.ids import current_request_id
 from server.app.core.permissions import AccessContext
 from server.app.core.retrieval_config import RetrievalConfig, get_retrieval_config
 from server.app.core.secrets import decrypt_secret
-from server.app.integrations.model_providers.registry import build_provider_adapter
+from server.app.integrations.model_providers.registry import (
+    ProviderFactory,
+    build_provider_adapter,
+)
 from server.app.integrations.tokenizers.base import SearchTextTokenizer
 from server.app.integrations.tokenizers.jieba_tokenizer import JiebaTokenizer
 from server.app.repositories.missed_question_repo import MissedQuestionRepository
@@ -27,12 +30,14 @@ class RetrievalService:
         config: RetrievalConfig | None = None,
         reranker: RerankService | None = None,
         tokenizer: SearchTextTokenizer | None = None,
+        provider_factory: ProviderFactory = build_provider_adapter,
     ) -> None:
         self.session = session
         self.config = config or get_retrieval_config()
         self.repo = RetrievalRepository(session)
         self.reranker = reranker or RerankService()
         self.tokenizer = tokenizer or JiebaTokenizer()
+        self._build_adapter = provider_factory
 
     def retrieve(
         self,
@@ -101,7 +106,7 @@ class RetrievalService:
     def _embed_query(self, tenant_id: str, question: str) -> list[float]:
         try:
             model_config, provider = EmbeddingService(self.session)._default_model(tenant_id)
-            adapter = build_provider_adapter(
+            adapter = self._build_adapter(
                 provider.provider_type,
                 provider.base_url,
                 decrypt_secret(provider.encrypted_api_key),

@@ -8,7 +8,10 @@ from sqlalchemy.orm import Session
 from server.app.core.ids import current_request_id
 from server.app.core.permissions import AccessContext
 from server.app.core.secrets import decrypt_secret
-from server.app.integrations.model_providers.registry import build_provider_adapter
+from server.app.integrations.model_providers.registry import (
+    ProviderFactory,
+    build_provider_adapter,
+)
 from server.app.models.document import Document
 from server.app.models.model_config import ModelCapability, ModelConfig, ModelProvider
 from server.app.repositories.query_run_repo import QueryRunRepository
@@ -18,10 +21,15 @@ from server.app.services.retrieval_service import RetrievalService
 
 
 class OpenAICompatibleService:
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        provider_factory: ProviderFactory = build_provider_adapter,
+    ) -> None:
         self.session = session
         self.prompt_service = PromptService()
         self.run_repo = QueryRunRepository(session)
+        self._build_adapter = provider_factory
 
     def create_completion(self, api_key, payload) -> dict:
         question = self._last_user_message(payload.messages)
@@ -187,7 +195,7 @@ class OpenAICompatibleService:
         if row is None:
             raise RuntimeError("CHAT_MODEL_MISSING")
         model_config, provider = row
-        return build_provider_adapter(
+        return self._build_adapter(
             provider.provider_type,
             provider.base_url,
             decrypt_secret(provider.encrypted_api_key),

@@ -9,7 +9,10 @@ from server.app.core.errors import bad_request, not_found
 from server.app.core.ids import current_request_id
 from server.app.core.permissions import AccessContext
 from server.app.core.secrets import decrypt_secret
-from server.app.integrations.model_providers.registry import build_provider_adapter
+from server.app.integrations.model_providers.registry import (
+    ProviderFactory,
+    build_provider_adapter,
+)
 from server.app.models.document import Document
 from server.app.models.model_config import ModelCapability, ModelConfig, ModelProvider
 from server.app.repositories.chat_repo import ChatRepository
@@ -21,12 +24,17 @@ from server.app.services.sse_service import SseService
 
 
 class ChatService:
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        provider_factory: ProviderFactory = build_provider_adapter,
+    ) -> None:
         self.session = session
         self.chat_repo = ChatRepository(session)
         self.run_repo = QueryRunRepository(session)
         self.prompt_service = PromptService()
         self.sse = SseService()
+        self._build_adapter = provider_factory
 
     def create_session(self, context: AccessContext, title: str | None):
         chat_session = self.chat_repo.create_session(context.tenant_id, context.user_id, title)
@@ -81,7 +89,9 @@ class ChatService:
         user_message = self.chat_repo.add_message(
             context.tenant_id, session_id, "USER", content, request_id
         )
-        retrieval = RetrievalService(self.session).retrieve(context, content)
+        retrieval = RetrievalService(
+            self.session, provider_factory=self._build_adapter
+        ).retrieve(context, content)
         run_public_id = f"run_{uuid4().hex}"
         run = self.run_repo.create_run(
             tenant_id=context.tenant_id,
@@ -223,7 +233,7 @@ class ChatService:
         if row is None:
             raise RuntimeError("CHAT_MODEL_MISSING")
         model_config, provider = row
-        return build_provider_adapter(
+        return self._build_adapter(
             provider.provider_type,
             provider.base_url,
             decrypt_secret(provider.encrypted_api_key),
