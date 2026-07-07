@@ -95,7 +95,9 @@ class EmbeddingService:
                     "EMBEDDING_NO_QA_PAIRS", "文档没有可向量化的 QA 对"
                 )
             model_config, provider = self._default_model(job.tenant_id)
-            expected_dimension = int(model_config.embedding_dimension or 1536)
+            expected_dimension = int(
+                model_config.embedding_dimension or settings.embedding_vector_dimension
+            )
             adapter = self._build_adapter(
                 provider.provider_type,
                 provider.base_url,

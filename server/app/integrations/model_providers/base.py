@@ -307,7 +307,13 @@ class MockProvider(BaseProvider):
             yield answer[index : index + chunk_size]
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        dimension = int(self.config.get("embeddingDimension") or self.dimension or 1536)
+        from server.app.core.config import settings
+
+        dimension = int(
+            self.config.get("embeddingDimension")
+            or self.dimension
+            or settings.embedding_vector_dimension
+        )
         vectors: list[list[float]] = []
         for text in texts:
             seed = hashlib.sha256(text.encode("utf-8")).digest()

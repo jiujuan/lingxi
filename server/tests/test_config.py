@@ -130,6 +130,7 @@ def test_settings_read_runtime_and_seed_values_from_environment(monkeypatch):
     monkeypatch.setenv("UPLOAD_ALLOWED_EXTENSIONS", ".md,.txt")
     monkeypatch.setenv("UPLOAD_MAX_FILE_SIZE_BYTES", "12345")
     monkeypatch.setenv("IMPORT_MAX_FILES_PER_JOB", "2")
+    monkeypatch.setenv("EMBEDDING_VECTOR_DIMENSION", "1536")
     monkeypatch.setenv("MINERU_BASE_URL", "http://mineru.local:8000/")
     monkeypatch.setenv("MINERU_API_KEY", "mineru-token")
     monkeypatch.setenv("MINERU_TIMEOUT_MS", "45000")
@@ -166,6 +167,7 @@ def test_settings_read_runtime_and_seed_values_from_environment(monkeypatch):
     assert settings.upload_allowed_extensions == (".md", ".txt")
     assert settings.upload_max_file_size_bytes == 12345
     assert settings.import_max_files_per_job == 2
+    assert settings.embedding_vector_dimension == 1536
     assert settings.mineru_base_url == "http://mineru.local:8000/"
     assert settings.mineru_api_key == "mineru-token"
     assert settings.mineru_timeout_ms == 45000
@@ -194,6 +196,7 @@ def test_settings_upload_and_mineru_defaults_when_unset(monkeypatch):
     monkeypatch.delenv("MINERU_BASE_URL", raising=False)
     monkeypatch.delenv("DOC_PARSER_ENGINE", raising=False)
     monkeypatch.delenv("DOCLING_BASE_URL", raising=False)
+    monkeypatch.delenv("EMBEDDING_VECTOR_DIMENSION", raising=False)
 
     settings = Settings()
 
@@ -209,6 +212,7 @@ def test_settings_upload_and_mineru_defaults_when_unset(monkeypatch):
     assert settings.docling_timeout_ms == 30000
     assert settings.docling_max_wait_seconds == 600
     assert settings.docling_poll_interval_seconds == 3.0
+    assert settings.embedding_vector_dimension == 1024
 
 
 def test_empty_secret_encryption_key_uses_independent_dev_default(monkeypatch):

@@ -5,7 +5,7 @@ from sqlalchemy.types import TypeDecorator, UserDefinedType
 class PgVector(UserDefinedType):
     cache_ok = True
 
-    def __init__(self, dimension: int = 1536) -> None:
+    def __init__(self, dimension: int) -> None:
         self.dimension = dimension
 
     def get_col_spec(self, **_kw) -> str:
@@ -16,7 +16,7 @@ class EmbeddingVector(TypeDecorator):
     impl = JSON
     cache_ok = True
 
-    def __init__(self, dimension: int = 1536) -> None:
+    def __init__(self, dimension: int) -> None:
         super().__init__()
         self.dimension = dimension
 

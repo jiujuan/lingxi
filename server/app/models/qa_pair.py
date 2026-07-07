@@ -1,6 +1,7 @@
 from sqlalchemy import ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from server.app.core.config import settings
 from server.app.db.base import Base, IdMixin, TimestampMixin
 from server.app.db.types import EmbeddingVector
 
@@ -34,7 +35,9 @@ class QaPair(IdMixin, TimestampMixin, Base):
     answer: Mapped[str] = mapped_column(Text, nullable=False)
     quote: Mapped[str | None] = mapped_column(Text)
     page_no: Mapped[int | None] = mapped_column(Integer)
-    question_embedding: Mapped[list | None] = mapped_column(EmbeddingVector(1536))
+    question_embedding: Mapped[list | None] = mapped_column(
+        EmbeddingVector(settings.embedding_vector_dimension)
+    )
     search_text: Mapped[str] = mapped_column(Text, default="")
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(40), default="ACTIVE")

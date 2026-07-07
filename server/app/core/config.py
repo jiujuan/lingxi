@@ -297,6 +297,13 @@ class Settings:
     embedding_batch_max_retries: int = field(
         default_factory=lambda: int(os.getenv("EMBEDDING_BATCH_MAX_RETRIES", "2"))
     )
+    # Dimension of the pgvector column storing question embeddings. Must match
+    # the default EMBEDDING model's output dimension. Changing it on an
+    # existing database requires a column migration (alembic upgrade re-runs
+    # the alignment migration) and a full re-embed of stored vectors.
+    embedding_vector_dimension: int = field(
+        default_factory=lambda: int(os.getenv("EMBEDDING_VECTOR_DIMENSION", "1024"))
+    )
     qa_split_max_batch_chars: int = field(
         default_factory=lambda: int(os.getenv("QA_SPLIT_MAX_BATCH_CHARS", "6000"))
     )
