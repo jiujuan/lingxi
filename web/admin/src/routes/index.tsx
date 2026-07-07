@@ -9,6 +9,8 @@ import { DocumentListPage } from '../features/knowledge/pages/DocumentListPage';
 import { ImportPage } from '../features/knowledge/pages/ImportPage';
 import { LogsPage } from '../features/logs/pages/LogsPage';
 import { ModelConfigPage } from '../features/model-config/pages/ModelConfigPage';
+import { DepartmentPage } from '../features/org/pages/DepartmentPage';
+import { UserPage } from '../features/org/pages/UserPage';
 import { SettingsPage } from '../features/settings/pages/SettingsPage';
 
 type Route = {
@@ -49,6 +51,18 @@ const ROUTES: Route[] = [
     label: '模型配置',
     permission: 'MODEL_CONFIG_READ',
     render: () => <ModelConfigPage />,
+  },
+  {
+    hash: '#departments',
+    label: '部门管理',
+    permission: 'USER_READ',
+    render: () => <DepartmentPage />,
+  },
+  {
+    hash: '#users',
+    label: '用户管理',
+    permission: 'USER_READ',
+    render: () => <UserPage />,
   },
   {
     hash: '#settings',

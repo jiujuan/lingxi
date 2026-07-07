@@ -253,6 +253,15 @@ label {
   font-size: 13px;
 }
 
+/* 用户管理行多一列（姓名/部门/角色/状态/创建时间/操作） */
+.table-row.user-row {
+  grid-template-columns: minmax(160px, 1.4fr) repeat(4, minmax(90px, 1fr)) auto;
+}
+
+.table-row.user-row .muted {
+  margin: 0;
+}
+
 .button-row {
   display: flex;
   gap: 8px;
