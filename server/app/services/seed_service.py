@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from server.app.core.config import settings
 from server.app.core.security import hash_password
+import server.app.db.base  # noqa: F401  (registers all models before model imports)
 from server.app.models.permission import Permission
 from server.app.models.role import Role, RolePermission, UserRole
 from server.app.models.user import Department, Tenant, User
