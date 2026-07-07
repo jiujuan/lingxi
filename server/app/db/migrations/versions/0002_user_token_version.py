@@ -14,16 +14,26 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "users",
-        sa.Column(
-            "token_version",
-            sa.Integer(),
-            nullable=False,
-            server_default="1",
-        ),
-    )
+    # 0001 builds the schema with Base.metadata.create_all() from the CURRENT
+    # models, so by the time this migration runs `users` may already carry
+    # token_version (fresh databases always do). Every add-column migration in
+    # this chain must therefore be idempotent.
+    bind = op.get_bind()
+    columns = {column["name"] for column in sa.inspect(bind).get_columns("users")}
+    if "token_version" not in columns:
+        op.add_column(
+            "users",
+            sa.Column(
+                "token_version",
+                sa.Integer(),
+                nullable=False,
+                server_default="1",
+            ),
+        )
 
 
 def downgrade() -> None:
-    op.drop_column("users", "token_version")
+    bind = op.get_bind()
+    columns = {column["name"] for column in sa.inspect(bind).get_columns("users")}
+    if "token_version" in columns:
+        op.drop_column("users", "token_version")
