@@ -5,6 +5,7 @@ import { hasPermission } from '../auth/authStore';
 import { ApiKeyPage } from '../features/api-keys/pages/ApiKeyPage';
 import { ChatPage } from '../features/chat/pages/ChatPage';
 import { DashboardPage } from '../features/dashboard/pages/DashboardPage';
+import { DocumentListPage } from '../features/knowledge/pages/DocumentListPage';
 import { ImportPage } from '../features/knowledge/pages/ImportPage';
 import { LogsPage } from '../features/logs/pages/LogsPage';
 import { ModelConfigPage } from '../features/model-config/pages/ModelConfigPage';
@@ -15,6 +16,8 @@ type Route = {
   label: string;
   permission: string;
   render: () => ReactNode;
+  /** Reachable by hash but not listed in the sidebar (entered from in-page buttons). */
+  hidden?: boolean;
 };
 
 // Each route declares the "read" permission that gates its menu entry.
@@ -30,6 +33,13 @@ const ROUTES: Route[] = [
     label: '知识库中心',
     permission: 'DOCUMENT_READ',
     render: () => <ImportPage />,
+  },
+  {
+    hash: '#documents',
+    label: '文档列表',
+    permission: 'DOCUMENT_READ',
+    render: () => <DocumentListPage />,
+    hidden: true,
   },
   { hash: '#chat', label: 'Chat', permission: 'CHAT_READ', render: () => <ChatPage /> },
   { hash: '#logs', label: '日志排障', permission: 'LOG_READ', render: () => <LogsPage /> },
@@ -49,7 +59,9 @@ const ROUTES: Route[] = [
 ];
 
 export function AppRoutes() {
-  const visibleRoutes = ROUTES.filter((route) => hasPermission(route.permission));
+  const visibleRoutes = ROUTES.filter(
+    (route) => !route.hidden && hasPermission(route.permission),
+  );
   const defaultHash = visibleRoutes[0]?.hash ?? '#dashboard';
 
   const [hash, setHash] = useState(window.location.hash || defaultHash);

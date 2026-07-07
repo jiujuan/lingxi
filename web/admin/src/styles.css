@@ -161,6 +161,12 @@ label {
   justify-content: space-between;
 }
 
+.toolbar-actions {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+}
+
 .toolbar-row.compact {
   align-items: center;
 }
