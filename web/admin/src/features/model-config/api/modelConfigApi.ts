@@ -55,6 +55,27 @@ export function testModelProvider(providerId: string) {
   );
 }
 
+export type ModelProviderUpdatePayload = {
+  name?: string;
+  baseUrl?: string;
+  /** Omit to keep the stored secret unchanged. */
+  apiKey?: string;
+  status?: string;
+};
+
+export function updateModelProvider(providerId: string, payload: ModelProviderUpdatePayload) {
+  return apiRequest<ModelProvider>(`/api/v1/model-providers/${providerId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteModelProvider(providerId: string) {
+  return apiRequest<{ ok: boolean }>(`/api/v1/model-providers/${providerId}`, {
+    method: 'DELETE',
+  });
+}
+
 export function listModelConfigs(capability?: string) {
   const query = capability ? `?capability=${encodeURIComponent(capability)}` : '';
   return apiRequest<{ data: ModelConfig[] }>(`/api/v1/model-configs${query}`);
@@ -75,5 +96,27 @@ export function createModelConfig(payload: {
 export function setDefaultModelConfig(configId: string) {
   return apiRequest<ModelConfig>(`/api/v1/model-configs/${configId}/default`, {
     method: 'PATCH',
+  });
+}
+
+export type ModelConfigUpdatePayload = {
+  modelName?: string;
+  embeddingDimension?: number;
+  maxTokens?: number;
+  timeoutMs?: number;
+  isDefault?: boolean;
+  status?: string;
+};
+
+export function updateModelConfig(configId: string, payload: ModelConfigUpdatePayload) {
+  return apiRequest<ModelConfig>(`/api/v1/model-configs/${configId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteModelConfig(configId: string) {
+  return apiRequest<{ ok: boolean }>(`/api/v1/model-configs/${configId}`, {
+    method: 'DELETE',
   });
 }

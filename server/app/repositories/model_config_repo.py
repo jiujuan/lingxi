@@ -1,4 +1,4 @@
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from server.app.models.model_config import ModelConfig, ModelProvider
@@ -66,6 +66,18 @@ class ModelConfigRepository:
             self.session.scalars(
                 statement.order_by(ModelConfig.capability, ModelConfig.created_at.desc())
             ).all()
+        )
+
+    def count_active_for_provider(self, tenant_id: str, provider_id: str) -> int:
+        return int(
+            self.session.scalar(
+                select(func.count(ModelConfig.id)).where(
+                    ModelConfig.tenant_id == tenant_id,
+                    ModelConfig.provider_id == provider_id,
+                    ModelConfig.deleted_at.is_(None),
+                )
+            )
+            or 0
         )
 
     def clear_default(self, tenant_id: str, capability: str) -> None:

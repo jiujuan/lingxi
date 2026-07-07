@@ -5,13 +5,23 @@ import { errorMessage } from '../../../api/client';
 import { queryKeys } from '../../../api/queryClient';
 import {
   ConnectionTestResult,
+  ModelConfig,
+  ModelConfigUpdatePayload,
+  ModelProvider,
+  ModelProviderUpdatePayload,
   createModelConfig,
   createModelProvider,
+  deleteModelConfig,
+  deleteModelProvider,
   listModelConfigs,
   listModelProviders,
   setDefaultModelConfig,
   testModelProvider,
+  updateModelConfig,
+  updateModelProvider,
 } from '../api/modelConfigApi';
+import { ModelConfigEditModal } from '../components/ModelConfigEditModal';
+import { ProviderEditModal } from '../components/ProviderEditModal';
 
 export function ModelConfigPage() {
   const queryClient = useQueryClient();
@@ -37,6 +47,8 @@ export function ModelConfigPage() {
   const [makeDefault, setMakeDefault] = useState(true);
   const [connectionResult, setConnectionResult] = useState<ConnectionTestResult | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [editingProvider, setEditingProvider] = useState<ModelProvider | null>(null);
+  const [editingConfig, setEditingConfig] = useState<ModelConfig | null>(null);
 
   // Default the selected provider to the first one once loaded.
   useEffect(() => {
@@ -87,6 +99,44 @@ export function ModelConfigPage() {
     onError: (err) => setNotice(errorMessage(err, '设置默认失败。')),
   });
 
+  const updateProviderMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: ModelProviderUpdatePayload }) =>
+      updateModelProvider(id, payload),
+    onSuccess: () => {
+      invalidate();
+      setNotice('供应商已更新。');
+    },
+  });
+
+  const deleteProviderMutation = useMutation({
+    mutationFn: (providerId: string) => deleteModelProvider(providerId),
+    onSuccess: (_result, providerId) => {
+      // A deleted provider must not stay selected in the create-model form.
+      setSelectedProviderId((current) => (current === providerId ? '' : current));
+      invalidate();
+      setNotice('供应商已删除。');
+    },
+    onError: (err) => setNotice(errorMessage(err, '供应商删除失败。')),
+  });
+
+  const updateConfigMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: ModelConfigUpdatePayload }) =>
+      updateModelConfig(id, payload),
+    onSuccess: () => {
+      invalidate();
+      setNotice('模型实例已更新。');
+    },
+  });
+
+  const deleteConfigMutation = useMutation({
+    mutationFn: (configId: string) => deleteModelConfig(configId),
+    onSuccess: () => {
+      invalidate();
+      setNotice('模型实例已删除。');
+    },
+    onError: (err) => setNotice(errorMessage(err, '模型实例删除失败。')),
+  });
+
   function submitProvider(event: FormEvent) {
     event.preventDefault();
     setNotice(null);
@@ -110,6 +160,21 @@ export function ModelConfigPage() {
 
   function setDefault(configId: string) {
     setDefaultMutation.mutate(configId);
+  }
+
+  function removeProvider(provider: ModelProvider) {
+    if (window.confirm(`确认删除供应商「${provider.name}」？`)) {
+      setNotice(null);
+      deleteProviderMutation.mutate(provider.id);
+    }
+  }
+
+  function removeConfig(config: ModelConfig) {
+    const defaultHint = config.isDefault ? '（当前为默认模型，删除后该能力将没有默认模型）' : '';
+    if (window.confirm(`确认删除模型实例「${config.modelName}」？${defaultHint}`)) {
+      setNotice(null);
+      deleteConfigMutation.mutate(config.id);
+    }
   }
 
   const loadFailed = providersQuery.isError || configsQuery.isError;
@@ -206,9 +271,29 @@ export function ModelConfigPage() {
               <span>{provider.providerType}</span>
               <span>{provider.secretConfigured ? 'Secret 已配置' : '未配置 Secret'}</span>
               <span>{provider.status}</span>
-              <button type="button" onClick={() => runConnectionTest(provider.id)}>
-                测试连接
-              </button>
+              <div className="button-row">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => runConnectionTest(provider.id)}
+                >
+                  测试连接
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => setEditingProvider(provider)}
+                >
+                  编辑
+                </button>
+                <button
+                  className="danger-button"
+                  type="button"
+                  onClick={() => removeProvider(provider)}
+                >
+                  删除
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -229,13 +314,53 @@ export function ModelConfigPage() {
               <span>{item.capability}</span>
               <span>{item.isDefault ? '默认' : '非默认'}</span>
               <span>{item.status}</span>
-              <button type="button" onClick={() => setDefault(item.id)}>
-                设为默认
-              </button>
+              <div className="button-row">
+                <button
+                  className="secondary-button"
+                  disabled={item.isDefault}
+                  type="button"
+                  onClick={() => setDefault(item.id)}
+                >
+                  设为默认
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => setEditingConfig(item)}
+                >
+                  编辑
+                </button>
+                <button
+                  className="danger-button"
+                  type="button"
+                  onClick={() => removeConfig(item)}
+                >
+                  删除
+                </button>
+              </div>
             </div>
           ))}
         </div>
       </section>
+
+      {editingProvider ? (
+        <ProviderEditModal
+          onClose={() => setEditingProvider(null)}
+          onSubmit={(id, payload) =>
+            updateProviderMutation.mutateAsync({ id, payload }).then(() => undefined)
+          }
+          provider={editingProvider}
+        />
+      ) : null}
+      {editingConfig ? (
+        <ModelConfigEditModal
+          config={editingConfig}
+          onClose={() => setEditingConfig(null)}
+          onSubmit={(id, payload) =>
+            updateConfigMutation.mutateAsync({ id, payload }).then(() => undefined)
+          }
+        />
+      ) : null}
     </div>
   );
 }

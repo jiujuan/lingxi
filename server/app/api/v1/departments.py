@@ -9,7 +9,7 @@ from server.app.schemas.department import (
     DepartmentResponse,
     DepartmentUpdateRequest,
 )
-from server.app.schemas.user import OkResponse
+from server.app.schemas.common import OkResponse
 from server.app.services.department_service import DepartmentService
 
 router = APIRouter(tags=["departments"])

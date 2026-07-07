@@ -1,8 +1,9 @@
+from datetime import UTC, datetime
 from time import perf_counter
 
 from sqlalchemy.orm import Session
 
-from server.app.core.errors import bad_request, not_found
+from server.app.core.errors import bad_request, conflict, not_found
 from server.app.core.ids import current_request_id
 from server.app.core.permissions import AccessContext
 from server.app.core.secrets import decrypt_secret, encrypt_secret, has_secret
@@ -90,6 +91,15 @@ class ModelConfigService:
 
     def list_providers(self, context: AccessContext) -> list[ModelProvider]:
         return self.providers.list_for_tenant(context.tenant_id)
+
+    def delete_provider(self, context: AccessContext, provider_id: str) -> None:
+        provider = self._get_provider(context.tenant_id, provider_id)
+        if self.configs.count_active_for_provider(context.tenant_id, provider.id):
+            raise conflict("PROVIDER_HAS_MODELS", "请先删除该供应商下的模型实例")
+        # Soft delete: call logs keep their provider reference and every list /
+        # runtime lookup already filters deleted_at.
+        provider.deleted_at = datetime.now(UTC)
+        self.session.commit()
 
     def test_provider_connection(
         self, context: AccessContext, provider_id: str
@@ -213,6 +223,11 @@ class ModelConfigService:
         if capability is not None:
             self._validate_capability(capability)
         return self.configs.list_for_tenant(context.tenant_id, capability)
+
+    def delete_model_config(self, context: AccessContext, config_id: str) -> None:
+        model_config = self._get_model_config(context.tenant_id, config_id)
+        model_config.deleted_at = datetime.now(UTC)
+        self.session.commit()
 
     @staticmethod
     def provider_to_dict(provider: ModelProvider) -> dict:

@@ -67,7 +67,3 @@ class AdminUserResponse(BaseModel):
 class UserListResponse(BaseModel):
     data: list[AdminUserResponse]
     pagination: PaginationResponse
-
-
-class OkResponse(BaseModel):
-    ok: bool = True

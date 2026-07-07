@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from server.app.core.permissions import AccessContext, require_permission
 from server.app.db.session import get_db
+from server.app.schemas.common import OkResponse
 from server.app.schemas.model_config import (
     ConnectionTestResponse,
     ModelConfigCreateRequest,
@@ -80,6 +81,16 @@ def update_model_provider(
     return ModelConfigService.provider_to_dict(provider)
 
 
+@router.delete("/model-providers/{provider_id}", response_model=OkResponse)
+def delete_model_provider(
+    provider_id: str,
+    context: AccessContext = Depends(require_permission("MODEL_CONFIG_WRITE")),
+    db: Session = Depends(get_db),
+) -> dict:
+    ModelConfigService(db).delete_provider(context, provider_id)
+    return {"ok": True}
+
+
 @router.post(
     "/model-providers/{provider_id}/connection-tests",
     response_model=ConnectionTestResponse,
@@ -151,6 +162,16 @@ def update_model_config(
         config=payload.config,
     )
     return ModelConfigService.model_config_to_dict(model_config)
+
+
+@router.delete("/model-configs/{config_id}", response_model=OkResponse)
+def delete_model_config(
+    config_id: str,
+    context: AccessContext = Depends(require_permission("MODEL_CONFIG_WRITE")),
+    db: Session = Depends(get_db),
+) -> dict:
+    ModelConfigService(db).delete_model_config(context, config_id)
+    return {"ok": True}
 
 
 @router.patch(

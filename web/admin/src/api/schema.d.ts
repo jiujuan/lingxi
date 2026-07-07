@@ -666,7 +666,8 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete Model Config */
+        delete: operations["delete_model_config_api_v1_model_configs__config_id__delete"];
         options?: never;
         head?: never;
         /** Update Model Config */
@@ -718,7 +719,8 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete Model Provider */
+        delete: operations["delete_model_provider_api_v1_model_providers__provider_id__delete"];
         options?: never;
         head?: never;
         /** Update Model Provider */
@@ -3592,6 +3594,37 @@ export interface operations {
             };
         };
     };
+    delete_model_config_api_v1_model_configs__config_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                config_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     update_model_config_api_v1_model_configs__config_id__patch: {
         parameters: {
             query?: never;
@@ -3698,6 +3731,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelProviderResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_model_provider_api_v1_model_providers__provider_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
                 };
             };
             /** @description Validation Error */

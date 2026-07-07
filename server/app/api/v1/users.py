@@ -3,9 +3,9 @@ from sqlalchemy.orm import Session
 
 from server.app.core.permissions import AccessContext, require_permission
 from server.app.db.session import get_db
+from server.app.schemas.common import OkResponse
 from server.app.schemas.user import (
     AdminUserResponse,
-    OkResponse,
     RoleListResponse,
     UserCreateRequest,
     UserListResponse,
