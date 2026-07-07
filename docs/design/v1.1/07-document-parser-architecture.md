@@ -1,7 +1,7 @@
-# 灵犀（Lingxi）文档解析架构设计 —— 可插拔解析器与 MinerU 集成
+# 灵犀（Lingxi）文档解析架构设计 —— 可插拔解析器与 MinerU / Docling 集成
 
 > 版本：V1.1
-> 日期：2026-07-07
+> 日期：2026-07-07（同日追加 §十二 Docling 双引擎）
 > 范围：`server/app/integrations/parsers/`、上传校验（`import_service`）、解析任务（`document_parse_service`）、健康检查、前端上传面板
 > 关联：[01-technical-architecture.md](./01-technical-architecture.md)、[analysis/llamaindex-comparison.md](./analysis/llamaindex-comparison.md)（本设计落实其"补 PDF 摄取"建议）
 
@@ -68,6 +68,7 @@ class ParserAdapter:
 | LIGHTWEIGHT | `{lineStart, lineEnd}` | 原文行号，1-based |
 | CSV | `{rowStart, rowEnd}` | 物理 CSV 行号，表头为第 1 行 |
 | MINERU | `{pageNo, blockIndex}` | 页码（page_idx+1）+ content_list 序号 |
+| DOCLING | `{pageNo, blockIndex, selfRef}` | 页码（prov.page_no）+ body 树遍历序号 + DoclingDocument 自引用（如 `#/texts/2`） |
 
 引用溯源（`citation → chunk → source_locator`）按 `Document.parser_name` 解释 locator。
 
@@ -82,13 +83,14 @@ class ParserAdapter:
 | .md / .markdown | LIGHTWEIGHT | MARKDOWN | 恒可用 |
 | .txt | LIGHTWEIGHT | TEXT | 恒可用 |
 | .csv | CSV | CSV | 恒可用 |
-| .pdf | MINERU | PDF | `MINERU_BASE_URL` 已配置 |
-| .docx | MINERU | WORD | 同上 |
-| .pptx | MINERU | PPT | 同上 |
-| .xlsx | MINERU | EXCEL | 同上 |
-| .png / .jpg / .jpeg | MINERU | IMAGE | 同上 |
+| .pdf | MINERU / DOCLING | PDF | 对应引擎已配置 |
+| .docx | MINERU / DOCLING | WORD | 同上 |
+| .pptx | MINERU / DOCLING | PPT | 同上 |
+| .xlsx | MINERU / DOCLING | EXCEL | 同上 |
+| .png / .jpg / .jpeg | MINERU / DOCLING | IMAGE | 同上 |
+| .html / .htm | DOCLING（独占） | HTML | `DOCLING_BASE_URL` 已配置且引擎未锁定为 mineru |
 
-链上顺序 `Lightweight → Csv → MinerU`，取第一个 `supports()` 命中者；当前各解析器扩展名互斥，顺序仅表达优先级约定。旧版 office 格式（.doc/.ppt/.xls）不受理——MinerU 仅支持 OOXML。
+链上顺序 `Lightweight → Csv → 重型引擎`，取第一个 `supports()` 命中者。自 Docling 接入后，两个重型引擎的扩展名**存在重叠，链序开始承载语义**：`auto` 模式下 MinerU 在前，共有格式全部归 MinerU，Docling 只接收其独占的 .html/.htm（详见 §十二）。旧版 office 格式（.doc/.ppt/.xls）不受理——两个引擎均仅支持 OOXML。
 
 ## 五、上传白名单策略
 
@@ -149,16 +151,23 @@ worker 通过 HTTP 调用自部署的 `mineru-api`（单实例）或 `mineru-rou
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
 | `UPLOAD_ALLOWED_EXTENSIONS` | （未设置） | 见 §5，只能收紧 |
+| `DOC_PARSER_ENGINE` | `auto` | 重型引擎选择：auto / mineru / docling（见 §十二） |
 | `MINERU_BASE_URL` | 空（禁用） | mineru-api / mineru-router 地址 |
 | `MINERU_API_KEY` | 空 | 可选 Bearer（auth 代理场景） |
 | `MINERU_TIMEOUT_MS` | 30000 | 单次 HTTP 调用超时（轮询类调用） |
 | `MINERU_MAX_WAIT_SECONDS` | 600 | 单文档解析整体截止时间 |
 | `MINERU_POLL_INTERVAL_SECONDS` | 3.0 | 任务轮询间隔 |
 | `MINERU_BACKEND` / `MINERU_LANG` | 空 | 透传给 mineru-api 的可选表单字段 |
+| `DOCLING_BASE_URL` | 空（禁用） | docling-serve 地址（默认端口 5001） |
+| `DOCLING_API_KEY` | 空 | 以 `X-Api-Key` 头发送（服务端设 `DOCLING_SERVE_API_KEY` 时必填） |
+| `DOCLING_TIMEOUT_MS` | 30000 | 单次 HTTP 调用超时 |
+| `DOCLING_MAX_WAIT_SECONDS` | 600 | 单文档解析整体截止时间 |
+| `DOCLING_POLL_INTERVAL_SECONDS` | 3.0 | 长轮询 `wait` 参数与客户端节奏 |
+| `DOCLING_DO_OCR` / `DOCLING_OCR_LANG` / `DOCLING_PDF_BACKEND` | 空 | 透传给 docling-serve 的可选表单字段 |
 
 ## 九、健康检查与可观测性
 
-- `GET /health` 新增 `mineru` 检查：未配置 → `"unconfigured"`（不参与整体状态计算）；已配置 → `GET {base}/health`（1s 超时）→ `up`/`down`。**mineru down 只产生 `degraded`，永不 503**——解析降级为可重试的任务失败，不应影响 API 就绪性（与 redis 规则一致）；
+- `GET /health` 新增 `mineru` 与 `docling` 检查：未配置 → `"unconfigured"`（不参与整体状态计算）；已配置 → `GET {base}/health`（1s 超时，docling 带 `X-Api-Key`）→ `up`/`down`。**引擎 down 只产生 `degraded`，永不 503**——解析降级为可重试的任务失败，不应影响 API 就绪性（与 redis 规则一致）。探针按配置驱动而非按 engine 选择驱动：停用某引擎时应同时清掉其 `*_BASE_URL`，否则其探针仍参与 degraded 判定；
 - 解析失败细节照旧落 `TaskRun.error`（code/message/retryable/failedAt），经 `/logs/task-runs` 可查；
 - 顺带修复：`DocumentChunk.token_count` 由 `len(content.split())`（中文整段算 1）改为 CJK 感知统计（每汉字 1 token、每字母数字连串 1 token）。QA 拆分与嵌入阶段的同类统计本期未动，列入已知问题。
 
@@ -179,3 +188,48 @@ worker 通过 HTTP 调用自部署的 `mineru-api`（单实例）或 `mineru-rou
 - `qa_split_service`/`embedding_service` 中的 `.split()` 计数与 `token_count` 语义统一；
 - 上传面板从 `filePolicy.allowedExtensions` 动态拉取白名单（当前为前端硬编码 + 服务端权威校验）；
 - `SettingsService` 的 filePolicy 仅展示、不参与校验（既有行为，未改动）。
+
+## 十二、Docling 集成与引擎选择（2026-07-07 追加）
+
+### 部署形态与客户端契约
+
+第二重型引擎 [Docling](https://github.com/docling-project/docling) 通过 HTTP 调自部署的 [docling-serve](https://github.com/docling-project/docling-serve)（stable v1 API），与 MinerU 接入形态一致，共享 `parsers/_http.py` 的 `RetryingHttpClient` 底座（重试/退避/错误归一化——**retryable 语义是与 Celery 重试管道的契约，单点维护**）。
+
+`DoclingClient` **一律走异步端点**（同步端点有约 2 分钟服务端超时，大文档必超）：
+
+```
+POST /v1/convert/file/async     multipart：files + to_formats=md&to_formats=json
+                                + image_export_mode=placeholder（防图片 base64 内联撑爆 ParseArtifact）
+                                + 可选 do_ocr / ocr_lang / pdf_backend 透传
+GET  /v1/status/poll/{task_id}?wait=N    长轮询；客户端单次超时 = timeout + poll_interval
+                                          （服务端会挂住连接 wait 秒，普通超时会误报）
+GET  /v1/result/{task_id}       → {"document": {"md_content", "json_content"}, "status", "errors"}
+```
+
+`_extract_task_id` / `_extract_result` 是 docling-serve 版本包络漂移的唯一改动点（对应 MinerU 的同名方法）。认证用 `X-Api-Key` 头（服务端 `DOCLING_SERVE_API_KEY`）。失败语义矩阵与 MinerU **完全一致**（§七的五个错误码），Celery 层对两个引擎的重试行为无差别。
+
+### DoclingDocument → blocks 映射
+
+优先用 `json_content`（DoclingDocument）建块，按 `body.children` 的 `$ref` 树序遍历（visited 集合防不可信 JSON 成环；groups 递归；不递归 table/picture 的子引用防 caption 双发）：
+
+- `title` → 面包屑根；`section_header.level` → 面包屑深度（均不出块，与 markdown 切块器一致）；
+- `text` / `list_item` / `code` / `formula` → 文本块；**未知 label 有文本也出块**（label 词表漂移防护）；
+- 防御性跳过 `page_header` / `page_footer` / `footnote` / 独立 `caption`（caption 经所属对象的 captions 引用附着）；
+- `table` → 由 `data.grid` 合成 markdown 表格（竖线转义、空白折叠），caption 前置；
+- `picture` → 解析 captions 引用 → `[图片] {caption}`；无 caption 跳过并聚合 warning（同 MinerU D4）；
+- `page_no = prov[0].page_no`（已 1-based，HTML 等无分页格式为 null）；locator `{pageNo, blockIndex, selfRef}`。
+
+回退与 MinerU 镜像：json_content 缺 → markdown 切分 + warning；md_content 缺 → `markdown_from_blocks` 合成 + warning；均缺 → `PARSER_RESPONSE_INVALID`。
+
+### 引擎选择语义（`DOC_PARSER_ENGINE`）
+
+| 取值 | 注册的重型解析器 | 行为 |
+|---|---|---|
+| `auto`（默认） | MinerU, Docling（此序） | 谁配置了 `*_BASE_URL` 用谁；**都配置时链序决定：共有格式（pdf/docx/pptx/xlsx/图片）全归 MinerU，Docling 只接收独占的 .html/.htm** |
+| `mineru` | 仅 MinerU | Docling 即使配置了也不注册，.html/.htm 不进白名单 |
+| `docling` | 仅 Docling | 全部重型格式（含共有七种 + html）归 Docling |
+| 其他值 | 同 auto | warn-once 日志后按 auto 处理（注册表在上传门逐请求执行，typo 不应变成全量 500） |
+
+**要点**：想让 Docling 解析 PDF，必须显式 `DOC_PARSER_ENGINE=docling`——auto 下 MinerU 优先是有意为之（中文文档解析质量优先、保持既有部署行为不变）。未配置引擎的格式照旧被上传门 415 拒绝，机制未变。停用某引擎时应同时清空其 `*_BASE_URL`（健康探针按配置驱动，见 §九）。
+
+部署指南：[docs/deployment/docling-local.md](../../deployment/docling-local.md)。

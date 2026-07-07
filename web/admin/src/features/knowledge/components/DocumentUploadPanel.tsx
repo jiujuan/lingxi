@@ -25,6 +25,8 @@ const ALLOWED_SUFFIXES = [
   '.png',
   '.jpg',
   '.jpeg',
+  '.html',
+  '.htm',
 ];
 
 export function DocumentUploadPanel({ onUploaded }: Props) {
@@ -99,8 +101,8 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
       <div>
         <h3>上传文档</h3>
         <p className="muted">
-          支持 Markdown、TXT、CSV，以及 PDF、Word、PPT、Excel、图片（需服务端配置
-          MinerU 解析服务）。上传后自动进入解析、QA 拆分和向量化链路。
+          支持 Markdown、TXT、CSV，以及 PDF、Word、PPT、Excel、图片、HTML（需服务端配置
+          MinerU 或 Docling 解析服务）。上传后自动进入解析、QA 拆分和向量化链路。
         </p>
       </div>
       <label>

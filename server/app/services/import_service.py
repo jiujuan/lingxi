@@ -375,6 +375,8 @@ class ImportService:
             ".pptx": "PPT",
             ".xls": "EXCEL",
             ".xlsx": "EXCEL",
+            ".html": "HTML",
+            ".htm": "HTML",
             ".png": "IMAGE",
             ".jpg": "IMAGE",
             ".jpeg": "IMAGE",

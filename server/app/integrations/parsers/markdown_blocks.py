@@ -55,3 +55,19 @@ def split_markdown_blocks(markdown: str) -> list[ParsedBlock]:
 
     flush(len(markdown.splitlines()))
     return blocks
+
+
+def markdown_from_blocks(blocks: list[ParsedBlock]) -> str:
+    """Synthesize a markdown artifact from structured blocks — used by heavy
+    parsers when the service returned structured content but no markdown."""
+    lines: list[str] = []
+    emitted_path: list[str] = []
+    for block in blocks:
+        if block.title_path != emitted_path:
+            for depth, title in enumerate(block.title_path, start=1):
+                if depth > len(emitted_path) or emitted_path[depth - 1] != title:
+                    lines.append("#" * depth + " " + title)
+            emitted_path = list(block.title_path)
+        lines.append(block.content)
+        lines.append("")
+    return "\n".join(lines).strip()

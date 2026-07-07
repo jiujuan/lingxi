@@ -13,9 +13,8 @@ from dataclasses import dataclass
 import json
 import time
 
-import httpx
-
 from server.app.core.config import settings
+from server.app.integrations.parsers._http import RetryingHttpClient
 from server.app.integrations.parsers.base import (
     ParsedBlock,
     ParsedDocument,
@@ -23,9 +22,11 @@ from server.app.integrations.parsers.base import (
     ParserAdapter,
     ParserError,
 )
-from server.app.integrations.parsers.markdown_blocks import split_markdown_blocks
+from server.app.integrations.parsers.markdown_blocks import (
+    markdown_from_blocks,
+    split_markdown_blocks,
+)
 
-_RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504}
 _TASK_SUCCESS_STATES = {"done", "completed", "success", "succeeded", "finished"}
 _TASK_FAILURE_STATES = {"failed", "error", "cancelled"}
 
@@ -36,7 +37,9 @@ class MinerUResult:
     content_list: list[dict] | None
 
 
-class MinerUClient:
+class MinerUClient(RetryingHttpClient):
+    service_label = "MinerU"
+
     def __init__(
         self,
         base_url: str | None,
@@ -49,14 +52,16 @@ class MinerUClient:
         lang: str | None = None,
         max_retries: int = 2,
     ) -> None:
-        self.base_url = (base_url or "").rstrip("/") or None
-        self.api_key = api_key
-        self.timeout_seconds = max(1.0, timeout_ms / 1000)
-        self.poll_interval_seconds = max(0.1, poll_interval_seconds)
-        self.max_wait_seconds = max(1, max_wait_seconds)
+        super().__init__(
+            base_url,
+            api_key,
+            timeout_ms=timeout_ms,
+            poll_interval_seconds=poll_interval_seconds,
+            max_wait_seconds=max_wait_seconds,
+            max_retries=max_retries,
+        )
         self.backend = backend
         self.lang = lang
-        self.max_retries = max(0, max_retries)
 
     @classmethod
     def from_settings(cls) -> "MinerUClient":
@@ -70,9 +75,10 @@ class MinerUClient:
             lang=settings.mineru_lang,
         )
 
-    @property
-    def configured(self) -> bool:
-        return bool(self.base_url)
+    def _headers(self) -> dict[str, str]:
+        if self.api_key:
+            return {"Authorization": f"Bearer {self.api_key}"}
+        return {}
 
     def parse_file(self, file_name: str, content: bytes, mime_type: str) -> MinerUResult:
         if not self.configured:
@@ -99,74 +105,6 @@ class MinerUClient:
         if task_id is not None:
             payload = self._poll_task(task_id, deadline)
         return self._extract_result(payload)
-
-    # -- HTTP plumbing ---------------------------------------------------------
-
-    def _headers(self) -> dict[str, str]:
-        if self.api_key:
-            return {"Authorization": f"Bearer {self.api_key}"}
-        return {}
-
-    def _request_json(
-        self,
-        method: str,
-        url: str,
-        *,
-        timeout_seconds: float,
-        data: dict | None = None,
-        files: dict | None = None,
-    ) -> dict:
-        last_error: ParserError | None = None
-        for attempt in range(self.max_retries + 1):
-            try:
-                with httpx.Client(timeout=timeout_seconds) as client:
-                    response = client.request(
-                        method, url, headers=self._headers(), data=data, files=files
-                    )
-                if response.status_code in _RETRYABLE_STATUS:
-                    last_error = ParserError(
-                        "PARSER_UNAVAILABLE",
-                        f"MinerU 服务返回 HTTP {response.status_code}",
-                        retryable=True,
-                    )
-                    if attempt < self.max_retries:
-                        self._sleep_backoff(attempt)
-                        continue
-                    raise last_error
-                if response.status_code >= 400:
-                    raise ParserError(
-                        "PARSER_REQUEST_ERROR",
-                        f"MinerU 服务拒绝请求 HTTP {response.status_code}",
-                        retryable=False,
-                    )
-                try:
-                    payload = response.json()
-                except (ValueError, json.JSONDecodeError) as exc:
-                    raise ParserError(
-                        "PARSER_RESPONSE_INVALID", "MinerU 返回非 JSON 响应"
-                    ) from exc
-                if not isinstance(payload, dict):
-                    raise ParserError(
-                        "PARSER_RESPONSE_INVALID", "MinerU 返回了非预期的响应结构"
-                    )
-                return payload
-            except (httpx.TimeoutException, httpx.TransportError) as exc:
-                last_error = ParserError(
-                    "PARSER_UNAVAILABLE",
-                    f"MinerU 服务连接失败：{exc}",
-                    retryable=True,
-                )
-                if attempt < self.max_retries:
-                    self._sleep_backoff(attempt)
-                    continue
-                raise last_error from exc
-        raise last_error or ParserError(
-            "PARSER_UNAVAILABLE", "MinerU 服务不可用", retryable=True
-        )
-
-    @staticmethod
-    def _sleep_backoff(attempt: int) -> None:
-        time.sleep(min(8.0, 0.5 * (2**attempt)))
 
     # -- Task polling ----------------------------------------------------------
 
@@ -300,7 +238,7 @@ class MinerUParser(ParserAdapter):
             warnings.extend(block_warnings)
             markdown = result.markdown
             if markdown is None:
-                markdown = self._markdown_from_blocks(blocks)
+                markdown = markdown_from_blocks(blocks)
                 warnings.append("MinerU 未返回 markdown，已由结构化内容合成")
         else:
             markdown = result.markdown or ""
@@ -381,17 +319,3 @@ class MinerUParser(ParserAdapter):
         if skipped_images:
             warnings.append(f"跳过 {skipped_images} 张无描述图片")
         return blocks, page_count, warnings
-
-    @staticmethod
-    def _markdown_from_blocks(blocks: list[ParsedBlock]) -> str:
-        lines: list[str] = []
-        emitted_path: list[str] = []
-        for block in blocks:
-            if block.title_path != emitted_path:
-                for depth, title in enumerate(block.title_path, start=1):
-                    if depth > len(emitted_path) or emitted_path[depth - 1] != title:
-                        lines.append("#" * depth + " " + title)
-                emitted_path = list(block.title_path)
-            lines.append(block.content)
-            lines.append("")
-        return "\n".join(lines).strip()

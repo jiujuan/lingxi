@@ -8,6 +8,10 @@ def test_health_check_returns_request_id():
     assert response.status_code == 200
     assert response.json()["status"] in ("ok", "degraded")
     assert response.json()["checks"]["db"] == "up"
+    # Parser engines are optional: absent config must read "unconfigured" and
+    # stay out of the status calculation.
+    assert response.json()["checks"]["mineru"] in ("unconfigured", "up", "down")
+    assert response.json()["checks"]["docling"] in ("unconfigured", "up", "down")
     assert response.json()["requestId"]
     assert response.headers["x-request-id"] == response.json()["requestId"]
 

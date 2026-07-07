@@ -3,6 +3,7 @@ import json
 import httpx
 import pytest
 
+from server.app.integrations.parsers import _http as http_module
 from server.app.integrations.parsers import mineru as mineru_module
 from server.app.integrations.parsers.base import ParseRequest, ParseSource, ParserError
 from server.app.integrations.parsers.mineru import MinerUClient, MinerUParser
@@ -15,8 +16,10 @@ def _patch_transport(monkeypatch, handler):
         kwargs["transport"] = httpx.MockTransport(handler)
         return real_client(*args, **kwargs)
 
-    monkeypatch.setattr(mineru_module.httpx, "Client", factory)
-    monkeypatch.setattr(mineru_module.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(http_module.httpx, "Client", factory)
+    # Covers both backoff sleeps (_http) and poll-interval sleeps (clients) —
+    # the modules share the global time module object.
+    monkeypatch.setattr(http_module.time, "sleep", lambda *_: None)
 
 
 def _client(**overrides) -> MinerUClient:

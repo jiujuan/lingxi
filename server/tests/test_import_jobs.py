@@ -230,6 +230,8 @@ def test_file_type_mapping_covers_new_formats():
     assert ImportService._file_type("a.docx") == "WORD"
     assert ImportService._file_type("a.pptx") == "PPT"
     assert ImportService._file_type("a.xlsx") == "EXCEL"
+    assert ImportService._file_type("a.html") == "HTML"
+    assert ImportService._file_type("a.htm") == "HTML"
     assert ImportService._file_type("a.JPG") == "IMAGE"
     assert ImportService._file_type("a.unknown") == "UNKNOWN"
 

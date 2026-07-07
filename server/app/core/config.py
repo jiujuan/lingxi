@@ -200,6 +200,37 @@ class Settings:
     mineru_lang: str | None = field(
         default_factory=lambda: os.getenv("MINERU_LANG") or None
     )
+    # Heavy-parser engine selection: "auto" registers both MinerU and Docling
+    # (MinerU first), "mineru"/"docling" registers only that engine.
+    doc_parser_engine: str = field(
+        default_factory=lambda: os.getenv("DOC_PARSER_ENGINE", "auto")
+    )
+    docling_base_url: str | None = field(
+        default_factory=lambda: os.getenv("DOCLING_BASE_URL") or None
+    )
+    docling_api_key: str | None = field(
+        default_factory=lambda: os.getenv("DOCLING_API_KEY") or None
+    )
+    docling_timeout_ms: int = field(
+        default_factory=lambda: int(os.getenv("DOCLING_TIMEOUT_MS", "30000"))
+    )
+    docling_max_wait_seconds: int = field(
+        default_factory=lambda: int(os.getenv("DOCLING_MAX_WAIT_SECONDS", "600"))
+    )
+    docling_poll_interval_seconds: float = field(
+        default_factory=lambda: float(
+            os.getenv("DOCLING_POLL_INTERVAL_SECONDS", "3.0")
+        )
+    )
+    docling_do_ocr: str | None = field(
+        default_factory=lambda: os.getenv("DOCLING_DO_OCR") or None
+    )
+    docling_ocr_lang: str | None = field(
+        default_factory=lambda: os.getenv("DOCLING_OCR_LANG") or None
+    )
+    docling_pdf_backend: str | None = field(
+        default_factory=lambda: os.getenv("DOCLING_PDF_BACKEND") or None
+    )
     jwt_secret_key: str = field(
         default_factory=lambda: os.getenv("JWT_SECRET_KEY", DEV_JWT_SECRET_DEFAULT)
     )

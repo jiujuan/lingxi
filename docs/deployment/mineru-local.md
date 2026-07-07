@@ -21,10 +21,14 @@ Lingxi 通过 HTTP 调用自部署的 `mineru-api` 完成 PDF / Word / PPT / Exc
 python -m venv D:\envs\mineru
 D:\envs\mineru\Scripts\Activate.ps1
 
-# 国内镜像安装（mineru[all] 自带 CPU 版 torch）
+# 国内镜像安装（mineru[all] 自带 CPU 版 torch），安装 MinerU 全量包（包含所有核心功能与推理支持）
 pip install --upgrade pip uv -i https://mirrors.aliyun.com/pypi/simple
 uv pip install -U "mineru[all]" -i https://mirrors.aliyun.com/pypi/simple
 ```
+
+（注：如果仅需在无 CUDA 的轻量级设备/Mac 上作为客户端或 CPU 运行，可将 `[all]` 替换为 `[core]`）
+
+
 
 有 NVIDIA 显卡（显存 ≥ 6GB）需要 GPU 加速时，另装 CUDA 版 torch（以 CUDA 12.8 为例）：
 

@@ -63,7 +63,12 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     def health(db: Session = Depends(get_db)) -> JSONResponse:
-        checks = {"db": _check_db(db), "redis": _check_redis(), "mineru": _check_mineru()}
+        checks = {
+            "db": _check_db(db),
+            "redis": _check_redis(),
+            "mineru": _check_mineru(),
+            "docling": _check_docling(),
+        }
         db_up = checks["db"] == "up"
         # "unconfigured" services are excluded from the status calculation.
         gating = [state for state in checks.values() if state != "unconfigured"]
@@ -124,6 +129,23 @@ def _check_mineru() -> str:
         import httpx
 
         response = httpx.get(f"{base_url}/health", timeout=1.0)
+        return "up" if response.status_code < 500 else "down"
+    except Exception:
+        return "down"
+
+
+def _check_docling() -> str:
+    # Same rule as MinerU: down degrades parsing only, never API readiness.
+    base_url = (settings.docling_base_url or "").rstrip("/")
+    if not base_url:
+        return "unconfigured"
+    try:
+        import httpx
+
+        headers = (
+            {"X-Api-Key": settings.docling_api_key} if settings.docling_api_key else {}
+        )
+        response = httpx.get(f"{base_url}/health", headers=headers, timeout=1.0)
         return "up" if response.status_code < 500 else "down"
     except Exception:
         return "down"

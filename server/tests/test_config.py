@@ -137,6 +137,15 @@ def test_settings_read_runtime_and_seed_values_from_environment(monkeypatch):
     monkeypatch.setenv("MINERU_POLL_INTERVAL_SECONDS", "1.5")
     monkeypatch.setenv("MINERU_BACKEND", "pipeline")
     monkeypatch.setenv("MINERU_LANG", "ch")
+    monkeypatch.setenv("DOC_PARSER_ENGINE", "docling")
+    monkeypatch.setenv("DOCLING_BASE_URL", "http://docling.local:5001/")
+    monkeypatch.setenv("DOCLING_API_KEY", "docling-token")
+    monkeypatch.setenv("DOCLING_TIMEOUT_MS", "20000")
+    monkeypatch.setenv("DOCLING_MAX_WAIT_SECONDS", "240")
+    monkeypatch.setenv("DOCLING_POLL_INTERVAL_SECONDS", "2.5")
+    monkeypatch.setenv("DOCLING_DO_OCR", "true")
+    monkeypatch.setenv("DOCLING_OCR_LANG", "zh")
+    monkeypatch.setenv("DOCLING_PDF_BACKEND", "dlparse_v4")
     monkeypatch.setenv("SECRET_ENCRYPTION_KEY", "secret-envelope-key")
     monkeypatch.setenv("SEED_ADMIN_EMAIL", "root@example.com")
     monkeypatch.setenv("SEED_ADMIN_PASSWORD", "Root123!")
@@ -164,6 +173,15 @@ def test_settings_read_runtime_and_seed_values_from_environment(monkeypatch):
     assert settings.mineru_poll_interval_seconds == 1.5
     assert settings.mineru_backend == "pipeline"
     assert settings.mineru_lang == "ch"
+    assert settings.doc_parser_engine == "docling"
+    assert settings.docling_base_url == "http://docling.local:5001/"
+    assert settings.docling_api_key == "docling-token"
+    assert settings.docling_timeout_ms == 20000
+    assert settings.docling_max_wait_seconds == 240
+    assert settings.docling_poll_interval_seconds == 2.5
+    assert settings.docling_do_ocr == "true"
+    assert settings.docling_ocr_lang == "zh"
+    assert settings.docling_pdf_backend == "dlparse_v4"
     assert settings.secret_encryption_key == "secret-envelope-key"
     assert settings.seed_admin_email == "root@example.com"
     assert settings.seed_admin_password == "Root123!"
@@ -174,6 +192,8 @@ def test_settings_read_runtime_and_seed_values_from_environment(monkeypatch):
 def test_settings_upload_and_mineru_defaults_when_unset(monkeypatch):
     monkeypatch.delenv("UPLOAD_ALLOWED_EXTENSIONS", raising=False)
     monkeypatch.delenv("MINERU_BASE_URL", raising=False)
+    monkeypatch.delenv("DOC_PARSER_ENGINE", raising=False)
+    monkeypatch.delenv("DOCLING_BASE_URL", raising=False)
 
     settings = Settings()
 
@@ -184,6 +204,11 @@ def test_settings_upload_and_mineru_defaults_when_unset(monkeypatch):
     assert settings.mineru_timeout_ms == 30000
     assert settings.mineru_max_wait_seconds == 600
     assert settings.mineru_poll_interval_seconds == 3.0
+    assert settings.doc_parser_engine == "auto"
+    assert settings.docling_base_url is None
+    assert settings.docling_timeout_ms == 30000
+    assert settings.docling_max_wait_seconds == 600
+    assert settings.docling_poll_interval_seconds == 3.0
 
 
 def test_empty_secret_encryption_key_uses_independent_dev_default(monkeypatch):
