@@ -232,6 +232,9 @@ class Settings:
             os.getenv("RETRIEVAL_SNAPSHOT_MAX_ITEMS_PER_STAGE", "10")
         )
     )
+    jieba_user_dict_path: str | None = field(
+        default_factory=lambda: os.getenv("JIEBA_USER_DICT_PATH") or None
+    )
     embedding_batch_size: int = field(
         default_factory=lambda: int(os.getenv("EMBEDDING_BATCH_SIZE", "64"))
     )

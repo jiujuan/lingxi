@@ -33,6 +33,18 @@ class EmbeddingServiceError(Exception):
     retryable: bool = True
 
 
+def build_search_text(tokenizer: SearchTextTokenizer, qa_pair: QaPair) -> str:
+    """Compose the FTS document for a QA pair. Shared with the backfill
+    script (``server.scripts.backfill_search_text``) so index rebuilds use
+    the exact composition the embedding path wrote."""
+    source = " ".join(
+        item
+        for item in [qa_pair.question, qa_pair.answer, qa_pair.quote or ""]
+        if item
+    )
+    return tokenizer.to_search_text(source)
+
+
 class EmbeddingService:
     def __init__(
         self,
@@ -99,7 +111,7 @@ class EmbeddingService:
 
             for qa_pair, vector in zip(qa_pairs, vectors, strict=True):
                 qa_pair.question_embedding = vector
-                qa_pair.search_text = self._build_search_text(qa_pair)
+                qa_pair.search_text = build_search_text(self.tokenizer, qa_pair)
                 qa_pair.token_count = len(qa_pair.search_text.split())
                 qa_pair.status = "ACTIVE"
 
@@ -228,14 +240,6 @@ class EmbeddingService:
                     "EMBEDDING_DIMENSION_MISMATCH",
                     "Embedding 向量维度与模型配置不一致",
                 )
-
-    def _build_search_text(self, qa_pair: QaPair) -> str:
-        source = " ".join(
-            item
-            for item in [qa_pair.question, qa_pair.answer, qa_pair.quote or ""]
-            if item
-        )
-        return self.tokenizer.to_search_text(source)
 
     def _count_chunks(self, document_id: str) -> int:
         return int(

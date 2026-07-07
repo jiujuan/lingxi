@@ -94,7 +94,7 @@ def test_jieba_tokenizer_generates_search_text():
 
     search_text = JiebaTokenizer().to_search_text("退款 SOP 2026")
 
-    assert search_text == "退 款 sop 2026"
+    assert search_text == "退款 sop 2026"
 
 
 def test_embedding_service_writes_vectors_search_text_and_ready_idempotently():
@@ -130,7 +130,7 @@ def test_embedding_service_writes_vectors_search_text_and_ready_idempotently():
     assert job.progress == 100
     assert len(qa_pairs) == 2
     assert len(qa_pairs[0].question_embedding) == 4
-    assert "退 款" in qa_pairs[0].search_text
+    assert "退款" in qa_pairs[0].search_text
     assert all(item.status == "ACTIVE" for item in qa_pairs)
     assert all(task.status == "SUCCESS" for task in task_runs)
 

@@ -118,7 +118,7 @@ def seed_document_center_data(SessionLocal):
                 quote="退款需要主管审批。",
                 page_no=1,
                 question_embedding=[0.1, 0.2, 0.3, 0.4],
-                search_text="退 款 需 要 主 管 审 批",
+                search_text="退款 需要 主管 审批",
                 status="ACTIVE",
             )
         )

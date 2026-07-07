@@ -62,7 +62,7 @@ def _seed_retrieval_dataset(session, identity):
             quote="退款需要主管审批。",
             page_no=1,
             question_embedding=[1.0, 0.0, 0.0, 0.0],
-            search_text="退 款 需 要 主 管 审 批",
+            search_text="退款 需要 主管 审批",
             status="ACTIVE",
         ),
         QaPair(
@@ -74,7 +74,7 @@ def _seed_retrieval_dataset(session, identity):
             quote="已开票订单需先红冲发票。",
             page_no=2,
             question_embedding=[0.8, 0.2, 0.0, 0.0],
-            search_text="已 开 票 订 单 退 款 前 红 冲 发 票",
+            search_text="已 开票 订单 退款 前 红冲 发票",
             status="ACTIVE",
         ),
         QaPair(
@@ -86,7 +86,7 @@ def _seed_retrieval_dataset(session, identity):
             quote="工资表在财务私有目录。",
             page_no=1,
             question_embedding=[1.0, 0.0, 0.0, 0.0],
-            search_text="工 资 表 财 务 私 有",
+            search_text="工资 表 财务 私有",
             status="ACTIVE",
         ),
     ]

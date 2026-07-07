@@ -4,6 +4,7 @@ celery
 cryptography
 fastapi
 httpx
+jieba==0.42.1
 python-jose
 psycopg[binary]
 python-multipart
