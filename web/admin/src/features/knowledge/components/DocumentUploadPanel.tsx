@@ -30,7 +30,8 @@ const ALLOWED_SUFFIXES = [
 ];
 
 export function DocumentUploadPanel({ onUploaded }: Props) {
-  const [title, setTitle] = useState('退款流程 SOP');
+  const [title, setTitle] = useState('');
+  const [titleEdited, setTitleEdited] = useState(false);
   const [allAuthenticated, setAllAuthenticated] = useState(true);
   const [departmentIds, setDepartmentIds] = useState('');
   const [roleIds, setRoleIds] = useState('');
@@ -39,6 +40,20 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  function applyFile(next: File | null) {
+    setFile(next);
+    // 自动把文件名（去扩展名）填入标题；用户手动改过标题则不覆盖
+    if (next && !titleEdited) {
+      setTitle(next.name.replace(/\.[^.]+$/, ''));
+    }
+  }
+
+  function handleTitleChange(value: string) {
+    setTitle(value);
+    // 清空标题视为放弃手动输入，下次选文件时恢复自动填充
+    setTitleEdited(value.trim() !== '');
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -107,20 +122,24 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
       </div>
       <label>
         文档标题
-        <input value={title} onChange={(event) => setTitle(event.target.value)} />
+        <input
+          onChange={(event) => handleTitleChange(event.target.value)}
+          placeholder="留空则自动使用上传文件名"
+          value={title}
+        />
       </label>
       <label
         className="drop-zone"
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => {
           event.preventDefault();
-          setFile(event.dataTransfer.files[0] ?? null);
+          applyFile(event.dataTransfer.files[0] ?? null);
         }}
       >
         <span>{file ? file.name : '拖拽文件到这里，或点击选择文件'}</span>
         <input
           accept={ALLOWED_SUFFIXES.join(',')}
-          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          onChange={(event) => applyFile(event.target.files?.[0] ?? null)}
           type="file"
         />
       </label>
