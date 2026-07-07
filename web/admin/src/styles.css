@@ -28,7 +28,8 @@ button {
   background: #2563eb;
   color: #ffffff;
   cursor: pointer;
-  padding: 10px 14px;
+  /* 6px vertical padding ≈ 80% of the former 10px-padding button height */
+  padding: 6px 14px;
 }
 
 .secondary-button {
@@ -40,7 +41,7 @@ button {
   background: #eef4ff;
   border-radius: 6px;
   color: #1d4ed8;
-  padding: 8px 10px;
+  padding: 5px 10px;
   text-decoration: none;
 }
 
@@ -723,7 +724,7 @@ label {
 }
 
 .chat-message-actions button {
-  padding: 6px 10px;
+  padding: 3px 10px;
 }
 
 .chat-composer {
