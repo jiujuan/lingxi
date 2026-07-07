@@ -964,7 +964,16 @@ pre {
 }
 
 .log-detail-drawer {
+  /* 详情面板最高为右侧内容栏（视口）高度的 90%，超出部分在 pre 内滚动 */
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: 90vh;
   max-width: 760px;
+}
+
+.log-detail-drawer pre {
+  margin: 0;
+  min-height: 0;
+  overflow: auto;
 }
 
 a code {
