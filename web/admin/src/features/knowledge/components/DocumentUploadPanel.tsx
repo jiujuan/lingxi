@@ -13,7 +13,19 @@ type Props = {
 };
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const ALLOWED_SUFFIXES = ['.md', '.markdown', '.txt'];
+const ALLOWED_SUFFIXES = [
+  '.md',
+  '.markdown',
+  '.txt',
+  '.csv',
+  '.pdf',
+  '.docx',
+  '.pptx',
+  '.xlsx',
+  '.png',
+  '.jpg',
+  '.jpeg',
+];
 
 export function DocumentUploadPanel({ onUploaded }: Props) {
   const [title, setTitle] = useState('退款流程 SOP');
@@ -29,7 +41,7 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!file) {
-      setError('请选择 Markdown 或 TXT 文件。');
+      setError('请选择要上传的文档文件。');
       return;
     }
     const validation = validateFile(file);
@@ -55,7 +67,6 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
       const created = await createImportJob({
         title: title.trim() || file.name,
         permission,
-        parseOptions: { preferredParser: 'LIGHTWEIGHT' },
         processingOptions: { enableQaSplit: true, enableEmbedding: true },
       });
       const checksum = await checksumFile(file);
@@ -87,7 +98,10 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
     <form className="panel upload-panel" onSubmit={submit}>
       <div>
         <h3>上传文档</h3>
-        <p className="muted">支持 Markdown、TXT，上传后自动进入解析、QA 拆分和向量化链路。</p>
+        <p className="muted">
+          支持 Markdown、TXT、CSV，以及 PDF、Word、PPT、Excel、图片（需服务端配置
+          MinerU 解析服务）。上传后自动进入解析、QA 拆分和向量化链路。
+        </p>
       </div>
       <label>
         文档标题
@@ -103,7 +117,7 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
       >
         <span>{file ? file.name : '拖拽文件到这里，或点击选择文件'}</span>
         <input
-          accept=".md,.markdown,.txt"
+          accept={ALLOWED_SUFFIXES.join(',')}
           onChange={(event) => setFile(event.target.files?.[0] ?? null)}
           type="file"
         />
@@ -164,7 +178,7 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
 function validateFile(file: File) {
   const lowerName = file.name.toLowerCase();
   if (!ALLOWED_SUFFIXES.some((suffix) => lowerName.endsWith(suffix))) {
-    return '当前仅支持 .md、.markdown、.txt 文件。';
+    return `当前支持的文件类型：${ALLOWED_SUFFIXES.join('、')}。`;
   }
   if (file.size > MAX_FILE_SIZE) {
     return '文件超过 10MB 限制。';

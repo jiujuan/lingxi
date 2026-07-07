@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 import hashlib
 import logging
+import re
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -11,8 +12,7 @@ from server.app.integrations.parsers.base import (
     ParserAdapter,
     ParserError,
 )
-from server.app.integrations.parsers.lightweight import LightweightParser
-from server.app.integrations.parsers.mineru import MinerUParser
+from server.app.integrations.parsers.registry import get_parser_chain
 from server.app.integrations.storage.base import ObjectStorageAdapter
 from server.app.integrations.storage.registry import get_storage_adapter
 from server.app.models.document import Document, DocumentStatus
@@ -21,6 +21,14 @@ from server.app.models.logs import TaskRun
 from server.app.models.qa_pair import DocumentChunk
 
 logger = logging.getLogger(__name__)
+
+# CJK-aware token proxy: one token per ideograph, one per alphanumeric run.
+# ``len(content.split())`` counted whole Chinese paragraphs as a single token.
+_TOKEN_COUNT_RE = re.compile(r"[一-鿿]|[^\W_]+")
+
+
+def _count_tokens(content: str) -> int:
+    return len(_TOKEN_COUNT_RE.findall(content))
 
 
 class DocumentParseService:
@@ -32,7 +40,7 @@ class DocumentParseService:
     ) -> None:
         self.session = session
         self.storage = storage or get_storage_adapter()
-        self.parsers = parsers or [LightweightParser(), MinerUParser()]
+        self.parsers = parsers or get_parser_chain()
 
     def parse_import_job(self, job_id: str) -> ImportJob:
         job = self.session.get(ImportJob, job_id)
@@ -173,7 +181,7 @@ class DocumentParseService:
                     title_path=block.title_path,
                     content=block.content,
                     page_no=block.page_no,
-                    token_count=len(block.content.split()),
+                    token_count=_count_tokens(block.content),
                     source_locator=block.source_locator,
                     status="ACTIVE",
                 )

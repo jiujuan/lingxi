@@ -166,9 +166,10 @@ class Settings:
         )
     )
     upload_allowed_extensions: tuple[str, ...] = field(
-        default_factory=lambda: parse_csv_env(
-            "UPLOAD_ALLOWED_EXTENSIONS", (".md", ".markdown", ".txt")
-        )
+        # Empty tuple = "unset": the effective allowlist is then derived from
+        # the parser registry (see integrations/parsers/registry.py). When set,
+        # it can only restrict — the gate intersects it with parser support.
+        default_factory=lambda: parse_csv_env("UPLOAD_ALLOWED_EXTENSIONS", ())
     )
     upload_max_file_size_bytes: int = field(
         default_factory=lambda: int(
@@ -177,6 +178,27 @@ class Settings:
     )
     import_max_files_per_job: int = field(
         default_factory=lambda: int(os.getenv("IMPORT_MAX_FILES_PER_JOB", "1"))
+    )
+    mineru_base_url: str | None = field(
+        default_factory=lambda: os.getenv("MINERU_BASE_URL") or None
+    )
+    mineru_api_key: str | None = field(
+        default_factory=lambda: os.getenv("MINERU_API_KEY") or None
+    )
+    mineru_timeout_ms: int = field(
+        default_factory=lambda: int(os.getenv("MINERU_TIMEOUT_MS", "30000"))
+    )
+    mineru_max_wait_seconds: int = field(
+        default_factory=lambda: int(os.getenv("MINERU_MAX_WAIT_SECONDS", "600"))
+    )
+    mineru_poll_interval_seconds: float = field(
+        default_factory=lambda: float(os.getenv("MINERU_POLL_INTERVAL_SECONDS", "3.0"))
+    )
+    mineru_backend: str | None = field(
+        default_factory=lambda: os.getenv("MINERU_BACKEND") or None
+    )
+    mineru_lang: str | None = field(
+        default_factory=lambda: os.getenv("MINERU_LANG") or None
     )
     jwt_secret_key: str = field(
         default_factory=lambda: os.getenv("JWT_SECRET_KEY", DEV_JWT_SECRET_DEFAULT)

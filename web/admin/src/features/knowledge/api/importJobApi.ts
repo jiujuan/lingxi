@@ -46,7 +46,7 @@ export type PermissionPayload = {
 export function createImportJob(payload: {
   title: string;
   permission: PermissionPayload;
-  parseOptions: Record<string, unknown>;
+  parseOptions?: Record<string, unknown>;
   processingOptions: Record<string, unknown>;
 }) {
   return apiRequest<ImportJob>('/api/v1/import-jobs', {

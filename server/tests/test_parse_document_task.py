@@ -37,13 +37,21 @@ def create_uploaded_job(
     storage.put_object(object_key=object_key, data=content)
 
     file_name = object_key.rsplit("/", 1)[-1]
-    mime_type = "application/pdf" if file_name.endswith(".pdf") else "text/markdown"
+    if file_name.endswith(".pdf"):
+        mime_type = "application/pdf"
+        file_type = "PDF"
+    elif file_name.endswith(".csv"):
+        mime_type = "text/csv"
+        file_type = "CSV"
+    else:
+        mime_type = "text/markdown"
+        file_type = "MARKDOWN"
 
     document = Document(
         tenant_id=tenant_id,
         title="Parser Guide",
         file_name=file_name,
-        file_type="PDF" if file_name.endswith(".pdf") else "MARKDOWN",
+        file_type=file_type,
         mime_type=mime_type,
         file_size=len(content),
         object_key=object_key,
@@ -142,13 +150,25 @@ def test_parse_document_service_writes_artifact_and_chunks_idempotently(tmp_path
     assert artifacts[0].artifact_type == "PARSED_MARKDOWN"
 
 
-def test_parse_document_service_records_failure(tmp_path):
+def test_parse_document_service_records_retryable_failure_when_mineru_unreachable(
+    monkeypatch, tmp_path
+):
+    import httpx
+
+    from server.app.integrations.parsers.mineru import MinerUClient, MinerUParser
+    from server.tests.test_mineru_parser import _patch_transport
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    _patch_transport(monkeypatch, handler)
+
     session, identity, storage = build_parse_session(tmp_path)
     job_id, document_id = create_uploaded_job(
         session,
         identity,
         storage,
-        b"%PDF-not-supported",
+        b"%PDF-1.7",
         object_key="uploads/doc.pdf",
     )
 
@@ -157,7 +177,9 @@ def test_parse_document_service_records_failure(tmp_path):
     from server.app.models.logs import TaskRun
     from server.app.services.document_parse_service import DocumentParseService
 
-    result = DocumentParseService(session, storage=storage).parse_import_job(job_id)
+    parser = MinerUParser(MinerUClient("http://mineru.test", max_retries=0))
+    service = DocumentParseService(session, storage=storage, parsers=[parser])
+    result = service.parse_import_job(job_id)
 
     document = session.get(Document, document_id)
     job = session.get(ImportJob, job_id)
@@ -166,7 +188,74 @@ def test_parse_document_service_records_failure(tmp_path):
     assert result.status == "FAILED"
     assert document.status == DocumentStatus.FAILED
     assert document.last_error_code == "PARSER_UNAVAILABLE"
-    assert job.status == "FAILED"
     assert job.error_code == "PARSER_UNAVAILABLE"
     assert task_run.status == "FAILED"
     assert task_run.error["code"] == "PARSER_UNAVAILABLE"
+    assert task_run.error["retryable"] is True
+
+
+def test_parse_document_service_rejects_unsupported_type_when_mineru_unconfigured(
+    tmp_path,
+):
+    session, identity, storage = build_parse_session(tmp_path)
+    job_id, document_id = create_uploaded_job(
+        session,
+        identity,
+        storage,
+        b"%PDF-1.7",
+        object_key="uploads/doc.pdf",
+    )
+
+    from server.app.integrations.parsers.csv_parser import CsvParser
+    from server.app.integrations.parsers.lightweight import LightweightParser
+    from server.app.integrations.parsers.mineru import MinerUClient, MinerUParser
+    from server.app.models.document import Document, DocumentStatus
+    from server.app.models.logs import TaskRun
+    from server.app.services.document_parse_service import DocumentParseService
+
+    parsers = [LightweightParser(), CsvParser(), MinerUParser(MinerUClient(None))]
+    result = DocumentParseService(
+        session, storage=storage, parsers=parsers
+    ).parse_import_job(job_id)
+
+    document = session.get(Document, document_id)
+    task_run = session.scalar(select(TaskRun).where(TaskRun.resource_id == job_id))
+
+    assert result.status == "FAILED"
+    assert document.status == DocumentStatus.FAILED
+    assert document.last_error_code == "UNSUPPORTED_FILE_TYPE"
+    assert task_run.error["retryable"] is False
+
+
+def test_parse_document_service_ingests_csv_via_registry_chain(tmp_path):
+    session, identity, storage = build_parse_session(tmp_path)
+    job_id, document_id = create_uploaded_job(
+        session,
+        identity,
+        storage,
+        "姓名,部门\n张三,售后\n李四,财务\n".encode(),
+        object_key="uploads/staff.csv",
+    )
+
+    from server.app.models.document import Document, DocumentStatus
+    from server.app.models.import_job import ParseArtifact
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.services.document_parse_service import DocumentParseService
+
+    DocumentParseService(session, storage=storage).parse_import_job(job_id)
+
+    document = session.get(Document, document_id)
+    chunks = session.scalars(
+        select(DocumentChunk).where(DocumentChunk.document_id == document_id)
+    ).all()
+    artifacts = session.scalars(
+        select(ParseArtifact).where(ParseArtifact.document_id == document_id)
+    ).all()
+
+    assert document.status == DocumentStatus.QA_SPLITTING
+    assert document.parser_name == "CSV"
+    assert len(chunks) == 1
+    assert chunks[0].content.splitlines()[0] == "| 姓名 | 部门 |"
+    assert chunks[0].token_count > 0
+    assert chunks[0].source_locator == {"rowStart": 2, "rowEnd": 3}
+    assert len(artifacts) == 1

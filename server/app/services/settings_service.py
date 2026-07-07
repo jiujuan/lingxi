@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from server.app.core.config import settings
 from server.app.core.ids import current_request_id
 from server.app.core.permissions import AccessContext
+from server.app.integrations.parsers.registry import allowed_upload_extensions
 from server.app.models.logs import AuditLog
 from server.app.repositories.system_setting_repo import SystemSettingRepository
 from server.app.schemas.settings import SystemSettingsResponse
@@ -45,7 +46,7 @@ class SettingsService:
         return {
             "filePolicy": {
                 "maxFileSizeMb": max(1, settings.upload_max_file_size_bytes // 1024 // 1024),
-                "allowedExtensions": list(settings.upload_allowed_extensions),
+                "allowedExtensions": sorted(allowed_upload_extensions()),
                 "defaultParser": "lightweight",
                 "ocrEnabled": False,
                 "fallbackEnabled": True,

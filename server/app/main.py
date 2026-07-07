@@ -63,9 +63,11 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     def health(db: Session = Depends(get_db)) -> JSONResponse:
-        checks = {"db": _check_db(db), "redis": _check_redis()}
+        checks = {"db": _check_db(db), "redis": _check_redis(), "mineru": _check_mineru()}
         db_up = checks["db"] == "up"
-        if all(state == "up" for state in checks.values()):
+        # "unconfigured" services are excluded from the status calculation.
+        gating = [state for state in checks.values() if state != "unconfigured"]
+        if all(state == "up" for state in gating):
             status = "ok"
         elif db_up:
             status = "degraded"
@@ -108,6 +110,21 @@ def _check_redis() -> str:
         )
         client.ping()
         return "up"
+    except Exception:
+        return "down"
+
+
+def _check_mineru() -> str:
+    # MinerU being down only degrades document parsing into retryable job
+    # failures; it must never fail API readiness (no 503 from this check).
+    base_url = (settings.mineru_base_url or "").rstrip("/")
+    if not base_url:
+        return "unconfigured"
+    try:
+        import httpx
+
+        response = httpx.get(f"{base_url}/health", timeout=1.0)
+        return "up" if response.status_code < 500 else "down"
     except Exception:
         return "down"
 

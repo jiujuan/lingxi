@@ -18,6 +18,7 @@ from server.app.core.errors import (
 )
 from server.app.core.ids import current_request_id
 from server.app.core.permissions import AccessContext
+from server.app.integrations.parsers.registry import allowed_upload_extensions
 from server.app.integrations.storage.base import ObjectStorageAdapter
 from server.app.integrations.storage.registry import get_storage_adapter
 from server.app.models.document import (
@@ -362,17 +363,28 @@ class ImportService:
     @staticmethod
     def _file_type(file_name: str) -> str:
         suffix = Path(file_name).suffix.lower()
-        if suffix in {".md", ".markdown"}:
-            return "MARKDOWN"
-        if suffix == ".txt":
-            return "TEXT"
-        return suffix.removeprefix(".").upper()
+        mapping = {
+            ".md": "MARKDOWN",
+            ".markdown": "MARKDOWN",
+            ".txt": "TEXT",
+            ".csv": "CSV",
+            ".pdf": "PDF",
+            ".doc": "WORD",
+            ".docx": "WORD",
+            ".ppt": "PPT",
+            ".pptx": "PPT",
+            ".xls": "EXCEL",
+            ".xlsx": "EXCEL",
+            ".png": "IMAGE",
+            ".jpg": "IMAGE",
+            ".jpeg": "IMAGE",
+        }
+        return mapping.get(suffix, suffix.removeprefix(".").upper())
 
     @staticmethod
     def _validate_file_limits(file_name: str, file_size: int) -> None:
         suffix = Path(file_name).suffix.lower()
-        allowed = {item.lower() for item in settings.upload_allowed_extensions}
-        if suffix not in allowed:
+        if suffix not in allowed_upload_extensions():
             raise unsupported_media_type("不支持的文件类型")
         if file_size > settings.upload_max_file_size_bytes:
             raise payload_too_large("上传文件超过大小限制")

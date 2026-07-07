@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 class ParserError(Exception):
@@ -45,9 +46,24 @@ class ParsedDocument:
 class ParserAdapter:
     name: str
     version: str
+    #: lowercase, dot-prefixed suffixes this parser accepts (e.g. ".pdf")
+    extensions: frozenset[str] = frozenset()
+    #: exact mime types this parser accepts
+    mime_types: frozenset[str] = frozenset()
+
+    def is_available(self) -> bool:
+        """Whether the parser can actually run (e.g. its backing service is
+        configured). Unavailable parsers are never selected and their formats
+        are not advertised to the upload gate."""
+        return True
 
     def supports(self, source: ParseSource) -> bool:
-        raise NotImplementedError
+        if not self.is_available():
+            return False
+        # Suffix first: the client-supplied mime type is untrusted and often
+        # defaults to application/octet-stream.
+        suffix = Path(source.file_name).suffix.lower()
+        return suffix in self.extensions or source.mime_type in self.mime_types
 
     def parse(self, request: ParseRequest) -> ParsedDocument:
         raise NotImplementedError

@@ -159,6 +159,81 @@ def test_upload_import_file_via_multipart_enqueues_parser(monkeypatch, tmp_path)
     assert queued == [job["id"]]
 
 
+def test_upload_gate_follows_parser_registry_allowlist(monkeypatch, tmp_path):
+    client, _ = build_test_client()
+    headers = login_admin(client)
+
+    from server.app.integrations.storage.local import LocalObjectStorage
+    from server.app.services import import_service
+
+    monkeypatch.setattr(
+        import_service,
+        "get_storage_adapter",
+        lambda: LocalObjectStorage(tmp_path),
+    )
+    monkeypatch.setattr(import_service, "enqueue_parse_task", lambda _job_id: None)
+
+    def create_job(title: str) -> dict:
+        return client.post(
+            "/api/v1/import-jobs",
+            headers=headers,
+            json={"title": title, "permission": {"allAuthenticated": True}},
+        ).json()
+
+    def bind(job: dict, file_name: str, mime_type: str, content: bytes):
+        return client.post(
+            f"/api/v1/import-jobs/{job['id']}/file",
+            headers=headers,
+            files={"file": (file_name, content, mime_type)},
+            data={
+                "object_key": f"uploads/{file_name}",
+                "checksum": f"sha256:{file_name}",
+            },
+        )
+
+    # 白名单不含 .pdf（MinerU 未配置的形态）：上传门直接 415
+    monkeypatch.setattr(
+        import_service,
+        "allowed_upload_extensions",
+        lambda: frozenset({".md", ".markdown", ".txt", ".csv"}),
+    )
+    csv_response = bind(
+        create_job("CSV Staff"), "staff.csv", "text/csv", "姓名,部门\n张三,售后\n".encode()
+    )
+    assert csv_response.status_code == 201
+    assert csv_response.json()["file"]["fileName"] == "staff.csv"
+
+    pdf_rejected = bind(
+        create_job("PDF Doc"), "doc.pdf", "application/pdf", b"%PDF-1.7"
+    )
+    assert pdf_rejected.status_code == 415
+
+    # 白名单含 .pdf（MinerU 已配置的形态）：上传门放行
+    monkeypatch.setattr(
+        import_service,
+        "allowed_upload_extensions",
+        lambda: frozenset({".md", ".pdf"}),
+    )
+    pdf_accepted = bind(
+        create_job("PDF Doc 2"), "doc2.pdf", "application/pdf", b"%PDF-1.7"
+    )
+    assert pdf_accepted.status_code == 201
+
+
+def test_file_type_mapping_covers_new_formats():
+    from server.app.services.import_service import ImportService
+
+    assert ImportService._file_type("a.md") == "MARKDOWN"
+    assert ImportService._file_type("a.txt") == "TEXT"
+    assert ImportService._file_type("a.csv") == "CSV"
+    assert ImportService._file_type("a.pdf") == "PDF"
+    assert ImportService._file_type("a.docx") == "WORD"
+    assert ImportService._file_type("a.pptx") == "PPT"
+    assert ImportService._file_type("a.xlsx") == "EXCEL"
+    assert ImportService._file_type("a.JPG") == "IMAGE"
+    assert ImportService._file_type("a.unknown") == "UNKNOWN"
+
+
 def test_import_job_rejects_duplicate_checksum(monkeypatch, tmp_path):
     client, _ = build_test_client()
     headers = login_admin(client)
