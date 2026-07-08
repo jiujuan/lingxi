@@ -67,7 +67,7 @@ class SettingsService:
                 "prefix": settings.local_storage_root,
             },
             "retentionPolicy": {
-                "apiCallLogDays": 90,
+                "apiCallLogDays": settings.api_call_log_retention_days,
                 "auditLogDays": 365,
                 "taskRunDays": 180,
                 "softDeleteDays": 30,

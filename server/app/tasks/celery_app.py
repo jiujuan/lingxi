@@ -2,6 +2,7 @@ import os
 import sys
 
 from celery import Celery
+from celery.schedules import crontab
 from kombu import Queue
 
 # Default this process to the "worker" DB pool profile before any task module
@@ -33,4 +34,17 @@ celery_app.conf.imports = (
     "server.app.tasks.parse_tasks",
     "server.app.tasks.qa_tasks",
     "server.app.tasks.embedding_tasks",
+    "server.app.tasks.maintenance_tasks",
 )
+
+# Maintenance window: archive old API call logs to cold storage once a day.
+# Off-peak and off the :00 mark so scheduled jobs don't all pile onto the hour.
+# Requires a running `celery beat` process in addition to the workers.
+celery_app.conf.beat_schedule = {
+    "archive-api-call-logs-daily": {
+        "task": "server.app.tasks.maintenance_tasks.archive_api_call_logs_task",
+        "schedule": crontab(hour=3, minute=17),
+        "options": {"queue": settings.celery_default_queue},
+    },
+}
+

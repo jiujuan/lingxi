@@ -152,6 +152,17 @@ celery -A server.app.tasks.celery_app.celery_app worker -Q parse,qa,embedding,ma
 celery -A server.app.tasks.celery_app.celery_app worker -Q parse,qa --loglevel=INFO
 ```
 
+### 定时任务（Celery Beat）
+
+日志归档等定时任务由 Celery Beat 触发，需要**再开一个窗口**单独运行 beat 进程（worker 只执行任务，不负责调度）：
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+celery -A server.app.tasks.celery_app.celery_app beat --loglevel=INFO
+```
+
+当前定时任务：每天 03:17 归档超过 `API_CALL_LOG_RETENTION_DAYS`（默认 90）天的 API 调用日志到对象存储，再从热表清除。
+
 ## 10. 启动前端 Web Admin
 
 新开一个 PowerShell 窗口：

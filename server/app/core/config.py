@@ -310,6 +310,9 @@ class Settings:
     qa_split_max_concurrency: int = field(
         default_factory=lambda: int(os.getenv("QA_SPLIT_MAX_CONCURRENCY", "4"))
     )
+    api_call_log_retention_days: int = field(
+        default_factory=lambda: int(os.getenv("API_CALL_LOG_RETENTION_DAYS", "90"))
+    )
     sse_heartbeat_seconds: float = field(
         default_factory=lambda: float(os.getenv("SSE_HEARTBEAT_SECONDS", "15"))
     )
