@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 import time
 
 from fastapi import Depends, FastAPI, Request
@@ -7,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from server.app.api.openai_compatible import router as openai_router
 from server.app.api.v1 import api_router
@@ -20,6 +22,13 @@ from server.app.core.errors import (
 from server.app.core.ids import current_request_id, new_request_id, set_request_id
 from server.app.core.logging import configure_logging
 from server.app.db.session import engine, get_db
+from server.app.repositories.api_call_log_repo import ApiCallLogRepository
+
+logger = logging.getLogger(__name__)
+
+# Only application traffic is worth persisting as an API call log; health,
+# metrics and CORS preflight would just be noise.
+_API_CALL_LOG_PREFIXES = ("/api/", "/v1/")
 
 
 @asynccontextmanager
@@ -56,9 +65,11 @@ def create_app() -> FastAPI:
         response.headers["x-request-id"] = request_id
         route = request.scope.get("route")
         path = getattr(route, "path", request.url.path)
+        elapsed = time.perf_counter() - started
         metrics.observe_request(
-            request.method, path, response.status_code, time.perf_counter() - started
+            request.method, path, response.status_code, elapsed
         )
+        await _record_api_call(request, response, request_id, elapsed)
         return response
 
     @app.get("/health")
@@ -96,6 +107,60 @@ def create_app() -> FastAPI:
     app.include_router(api_router)
     app.include_router(openai_router)
     return app
+
+
+async def _record_api_call(request: Request, response, request_id: str, elapsed: float) -> None:
+    """Persist one API call log row for application traffic.
+
+    Endpoints and the auth dependency enrich ``request.state`` (tenant, key
+    prefix, error code, metadata) as they run; this reads whatever made it
+    there — unauthenticated/failed requests simply land with a NULL tenant.
+    The write is offloaded to a worker thread (the ORM session is sync) and any
+    failure is swallowed so logging can never break the request it describes.
+    """
+    if request.method == "OPTIONS":
+        return
+    raw_path = request.url.path
+    if not raw_path.startswith(_API_CALL_LOG_PREFIXES):
+        return
+    # Streaming (SSE) responses keep the route's DB session open while the body
+    # is produced; writing a log row from here would race that session (and
+    # block the stream). Skip them — the non-streaming calls that dominate the
+    # traffic still get recorded.
+    if response.headers.get("content-type", "").startswith("text/event-stream"):
+        return
+    state = request.state
+    # Resolve the session factory through dependency_overrides so tests hit
+    # their in-memory database instead of the process-wide engine.
+    db_factory = request.app.dependency_overrides.get(get_db, get_db)
+    payload = {
+        "tenant_id": getattr(state, "log_tenant_id", None),
+        "api_key_id": getattr(state, "log_api_key_id", None),
+        "key_prefix": getattr(state, "log_key_prefix", None),
+        "path": raw_path,
+        "method": request.method,
+        "status_code": response.status_code,
+        "latency_ms": max(1, int(elapsed * 1000)),
+        "error_code": getattr(state, "log_error_code", None),
+        "request_id": request_id,
+        "request_metadata": getattr(state, "log_metadata", None) or {},
+    }
+    await run_in_threadpool(_write_api_call_log, db_factory, payload)
+
+
+def _write_api_call_log(db_factory, payload: dict) -> None:
+    try:
+        gen = db_factory()
+        session = next(gen)
+        try:
+            ApiCallLogRepository(session).add(**payload)
+            session.commit()
+        finally:
+            gen.close()
+    except Exception:  # noqa: BLE001 - logging must never surface to the client
+        logger.warning(
+            "Failed to persist API call log for %s", payload.get("path"), exc_info=True
+        )
 
 
 def _check_db(db: Session) -> str:

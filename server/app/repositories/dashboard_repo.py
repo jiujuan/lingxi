@@ -32,8 +32,13 @@ class DashboardRepository:
         ) or 0
 
     def api_call_count(self, tenant_id: str, since: datetime | None) -> int:
+        # Count external API usage only. The api_call_logs table now also holds
+        # admin-console (/api/*) traffic for troubleshooting, but this dashboard
+        # metric means "external API calls served", so it stays scoped to the
+        # OpenAI-compatible gateway (/v1/*).
         query = select(func.count()).select_from(ApiCallLog).where(
-            ApiCallLog.tenant_id == tenant_id
+            ApiCallLog.tenant_id == tenant_id,
+            ApiCallLog.path.like("/v1/%"),
         )
         if since:
             query = query.where(ApiCallLog.created_at >= since)

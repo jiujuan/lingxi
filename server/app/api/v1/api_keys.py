@@ -1,10 +1,7 @@
-from time import perf_counter
-
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from server.app.core.ids import current_request_id
 from server.app.core.permissions import AccessContext, require_permission
 from server.app.db.session import get_db
 from server.app.repositories.api_call_log_repo import ApiCallLogRepository
@@ -105,40 +102,27 @@ def api_key_auth_probe(
     credentials: HTTPAuthorizationCredentials | None = Depends(api_key_scheme),
     db: Session = Depends(get_db),
 ) -> dict:
-    started = perf_counter()
     service = ApiKeyService(db)
     auth_header_present = credentials is not None
-    key_prefix = None
-    api_key = None
-    status_code = 200
-    error_code = None
+    # Enrich request.state so the observability middleware records this call.
+    request.state.log_key_prefix = (
+        credentials.credentials[:16] if credentials else None
+    )
+    request.state.log_metadata = {"authHeaderPresent": auth_header_present}
     try:
         if credentials is None:
             raise service._unauthorized("INVALID_API_KEY", "API Key 缺失")
-        key_prefix = credentials.credentials[:16]
         result = service.authenticate(credentials.credentials, required_scope=scope)
         api_key = result.api_key
+        request.state.log_tenant_id = api_key.tenant_id
+        request.state.log_api_key_id = api_key.id
+        request.state.log_key_prefix = api_key.key_prefix
         return {"ok": True, "keyPrefix": api_key.key_prefix, "scopes": api_key.scopes}
     except Exception as exc:
-        status_code = getattr(exc, "status_code", 500)
         detail = getattr(exc, "detail", {})
         if isinstance(detail, dict):
-            error_code = (detail.get("error") or {}).get("code")
+            request.state.log_error_code = (detail.get("error") or {}).get("code")
         raise
-    finally:
-        ApiCallLogRepository(db).add(
-            tenant_id=api_key.tenant_id if api_key is not None else None,
-            api_key_id=api_key.id if api_key is not None else None,
-            key_prefix=api_key.key_prefix if api_key is not None else key_prefix,
-            path=str(request.url.path),
-            method=request.method,
-            status_code=status_code,
-            latency_ms=max(1, int((perf_counter() - started) * 1000)),
-            error_code=error_code,
-            request_id=current_request_id(),
-            request_metadata={"authHeaderPresent": auth_header_present},
-        )
-        db.commit()
 
 
 def _api_key_to_dict(item) -> dict:

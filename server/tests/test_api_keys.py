@@ -87,7 +87,13 @@ def test_api_key_auth_scope_rate_limit_disable_rotate_and_call_log():
     assert old_key.status_code == 401
 
     with SessionLocal() as session:
-        logs = session.scalars(select(ApiCallLog)).all()
+        # The middleware now logs every API call; scope the key_prefix
+        # assertion to the probe calls this test actually made with the key.
+        logs = session.scalars(
+            select(ApiCallLog).where(
+                ApiCallLog.path == "/api/v1/api-key-auth/probe"
+            )
+        ).all()
 
     assert logs
     assert all(log.key_prefix == created["keyPrefix"] for log in logs)

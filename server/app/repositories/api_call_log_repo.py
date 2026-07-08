@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
 from server.app.models.api_key import ApiCallLog
@@ -63,7 +63,12 @@ class ApiCallLogRepository:
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[ApiCallLog], int]:
-        query = select(ApiCallLog).where(ApiCallLog.tenant_id == tenant_id)
+        # Include NULL-tenant rows: a request that fails authentication has no
+        # resolved tenant, and those failed attempts are exactly what an admin
+        # needs to see when troubleshooting from the API call log.
+        query = select(ApiCallLog).where(
+            or_(ApiCallLog.tenant_id == tenant_id, ApiCallLog.tenant_id.is_(None))
+        )
         if status_code is not None:
             query = query.where(ApiCallLog.status_code == status_code)
         if path:

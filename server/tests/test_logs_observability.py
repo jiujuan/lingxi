@@ -108,6 +108,55 @@ def test_logs_api_lists_filters_and_redacts_sensitive_fields():
     assert audit_logs.json()["data"][0]["beforeSnapshot"]["apiKey"] == "***REDACTED***"
 
 
+def test_api_call_log_middleware_records_admin_and_failed_calls():
+    client, SessionLocal = build_test_client()
+    headers = login_admin(client)
+
+    from server.app.models.logs import ApiCallLog
+
+    # An authenticated admin call must be attributed to the caller's tenant.
+    admin_call = client.get("/api/v1/api-keys", headers=headers)
+    assert admin_call.status_code == 200
+
+    # An external gateway call with a bogus key fails auth and has no tenant.
+    failed_call = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer lk_live_bogus_key_0000"},
+        json={
+            "model": "knowledge-chat",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": False,
+        },
+    )
+    assert failed_call.status_code == 401
+
+    with SessionLocal() as session:
+        tenant_id = _tenant_id(session)
+        admin_log = session.scalar(
+            select(ApiCallLog).where(ApiCallLog.path == "/api/v1/api-keys")
+        )
+        failed_log = session.scalar(
+            select(ApiCallLog).where(ApiCallLog.path == "/v1/chat/completions")
+        )
+
+    # The middleware — not the endpoint — recorded the admin call, with tenant.
+    assert admin_log is not None
+    assert admin_log.method == "GET"
+    assert admin_log.status_code == 200
+    assert admin_log.tenant_id == tenant_id
+
+    # Failed auth lands with a NULL tenant...
+    assert failed_log is not None
+    assert failed_log.tenant_id is None
+
+    # ...and is still visible in the console (NULL-tenant rows are included).
+    listed = client.get("/api/v1/logs/api-calls", headers=headers)
+    assert listed.status_code == 200
+    paths = [row["path"] for row in listed.json()["data"]]
+    assert "/v1/chat/completions" in paths
+    assert "/api/v1/api-keys" in paths
+
+
 def test_retry_task_run_requeues_failed_import_job(monkeypatch):
     client, SessionLocal = build_test_client()
     headers = login_admin(client)

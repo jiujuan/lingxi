@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -30,6 +30,7 @@ security_scheme = HTTPBearer(auto_error=False)
 
 
 def get_current_access_context(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),
     db: Session = Depends(get_db),
 ) -> AccessContext:
@@ -69,7 +70,7 @@ def get_current_access_context(
         if permission_code:
             permissions.add(permission_code)
 
-    return AccessContext(
+    context = AccessContext(
         tenant_id=user.tenant_id,
         user_id=user.id,
         department_id=user.department_id,
@@ -79,6 +80,11 @@ def get_current_access_context(
         name=user.name,
         role_codes=role_codes,
     )
+    # Hand the API-call-log middleware a tenant/actor to attribute this request
+    # to; it runs after the route and only sees what request.state carries.
+    request.state.log_tenant_id = context.tenant_id
+    request.state.log_user_id = context.user_id
+    return context
 
 
 def require_permission(permission: str):
