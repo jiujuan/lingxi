@@ -92,6 +92,7 @@ VITE_API_BASE_URL=http://localhost:8000
 在项目根目录执行：
 
 ```powershell
+cd lingxi
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip

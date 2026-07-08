@@ -7,3 +7,6 @@ __pycache__/
 web/admin/node_modules/
 web/admin/dist/
 
+# Local object-storage / runtime data
+.data/
+
