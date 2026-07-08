@@ -27,7 +27,16 @@ class OllamaProvider(HttpProvider):
         return ConnectionTestResult(success=True, status="SUCCESS", latency_ms=1)
 
     def complete_chat(self, prompt: str) -> str:
+        return self._post_chat(self._chat_payload(prompt, stream=False))
+
+    def generate_qa_pairs(self, prompt: str) -> str:
         payload = self._chat_payload(prompt, stream=False)
+        # Constrain the server to emit strict JSON so a chatty model can't wrap
+        # the object in prose or ```json fences and break QA-split parsing.
+        payload["format"] = "json"
+        return self._post_chat(payload)
+
+    def _post_chat(self, payload: dict) -> str:
         data = self._request_json(
             "POST", self._endpoint("/api/chat"), headers=self._headers(), json_body=payload
         )
@@ -36,9 +45,6 @@ class OllamaProvider(HttpProvider):
         if not isinstance(content, str):
             raise ProviderError("PROVIDER_BAD_RESPONSE", "Ollama 响应缺少文本内容")
         return content
-
-    def generate_qa_pairs(self, prompt: str) -> str:
-        return self.complete_chat(prompt)
 
     def stream_chat(self, prompt: str) -> Iterator[str]:
         payload = self._chat_payload(prompt, stream=True)

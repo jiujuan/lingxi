@@ -44,17 +44,60 @@ class ValidatedQaItem:
 
 
 class QaSplitValidationError(Exception):
-    def __init__(self, message: str) -> None:
+    def __init__(
+        self,
+        message: str,
+        code: str = "QA_SPLIT_INVALID_OUTPUT",
+        *,
+        retryable: bool = True,
+    ) -> None:
         super().__init__(message)
-        self.code = "QA_SPLIT_INVALID_OUTPUT"
+        self.code = code
         self.message = message
+        self.retryable = retryable
+
+
+def _extract_json_text(raw_output: str) -> str:
+    """Best-effort extraction of a JSON document from a model's raw text.
+
+    The Ollama adapter asks for strict JSON (``format=json``), but that only
+    covers Ollama, and even then some chatty models still wrap the object in a
+    ```json fence or emit a sentence before it. This strips a surrounding
+    Markdown code fence and, failing that, slices from the first opening bracket
+    to its matching closing bracket so the common "prose around JSON" case still
+    parses instead of failing the whole document.
+    """
+    text = raw_output.strip()
+    if not text:
+        return text
+    # Strip a surrounding ```json ... ``` (or bare ```) fence.
+    if text.startswith("```"):
+        newline = text.find("\n")
+        if newline != -1:
+            text = text[newline + 1 :]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+    if text.startswith(("{", "[")):
+        return text
+    # Fall back to slicing the outermost object/array out of surrounding prose.
+    starts = [pos for pos in (text.find("{"), text.find("[")) if pos != -1]
+    if not starts:
+        return text
+    start = min(starts)
+    close_char = "}" if text[start] == "{" else "]"
+    end = text.rfind(close_char)
+    return text[start : end + 1] if end > start else text
 
 
 def validate_qa_split_output(raw_output: str) -> list[ValidatedQaItem]:
     try:
-        parsed = json.loads(raw_output)
+        parsed = json.loads(_extract_json_text(raw_output))
     except json.JSONDecodeError as exc:
-        raise QaSplitValidationError("QA 拆分模型输出不是合法 JSON") from exc
+        snippet = (raw_output or "").strip().replace("\n", " ")[:200]
+        raise QaSplitValidationError(
+            f"QA 拆分模型输出不是合法 JSON（原始输出片段：{snippet!r}）"
+        ) from exc
 
     items = parsed.get("items") if isinstance(parsed, dict) else parsed
     if not isinstance(items, list) or not items:
@@ -161,7 +204,9 @@ class QaSplitService:
             self.session.commit()
             return job
         except QaSplitValidationError as exc:
-            self._mark_failed(job, document, task_run, exc.code, exc.message, True)
+            self._mark_failed(
+                job, document, task_run, exc.code, exc.message, exc.retryable
+            )
             return job
         except Exception:
             logger.exception("Unexpected error splitting QA for job %s", job.id)
@@ -205,7 +250,13 @@ class QaSplitService:
         )
         row = self.session.execute(statement).first()
         if row is None:
-            raise QaSplitValidationError("未配置默认 QA Split 模型")
+            raise QaSplitValidationError(
+                "未配置默认 QA Split 模型",
+                code="QA_SPLIT_MODEL_NOT_CONFIGURED",
+                # Deterministic config gap: auto-retry can't help until an admin
+                # configures a default QA_SPLIT model, so don't burn retries.
+                retryable=False,
+            )
         return row[0], row[1]
 
     def _group_chunks(self, chunks: list[DocumentChunk]) -> list[list[DocumentChunk]]:
