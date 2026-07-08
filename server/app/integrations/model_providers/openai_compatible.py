@@ -46,7 +46,19 @@ class OpenAICompatibleProvider(HttpProvider):
         return ConnectionTestResult(success=True, status="SUCCESS", latency_ms=1)
 
     def complete_chat(self, prompt: str) -> str:
+        return self._post_chat(self._chat_payload(prompt, stream=False))
+
+    def generate_qa_pairs(self, prompt: str) -> str:
         payload = self._chat_payload(prompt, stream=False)
+        # Constrain the model to a strict JSON object so a chatty model can't
+        # wrap the result in prose or ```json fences and break QA-split parsing.
+        # Mirrors the Ollama adapter's format="json"; the response_format field
+        # is honoured by OpenAI, DeepSeek, DashScope (Qwen) and Moonshot
+        # compatible endpoints.
+        payload["response_format"] = {"type": "json_object"}
+        return self._post_chat(payload)
+
+    def _post_chat(self, payload: dict) -> str:
         data = self._request_json(
             "POST",
             self._endpoint(self._chat_path),
@@ -54,9 +66,6 @@ class OpenAICompatibleProvider(HttpProvider):
             json_body=payload,
         )
         return self._extract_message(data)
-
-    def generate_qa_pairs(self, prompt: str) -> str:
-        return self.complete_chat(prompt)
 
     def stream_chat(self, prompt: str) -> Iterator[str]:
         payload = self._chat_payload(prompt, stream=True)

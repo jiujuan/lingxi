@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 
@@ -53,6 +55,29 @@ def test_openai_compatible_complete_chat_and_embeddings(monkeypatch):
     vectors = provider.embed_texts(["a", "b"])
     assert vectors == [[0.1, 0.2], [0.3, 0.4]]  # reordered by index
     assert any(path.endswith("/chat/completions") for path in seen)
+
+
+def test_openai_compatible_generate_qa_pairs_forces_json_object(monkeypatch):
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": '{"items":[]}'}}]}
+        )
+
+    _patch_transport(monkeypatch, handler)
+    provider = OpenAICompatibleProvider(
+        "https://api.example.com/v1", "sk-test", {"modelName": "gpt-x"}
+    )
+
+    # QA split constrains output to a strict JSON object (parity with Ollama).
+    provider.generate_qa_pairs("hi")
+    assert seen[-1]["response_format"] == {"type": "json_object"}
+
+    # Plain chat must not force JSON — it serves free-form conversation.
+    provider.complete_chat("hi")
+    assert "response_format" not in seen[-1]
 
 
 def test_openai_compatible_stream_chat_parses_sse(monkeypatch):
