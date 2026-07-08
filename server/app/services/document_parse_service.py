@@ -85,6 +85,20 @@ class DocumentParseService:
             )
             parser = self._select_parser(source)
             parsed = parser.parse(ParseRequest(source=source, options=job.options or {}))
+            if not parsed.blocks:
+                # No content blocks means the QA-split stage would later fail
+                # with an opaque "no chunk to split" error. Fail here instead,
+                # at the stage that has the context, with an actionable cause:
+                # scanned/image-only PDFs (OCR off), heading-only or empty
+                # documents all extract to zero retrievable text blocks.
+                # Not retryable — re-parsing the same file yields the same
+                # empty result unless the upload or OCR config changes.
+                raise ParserError(
+                    "PARSER_NO_CONTENT",
+                    "文档解析后未提取到任何文本内容，可能是扫描件/纯图片（需开启 OCR）"
+                    "或文档为空/仅有标题",
+                    retryable=False,
+                )
             self._replace_parse_outputs(job, document, parsed.markdown, parsed.blocks)
 
             document.parser_name = parsed.parser_name

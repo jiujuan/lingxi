@@ -240,6 +240,14 @@ class MinerUParser(ParserAdapter):
             if markdown is None:
                 markdown = markdown_from_blocks(blocks)
                 warnings.append("MinerU 未返回 markdown，已由结构化内容合成")
+            if not blocks and markdown:
+                # Structured content_list yielded nothing usable (e.g. only
+                # headings/uncaptioned images, or a schema this builder doesn't
+                # recognise) but markdown is present — split that so the
+                # document isn't lost to a downstream "no chunk" error.
+                blocks = split_markdown_blocks(markdown)
+                page_count = page_count or (1 if markdown else 0)
+                warnings.append("MinerU 结构化内容为空，已按 markdown 回退切分")
         else:
             markdown = result.markdown or ""
             blocks = split_markdown_blocks(markdown)

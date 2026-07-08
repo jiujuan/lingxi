@@ -150,6 +150,43 @@ def test_parse_document_service_writes_artifact_and_chunks_idempotently(tmp_path
     assert artifacts[0].artifact_type == "PARSED_MARKDOWN"
 
 
+def test_parse_document_service_fails_when_no_content_blocks_extracted(tmp_path):
+    session, identity, storage = build_parse_session(tmp_path)
+    # A heading-only markdown extracts to zero content blocks: headings shape
+    # the title_path breadcrumb but are never emitted as blocks.
+    job_id, document_id = create_uploaded_job(
+        session,
+        identity,
+        storage,
+        b"# Title Only\n\n## Another Heading\n",
+    )
+
+    from server.app.models.document import Document, DocumentStatus
+    from server.app.models.import_job import ImportJob
+    from server.app.models.logs import TaskRun
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.services.document_parse_service import DocumentParseService
+
+    result = DocumentParseService(session, storage=storage).parse_import_job(job_id)
+
+    document = session.get(Document, document_id)
+    job = session.get(ImportJob, job_id)
+    task_run = session.scalar(select(TaskRun).where(TaskRun.resource_id == job_id))
+    chunks = session.scalars(
+        select(DocumentChunk).where(DocumentChunk.document_id == document_id)
+    ).all()
+
+    # Fails at the parse stage (not deferred to QA split) with an actionable code.
+    assert result.status == "FAILED"
+    assert result.stage == "PARSING"
+    assert document.status == DocumentStatus.FAILED
+    assert document.last_error_code == "PARSER_NO_CONTENT"
+    assert job.error_code == "PARSER_NO_CONTENT"
+    assert task_run.error["code"] == "PARSER_NO_CONTENT"
+    assert task_run.error["retryable"] is False
+    assert len(chunks) == 0
+
+
 def test_parse_document_service_records_retryable_failure_when_mineru_unreachable(
     monkeypatch, tmp_path
 ):

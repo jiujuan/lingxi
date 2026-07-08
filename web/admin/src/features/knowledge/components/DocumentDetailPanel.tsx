@@ -111,6 +111,13 @@ export function DocumentDetailPanel({
         <div className="error-box">
           <strong>{detail.lastErrorCode}</strong>
           <p>{detail.lastErrorMessage}</p>
+          {errorHint(detail.lastErrorCode) ? (
+            <ul className="error-hint">
+              {errorHint(detail.lastErrorCode)!.map((tip) => (
+                <li key={tip}>{tip}</li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       ) : null}
 
@@ -173,6 +180,31 @@ export function DocumentDetailPanel({
       </section>
     </section>
   );
+}
+
+// Actionable, user-facing follow-ups keyed by backend error code. The error
+// message says what went wrong; these say what to do about it.
+const ERROR_HINTS: Record<string, string[]> = {
+  PARSER_NO_CONTENT: [
+    '若为扫描件/纯图片 PDF：请在解析引擎开启 OCR（MinerU 设置 lang，Docling 设置 do_ocr）后重新上传。',
+    '若文档本应有文字：请确认文件未损坏、不是仅有标题或空白，可用其他阅读器打开核对。',
+    '确认解析服务（MinerU / Docling）已正确配置并可访问。',
+  ],
+  QA_SPLIT_MODEL_NOT_CONFIGURED: [
+    '请在「模型配置」中添加一个 QA_SPLIT 能力的对话模型（如 Ollama 的 qwen2.5），设为默认且状态为 ACTIVE。',
+    '注意：QA 拆分需要对话/生成模型，不能用 bge-m3 这类纯 embedding 模型。',
+  ],
+  QA_SPLIT_INVALID_OUTPUT: [
+    'QA 拆分模型未按要求输出合法 JSON。请改用指令微调、参数更大的对话模型（如 qwen2.5:7b/14b）。',
+    '确认所选模型是对话模型而非 embedding 模型；本地 Ollama 已强制 JSON 输出，仍失败多为模型能力不足。',
+  ],
+};
+
+function errorHint(code: string | null | undefined): string[] | null {
+  if (!code) {
+    return null;
+  }
+  return ERROR_HINTS[code] ?? null;
 }
 
 function permissionText(permission: KnowledgeDocumentDetail['permissions']) {

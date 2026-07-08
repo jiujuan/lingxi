@@ -307,6 +307,29 @@ def test_markdown_synthesized_when_md_content_missing(monkeypatch):
     assert any("合成" in warning for warning in parsed.warnings)
 
 
+def test_markdown_fallback_when_structured_walk_yields_no_blocks(monkeypatch):
+    # docling-serve returns a json_content dict, but its structure yields zero
+    # blocks (broken/empty structured export). The full md_content must be used
+    # instead of losing the document to a downstream "no chunk" error.
+    empty_doc = {"body": {"children": []}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/convert/file/async":
+            return httpx.Response(200, json={"task_id": "t1", "task_status": "success"})
+        return httpx.Response(
+            200,
+            json=_success_result(
+                {"md_content": "# 标题\n\n正文段落。", "json_content": empty_doc}
+            ),
+        )
+
+    _patch_transport(monkeypatch, handler)
+    parsed = DoclingParser(_client()).parse(_pdf_request())
+
+    assert [block.content for block in parsed.blocks] == ["正文段落。"]
+    assert any("结构化内容为空" in warning for warning in parsed.warnings)
+
+
 def test_result_without_document_or_with_failure_is_invalid(monkeypatch):
     responses = iter(
         [
