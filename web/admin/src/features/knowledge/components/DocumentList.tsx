@@ -1,6 +1,11 @@
 import type { DocumentFilters, KnowledgeDocument, Pagination } from '../api/documentApi';
 import { PermissionGate } from '../../../auth/PermissionGate';
 import { formatBytes, formatDateTime as formatTime } from '../../../shared/format';
+import type { KnowledgeClassificationValue } from '../types/classification';
+import {
+  formatClassificationPath,
+  KnowledgeClassificationSelect,
+} from './KnowledgeClassificationSelect';
 
 type Props = {
   documents: KnowledgeDocument[];
@@ -34,8 +39,24 @@ export function DocumentList({
   onDelete,
   onRetry,
 }: Props) {
+  const classificationFilterValue: KnowledgeClassificationValue = {
+    spaceId: filters.spaceId || null,
+    departmentId: filters.classificationDepartmentId || null,
+    categoryId: filters.categoryId || null,
+  };
+
   function changeFilter(key: keyof DocumentFilters, value: string) {
     onFiltersChange({ ...filters, [key]: value, page: 1 });
+  }
+
+  function changeClassificationFilter(value: KnowledgeClassificationValue) {
+    onFiltersChange({
+      ...filters,
+      spaceId: value.spaceId ?? '',
+      classificationDepartmentId: value.departmentId ?? '',
+      categoryId: value.categoryId ?? '',
+      page: 1,
+    });
   }
 
   function changePage(offset: number) {
@@ -50,7 +71,7 @@ export function DocumentList({
       <div className="toolbar-row compact">
         <div>
           <h3>文档列表</h3>
-          <p className="muted">按状态、类型和权限范围筛选已入库文档。</p>
+          <p className="muted">按状态、类型、分类和权限范围筛选已入库文档。</p>
         </div>
         <button onClick={onRefresh} type="button">
           刷新
@@ -93,10 +114,10 @@ export function DocumentList({
           </select>
         </label>
         <label>
-          部门 ID
+          授权部门 ID
           <input
             onChange={(event) => changeFilter('departmentId', event.target.value)}
-            placeholder="department id"
+            placeholder="permission department id"
             value={filters.departmentId}
           />
         </label>
@@ -109,6 +130,16 @@ export function DocumentList({
           />
         </label>
       </div>
+
+      <KnowledgeClassificationSelect
+        allowUnclassified
+        className="document-classification-filter"
+        disabled={loading}
+        idPrefix="document-list-classification"
+        legend="分类筛选"
+        onChange={changeClassificationFilter}
+        value={classificationFilterValue}
+      />
 
       {error ? <p className="error">{error}</p> : null}
       {loading ? <p className="muted">正在加载文档列表...</p> : null}
@@ -125,6 +156,7 @@ export function DocumentList({
             <span>文档</span>
             <span>状态</span>
             <span>权限</span>
+            <span>分类路径</span>
             <span>QA/Chunk</span>
             <span>更新时间</span>
             <span>操作</span>
@@ -149,6 +181,7 @@ export function DocumentList({
                 {stageLabel(document.status)}
               </span>
               <span>{permissionText(document.permissions)}</span>
+              <span>{renderClassificationPath(document)}</span>
               <span>
                 {document.qaPairCount} / {document.chunkCount}
               </span>
@@ -203,6 +236,10 @@ export function DocumentList({
       </div>
     </section>
   );
+}
+
+function renderClassificationPath(document: KnowledgeDocument) {
+  return formatClassificationPath(document.classification);
 }
 
 function permissionText(permission: KnowledgeDocument['permissions']) {
