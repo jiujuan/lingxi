@@ -7,6 +7,7 @@ import { ChatPage } from '../features/chat/pages/ChatPage';
 import { DashboardPage } from '../features/dashboard/pages/DashboardPage';
 import { DocumentListPage } from '../features/knowledge/pages/DocumentListPage';
 import { ImportPage } from '../features/knowledge/pages/ImportPage';
+import { KnowledgeClassificationPage } from '../features/knowledge/pages/KnowledgeClassificationPage';
 import { LogsPage } from '../features/logs/pages/LogsPage';
 import { ModelConfigPage } from '../features/model-config/pages/ModelConfigPage';
 import { DepartmentPage } from '../features/org/pages/DepartmentPage';
@@ -42,6 +43,12 @@ const ROUTES: Route[] = [
     permission: 'DOCUMENT_READ',
     render: () => <DocumentListPage />,
     hidden: true,
+  },
+  {
+    hash: '#knowledge-classification',
+    label: '知识库分类',
+    permission: 'DOCUMENT_READ',
+    render: () => <KnowledgeClassificationPage />,
   },
   { hash: '#chat', label: 'Chat', permission: 'CHAT_READ', render: () => <ChatPage /> },
   { hash: '#logs', label: '日志排障', permission: 'LOG_READ', render: () => <LogsPage /> },

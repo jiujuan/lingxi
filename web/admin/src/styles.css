@@ -303,6 +303,25 @@ label {
   margin: 0;
 }
 
+
+.classification-admin-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(360px, 0.9fr) minmax(520px, 1.1fr);
+}
+
+.table-row.classification-space-row {
+  grid-template-columns: minmax(160px, 1.2fr) 120px minmax(120px, 1fr) 110px 140px minmax(120px, auto);
+}
+
+.table-row.classification-category-row {
+  grid-template-columns: minmax(140px, 1.2fr) 120px 70px minmax(110px, 0.8fr) minmax(120px, 1fr) 110px minmax(120px, auto);
+}
+
+.classification-space-row .title-button {
+  text-align: left;
+}
+
 .document-table {
   border: 1px solid #edf1f7;
   border-radius: 8px;
@@ -1036,6 +1055,9 @@ a code {
   }
 
   .table-row,
+  .classification-admin-grid,
+  .table-row.classification-space-row,
+  .table-row.classification-category-row,
   .document-table-head,
   .document-row {
     grid-template-columns: 1fr;

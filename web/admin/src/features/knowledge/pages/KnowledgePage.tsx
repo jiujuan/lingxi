@@ -30,6 +30,9 @@ export function KnowledgePage() {
           <button onClick={() => (window.location.hash = '#documents')} type="button">
             文档列表
           </button>
+          <button onClick={() => (window.location.hash = '#knowledge-classification')} type="button">
+            知识库分类
+          </button>
           <span className="status-pill">V1.1 入库闭环</span>
         </div>
       </section>
