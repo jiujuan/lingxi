@@ -37,6 +37,7 @@ import server.app.models.user  # noqa: E402,F401
 import server.app.models.role  # noqa: E402,F401
 import server.app.models.permission  # noqa: E402,F401
 import server.app.models.document  # noqa: E402,F401
+import server.app.models.knowledge_category  # noqa: E402,F401
 import server.app.models.import_job  # noqa: E402,F401
 import server.app.models.qa_pair  # noqa: E402,F401
 import server.app.models.chat  # noqa: E402,F401

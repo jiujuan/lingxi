@@ -1,6 +1,6 @@
 from enum import StrEnum
 
-from sqlalchemy import Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import Enum, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.app.db.base import Base, IdMixin, TimestampMixin
@@ -44,8 +44,32 @@ class Document(IdMixin, TimestampMixin, Base):
     page_count: Mapped[int | None] = mapped_column(Integer)
     qa_pair_count: Mapped[int] = mapped_column(Integer, default=0)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    knowledge_space_id: Mapped[str | None] = mapped_column(String(36))
+    category_department_id: Mapped[str | None] = mapped_column(String(36))
+    knowledge_category_id: Mapped[str | None] = mapped_column(String(36))
     last_error_code: Mapped[str | None] = mapped_column(String(120))
     last_error_message: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        Index(
+            "idx_documents_tenant_space_updated",
+            "tenant_id",
+            "knowledge_space_id",
+            "updated_at",
+        ),
+        Index(
+            "idx_documents_tenant_category_department_updated",
+            "tenant_id",
+            "category_department_id",
+            "updated_at",
+        ),
+        Index(
+            "idx_documents_tenant_knowledge_category_updated",
+            "tenant_id",
+            "knowledge_category_id",
+            "updated_at",
+        ),
+    )
 
 
 class DocumentAccessRule(IdMixin, Base):
