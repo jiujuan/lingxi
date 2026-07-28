@@ -1,5 +1,7 @@
 import { ApiError, apiRequest } from '../../../api/client';
+import type { Schemas } from '../../../api/schema-helpers';
 import { getToken, redirectToLogin } from '../../../auth/authStore';
+import type { ImportClassificationPayload } from '../types/classification';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -36,19 +38,13 @@ export type QaPair = {
   status: string;
 };
 
-export type PermissionPayload = {
-  departmentIds?: string[];
-  roleIds?: string[];
-  userIds?: string[];
-  allAuthenticated: boolean;
+export type PermissionPayload = Schemas['ImportPermissionRequest'];
+
+export type CreateImportJobPayload = Omit<Schemas['ImportJobCreateRequest'], 'classification'> & {
+  classification?: ImportClassificationPayload | null;
 };
 
-export function createImportJob(payload: {
-  title: string;
-  permission: PermissionPayload;
-  parseOptions?: Record<string, unknown>;
-  processingOptions: Record<string, unknown>;
-}) {
+export function createImportJob(payload: CreateImportJobPayload) {
   return apiRequest<ImportJob>('/api/v1/import-jobs', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -66,7 +62,7 @@ export function bindImportJobFile(
     contentBase64: string;
   },
 ) {
-  return apiRequest<ImportJob>(`/api/v1/import-jobs/${jobId}/files`, {
+  return apiRequest<ImportJob>(`/api/v1/import-jobs/${encodeURIComponent(jobId)}/files`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });
@@ -91,7 +87,7 @@ export function uploadImportJobFile(
 
     const token = getToken();
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${API_BASE_URL}/api/v1/import-jobs/${jobId}/file`);
+    xhr.open('POST', `${API_BASE_URL}/api/v1/import-jobs/${encodeURIComponent(jobId)}/file`);
     if (token) {
       xhr.setRequestHeader('Authorization', `Bearer ${token}`);
     }
@@ -141,23 +137,26 @@ function xhrError(xhr: XMLHttpRequest): ApiError {
 }
 
 export function getImportJob(jobId: string) {
-  return apiRequest<ImportJob>(`/api/v1/import-jobs/${jobId}`);
+  return apiRequest<ImportJob>(`/api/v1/import-jobs/${encodeURIComponent(jobId)}`);
 }
 
 export function retryImportJob(jobId: string) {
-  return apiRequest<ImportJob>(`/api/v1/import-jobs/${jobId}/retries`, {
+  return apiRequest<ImportJob>(`/api/v1/import-jobs/${encodeURIComponent(jobId)}/retries`, {
     method: 'POST',
   });
 }
 
 export function regenerateQaPairs(documentId: string) {
-  return apiRequest<ImportJob>(`/api/v1/documents/${documentId}/qa-regenerations`, {
-    method: 'POST',
-  });
+  return apiRequest<ImportJob>(
+    `/api/v1/documents/${encodeURIComponent(documentId)}/qa-regenerations`,
+    {
+      method: 'POST',
+    },
+  );
 }
 
 export function listQaPairs(documentId: string) {
   return apiRequest<{ data: QaPair[] }>(
-    `/api/v1/documents/${documentId}/qa-pairs?page=1&pageSize=20`,
+    `/api/v1/documents/${encodeURIComponent(documentId)}/qa-pairs?page=1&pageSize=20`,
   );
 }

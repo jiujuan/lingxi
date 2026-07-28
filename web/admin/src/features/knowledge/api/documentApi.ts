@@ -1,12 +1,12 @@
 import { apiRequest } from '../../../api/client';
+import type { Schemas } from '../../../api/schema-helpers';
+import type {
+  KnowledgeClassificationPath,
+  UpdateDocumentClassificationPayload,
+} from '../types/classification';
 import type { PermissionPayload } from './importJobApi';
 
-export type Pagination = {
-  page: number;
-  pageSize: number;
-  totalItems: number;
-  totalPages: number;
-};
+export type Pagination = Schemas['PaginationResponse'];
 
 export type NamedSubject = {
   id: string;
@@ -42,31 +42,12 @@ export type ProcessingLog = {
   requestId: string | null;
 };
 
-export type KnowledgeDocument = {
-  id: string;
-  title: string;
-  fileName: string;
-  fileType: string;
-  mimeType: string;
-  fileSize: number;
-  status: string;
-  parserName: string | null;
-  pageCount: number | null;
-  qaPairCount: number;
-  chunkCount: number;
-  permissions: DocumentPermission;
-  latestJob: DocumentJobSummary | null;
-  lastErrorCode: string | null;
-  lastErrorMessage: string | null;
-  createdAt: string;
-  updatedAt: string;
+export type KnowledgeDocument = Omit<Schemas['DocumentListItemResponse'], 'classification'> & {
+  classification?: KnowledgeClassificationPath | null;
 };
 
-export type KnowledgeDocumentDetail = KnowledgeDocument & {
-  parserVersion: string | null;
-  objectKey: string;
-  checksum: string;
-  processingLogs: ProcessingLog[];
+export type KnowledgeDocumentDetail = Omit<Schemas['DocumentDetailResponse'], 'classification'> & {
+  classification?: KnowledgeClassificationPath | null;
 };
 
 export type DocumentChunk = {
@@ -85,48 +66,126 @@ export type DocumentFilters = {
   keyword: string;
   fileType: string;
   status: string;
+  /** Knowledge space filter (classification), distinct from permission scope. */
+  spaceId: string;
+  /** Classification department filter, distinct from permission departmentId below. */
+  classificationDepartmentId: string;
+  categoryId: string;
   departmentId: string;
   roleId: string;
   page: number;
   pageSize: number;
 };
 
-export function listDocuments(filters: DocumentFilters) {
+export async function listDocuments(filters: DocumentFilters) {
   const params = buildParams({
     keyword: filters.keyword,
     fileType: filters.fileType,
     status: filters.status,
+    spaceId: filters.spaceId,
+    classificationDepartmentId: filters.classificationDepartmentId,
+    categoryId: filters.categoryId,
     departmentId: filters.departmentId,
     roleId: filters.roleId,
     page: String(filters.page),
     pageSize: String(filters.pageSize),
   });
-  return apiRequest<{ data: KnowledgeDocument[]; pagination: Pagination }>(
-    `/api/v1/documents?${params}`,
-  );
+  const result = await apiRequest<{
+    data: RawKnowledgeDocument[];
+    pagination: Pagination;
+  }>(`/api/v1/documents?${params}`);
+  return {
+    ...result,
+    data: result.data.map(mapKnowledgeDocument),
+  };
 }
 
-export function getDocument(documentId: string) {
-  return apiRequest<KnowledgeDocumentDetail>(`/api/v1/documents/${documentId}`);
+export async function getDocument(documentId: string) {
+  const result = await apiRequest<RawKnowledgeDocumentDetail>(
+    `/api/v1/documents/${encodeURIComponent(documentId)}`,
+  );
+  return mapKnowledgeDocumentDetail(result);
 }
 
 export function listDocumentChunks(documentId: string) {
   return apiRequest<{ data: DocumentChunk[]; pagination: Pagination }>(
-    `/api/v1/documents/${documentId}/chunks?page=1&pageSize=20`,
+    `/api/v1/documents/${encodeURIComponent(documentId)}/chunks?page=1&pageSize=20`,
   );
 }
 
 export function updateDocumentPermissions(documentId: string, payload: PermissionPayload) {
-  return apiRequest<DocumentPermission>(`/api/v1/documents/${documentId}/permissions`, {
-    method: 'PATCH',
-    body: JSON.stringify(payload),
-  });
+  return apiRequest<DocumentPermission>(
+    `/api/v1/documents/${encodeURIComponent(documentId)}/permissions`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function updateDocumentClassification(
+  documentId: string,
+  payload: UpdateDocumentClassificationPayload,
+) {
+  const result = await apiRequest<Schemas['DocumentClassificationResponse']>(
+    `/api/v1/documents/${encodeURIComponent(documentId)}/classification`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+  );
+  return mapClassification(result);
 }
 
 export function deleteDocument(documentId: string) {
-  return apiRequest<{ id: string; status: string }>(`/api/v1/documents/${documentId}`, {
-    method: 'DELETE',
-  });
+  return apiRequest<{ id: string; status: string }>(
+    `/api/v1/documents/${encodeURIComponent(documentId)}`,
+    {
+      method: 'DELETE',
+    },
+  );
+}
+
+type RawKnowledgeDocument = Omit<Schemas['DocumentListItemResponse'], 'classification'> & {
+  classification?: Schemas['DocumentClassificationResponse'] | null;
+};
+
+type RawKnowledgeDocumentDetail = Omit<Schemas['DocumentDetailResponse'], 'classification'> & {
+  classification?: Schemas['DocumentClassificationResponse'] | null;
+};
+
+function mapKnowledgeDocument(document: RawKnowledgeDocument): KnowledgeDocument {
+  return {
+    ...document,
+    classification: mapClassification(document.classification),
+  };
+}
+
+function mapKnowledgeDocumentDetail(document: RawKnowledgeDocumentDetail): KnowledgeDocumentDetail {
+  return {
+    ...document,
+    classification: mapClassification(document.classification),
+  };
+}
+
+function mapClassification(
+  classification: Schemas['DocumentClassificationResponse'] | null | undefined,
+): KnowledgeClassificationPath | null {
+  if (!classification) {
+    return null;
+  }
+  const departmentId = classification.categoryDepartmentId;
+  const departmentName = classification.categoryDepartment?.name ?? null;
+  return {
+    spaceId: classification.knowledgeSpaceId,
+    spaceName: classification.knowledgeSpace?.name ?? null,
+    departmentId,
+    departmentName,
+    classificationDepartmentId: departmentId,
+    classificationDepartmentName: departmentName,
+    categoryId: classification.knowledgeCategoryId,
+    categoryName: classification.knowledgeCategory?.name ?? null,
+  };
 }
 
 function buildParams(values: Record<string, string>) {
