@@ -30,6 +30,7 @@ from server.app.models.document import (
 from server.app.models.import_job import ImportJob, ImportJobFile, ImportJobStatus
 from server.app.models.logs import AuditLog
 from server.app.repositories.import_job_repo import ImportJobRepository
+from server.app.services.knowledge_category_service import KnowledgeCategoryService
 
 logger = logging.getLogger(__name__)
 
@@ -82,9 +83,19 @@ class ImportService:
         *,
         title: str,
         permission: dict,
-        parse_options: dict | None,
-        processing_options: dict | None,
+        classification: object | None = None,
+        parse_options: dict | None = None,
+        processing_options: dict | None = None,
     ) -> ImportJob:
+        classification_payload = self._normalize_classification(classification)
+        validated_classification = (
+            KnowledgeCategoryService(self.session).validate_classification(
+                context, classification_payload
+            )
+            if classification_payload is not None
+            else None
+        )
+
         document = Document(
             tenant_id=context.tenant_id,
             title=title.strip(),
@@ -95,6 +106,23 @@ class ImportService:
             object_key=f"pending/{uuid4()}",
             checksum=f"pending:{uuid4()}",
             status=DocumentStatus.UPLOADED,
+            knowledge_space_id=(
+                validated_classification.knowledge_space.id
+                if validated_classification and validated_classification.knowledge_space
+                else None
+            ),
+            category_department_id=(
+                validated_classification.category_department.id
+                if validated_classification
+                and validated_classification.category_department
+                else None
+            ),
+            knowledge_category_id=(
+                validated_classification.knowledge_category.id
+                if validated_classification
+                and validated_classification.knowledge_category
+                else None
+            ),
         )
         self.session.add(document)
         self.session.flush()
@@ -121,7 +149,11 @@ class ImportService:
             action="IMPORT_JOB_CREATED",
             resource_type="IMPORT_JOB",
             resource_id=job.id,
-            after_snapshot={"documentId": document.id, "title": document.title},
+            after_snapshot={
+                "documentId": document.id,
+                "title": document.title,
+                "classification": self._classification_snapshot(document),
+            },
         )
         self.session.commit()
         return job
@@ -329,6 +361,30 @@ class ImportService:
             raise service_unavailable(
                 "任务入队失败，请稍后重试", "TASK_ENQUEUE_FAILED"
             ) from exc
+
+    @staticmethod
+    def _normalize_classification(classification: object | None) -> object | None:
+        if not isinstance(classification, dict):
+            return classification
+        return {
+            "knowledge_space_id": classification.get(
+                "knowledge_space_id", classification.get("spaceId")
+            ),
+            "category_department_id": classification.get(
+                "category_department_id", classification.get("departmentId")
+            ),
+            "knowledge_category_id": classification.get(
+                "knowledge_category_id", classification.get("categoryId")
+            ),
+        }
+
+    @staticmethod
+    def _classification_snapshot(document: Document) -> dict:
+        return {
+            "spaceId": document.knowledge_space_id,
+            "departmentId": document.category_department_id,
+            "categoryId": document.knowledge_category_id,
+        }
 
     @staticmethod
     def _build_access_rules(

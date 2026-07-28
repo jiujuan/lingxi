@@ -6,6 +6,42 @@ from server.tests.test_auth_rbac import build_test_client
 from server.tests.test_model_config import login_admin
 
 
+def _create_import_classification(client, SessionLocal, headers) -> dict:
+    from server.app.models.user import Department
+
+    with SessionLocal() as session:
+        support = session.scalar(select(Department).where(Department.code == "SUPPORT"))
+        assert support is not None
+        support_id = support.id
+
+    space_response = client.post(
+        "/api/v1/knowledge-spaces",
+        headers=headers,
+        json={"name": "客服知识库", "code": "support-kb"},
+    )
+    assert space_response.status_code == 201
+    space = space_response.json()
+
+    category_response = client.post(
+        "/api/v1/knowledge-categories",
+        headers=headers,
+        json={
+            "spaceId": space["id"],
+            "departmentId": support_id,
+            "name": "退款专题",
+            "code": "refund",
+        },
+    )
+    assert category_response.status_code == 201
+    category = category_response.json()
+
+    return {
+        "space_id": space["id"],
+        "department_id": support_id,
+        "category_id": category["id"],
+    }
+
+
 def test_create_import_job_writes_document_and_access_rules():
     client, SessionLocal = build_test_client()
     headers = login_admin(client)
@@ -37,11 +73,12 @@ def test_create_import_job_writes_document_and_access_rules():
     assert body["stage"] == "CREATED"
     assert body["documentId"]
 
-    from server.app.models.document import DocumentAccessRule
+    from server.app.models.document import Document, DocumentAccessRule
     from server.app.models.import_job import ImportJob
 
     with SessionLocal() as session:
         job = session.get(ImportJob, body["id"])
+        document = session.get(Document, body["documentId"])
         rules = session.scalars(
             select(DocumentAccessRule).where(
                 DocumentAccessRule.document_id == body["documentId"]
@@ -50,8 +87,85 @@ def test_create_import_job_writes_document_and_access_rules():
 
     assert job is not None
     assert job.document_id == body["documentId"]
+    assert document is not None
+    assert document.knowledge_space_id is None
+    assert document.category_department_id is None
+    assert document.knowledge_category_id is None
     assert len(rules) == 1
     assert rules[0].subject_id == department.id
+
+
+def test_create_import_job_with_classification_writes_document_fields():
+    client, SessionLocal = build_test_client()
+    headers = login_admin(client)
+    classification = _create_import_classification(client, SessionLocal, headers)
+
+    response = client.post(
+        "/api/v1/import-jobs",
+        headers=headers,
+        json={
+            "title": "Refund SOP",
+            "classification": {
+                "spaceId": classification["space_id"],
+                "departmentId": classification["department_id"],
+                "categoryId": classification["category_id"],
+            },
+            "permission": {"allAuthenticated": True},
+            "processingOptions": {"enableQaSplit": True, "enableEmbedding": True},
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+
+    from server.app.models.document import Document, DocumentAccessRule
+    from server.app.models.import_job import ImportJob
+
+    with SessionLocal() as session:
+        document = session.get(Document, body["documentId"])
+        job = session.get(ImportJob, body["id"])
+        rules = session.scalars(
+            select(DocumentAccessRule).where(
+                DocumentAccessRule.document_id == body["documentId"]
+            )
+        ).all()
+
+    assert document is not None
+    assert document.knowledge_space_id == classification["space_id"]
+    assert document.category_department_id == classification["department_id"]
+    assert document.knowledge_category_id == classification["category_id"]
+    assert job is not None
+    assert job.document_id == document.id
+    assert len(rules) == 1
+
+
+def test_create_import_job_rejects_inconsistent_classification_path():
+    client, SessionLocal = build_test_client()
+    headers = login_admin(client)
+    classification = _create_import_classification(client, SessionLocal, headers)
+
+    other_space = client.post(
+        "/api/v1/knowledge-spaces",
+        headers=headers,
+        json={"name": "内部知识库", "code": "internal-kb"},
+    ).json()
+
+    response = client.post(
+        "/api/v1/import-jobs",
+        headers=headers,
+        json={
+            "title": "Refund SOP",
+            "classification": {
+                "spaceId": other_space["id"],
+                "departmentId": classification["department_id"],
+                "categoryId": classification["category_id"],
+            },
+            "permission": {"allAuthenticated": True},
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "CLASSIFICATION_PATH_INVALID"
 
 
 def test_bind_import_file_validates_object_key_and_enqueues_parser(monkeypatch, tmp_path):

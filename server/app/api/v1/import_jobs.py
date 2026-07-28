@@ -23,6 +23,7 @@ def create_import_job(
         context,
         title=payload.title,
         permission=payload.permission.model_dump(by_alias=True),
+        classification=payload.classification,
         parse_options=payload.parse_options,
         processing_options=payload.processing_options,
     )

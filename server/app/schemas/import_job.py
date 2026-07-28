@@ -10,10 +10,19 @@ class ImportPermissionRequest(BaseModel):
     all_authenticated: bool = Field(default=False, alias="allAuthenticated")
 
 
+class ImportClassificationRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    knowledge_space_id: str | None = Field(default=None, alias="spaceId")
+    category_department_id: str | None = Field(default=None, alias="departmentId")
+    knowledge_category_id: str | None = Field(default=None, alias="categoryId")
+
+
 class ImportJobCreateRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     title: str = Field(min_length=1, max_length=300)
+    classification: ImportClassificationRequest | None = None
     permission: ImportPermissionRequest = Field(
         default_factory=ImportPermissionRequest
     )
