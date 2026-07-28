@@ -28,3 +28,25 @@ export type CreateKnowledgeCategoryPayload = Schemas['KnowledgeCategoryCreateReq
 export type UpdateKnowledgeCategoryPayload = Schemas['KnowledgeCategoryUpdateRequest'];
 export type UpdateDocumentClassificationPayload = Schemas['DocumentClassificationUpdateRequest'];
 export type ImportClassificationPayload = Schemas['ImportClassificationRequest'];
+
+export type KnowledgeClassificationValue = {
+  spaceId: string | null;
+  departmentId: string | null;
+  categoryId: string | null;
+};
+
+export type KnowledgeClassificationSelectProps = {
+  value?: KnowledgeClassificationValue | KnowledgeClassificationPath | null;
+  defaultValue?: KnowledgeClassificationValue | KnowledgeClassificationPath | null;
+  onChange?: (
+    value: KnowledgeClassificationValue,
+    payload: UpdateDocumentClassificationPayload | null,
+  ) => void;
+  required?: boolean;
+  allowUnclassified?: boolean;
+  disabled?: boolean;
+  className?: string;
+  idPrefix?: string;
+  legend?: string;
+  showValidation?: boolean;
+};
