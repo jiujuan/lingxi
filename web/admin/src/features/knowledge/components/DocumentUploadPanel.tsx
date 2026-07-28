@@ -4,15 +4,30 @@ import { errorMessage } from '../../../api/client';
 import {
   createImportJob,
   uploadImportJobFile,
+  type CreateImportJobPayload,
   type ImportJob,
   type PermissionPayload,
 } from '../api/importJobApi';
+import {
+  KnowledgeClassificationSelect,
+  toClassificationPayload,
+} from './KnowledgeClassificationSelect';
+import { validateClassificationValue } from '../hooks/useKnowledgeClassificationOptions';
+import type { KnowledgeClassificationValue } from '../types/classification';
 
 type Props = {
   onUploaded: (job: ImportJob) => void;
 };
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
+function emptyClassification(): KnowledgeClassificationValue {
+  return {
+    spaceId: null,
+    departmentId: null,
+    categoryId: null,
+  };
+}
+
 const ALLOWED_SUFFIXES = [
   '.md',
   '.markdown',
@@ -36,6 +51,8 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
   const [departmentIds, setDepartmentIds] = useState('');
   const [roleIds, setRoleIds] = useState('');
   const [userIds, setUserIds] = useState('');
+  const [classificationValue, setClassificationValue] =
+    useState<KnowledgeClassificationValue>(() => emptyClassification());
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -66,6 +83,13 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
       setError(validation);
       return;
     }
+    const classificationValidation = validateClassificationValue(classificationValue, {
+      allowUnclassified: true,
+    });
+    if (classificationValidation) {
+      setError(classificationValidation);
+      return;
+    }
     const permission = buildPermission();
     if (
       !permission.allAuthenticated &&
@@ -81,11 +105,16 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
     setProgress(0);
     setError(null);
     try {
-      const created = await createImportJob({
+      const importPayload: CreateImportJobPayload = {
         title: title.trim() || file.name,
         permission,
         processingOptions: { enableQaSplit: true, enableEmbedding: true },
-      });
+      };
+      const classification = toClassificationPayload(classificationValue);
+      if (classification) {
+        importPayload.classification = classification;
+      }
+      const created = await createImportJob(importPayload);
       const checksum = await checksumFile(file);
       const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '-');
       const bound = await uploadImportJobFile(created.id, file, {
@@ -94,12 +123,28 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
         onProgress: setProgress,
       });
       onUploaded(bound);
+      resetForm();
     } catch (caught) {
       setError(errorMessage(caught, '请求失败。'));
     } finally {
       setBusy(false);
       setProgress(0);
     }
+  }
+
+  function handleClassificationChange(value: KnowledgeClassificationValue) {
+    setClassificationValue(value);
+  }
+
+  function resetForm() {
+    setTitle('');
+    setTitleEdited(false);
+    setAllAuthenticated(true);
+    setDepartmentIds('');
+    setRoleIds('');
+    setUserIds('');
+    setClassificationValue(emptyClassification());
+    setFile(null);
   }
 
   function buildPermission(): PermissionPayload {
@@ -116,8 +161,8 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
       <div>
         <h3>上传文档</h3>
         <p className="muted">
-          支持 Markdown、TXT、CSV，以及 PDF、Word、PPT、Excel、图片、HTML（需服务端配置
-          MinerU 或 Docling 解析服务）。上传后自动进入解析、QA 拆分和向量化链路。
+          支持 Markdown、TXT、CSV，以及 PDF、Word、PPT、Excel、图片、HTML（需服务端配置 MinerU 或
+          Docling 解析服务）。上传后自动进入解析、QA 拆分和向量化链路。
         </p>
       </div>
       <label>
@@ -143,6 +188,13 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
           type="file"
         />
       </label>
+      <KnowledgeClassificationSelect
+        allowUnclassified
+        disabled={busy}
+        onChange={handleClassificationChange}
+        showValidation
+        value={classificationValue}
+      />
       <label className="checkbox-row">
         <input
           checked={allAuthenticated}
