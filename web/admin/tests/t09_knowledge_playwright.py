@@ -1,15 +1,109 @@
+from __future__ import annotations
+
+import json
+import tempfile
+from copy import deepcopy
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import Page, Route, expect, sync_playwright
 
 
 ROOT = Path(__file__).resolve().parents[3]
 SCREENSHOT_DIR = ROOT / "docs" / "development" / "v1.1" / "acceptance"
-APP_URL = "http://127.0.0.1:5174/#knowledge"
+APP_ORIGIN = "http://127.0.0.1:5174"
+
+NOW = "2026-07-29T10:00:00+08:00"
 
 
-READY_DOCUMENT = {
+DEPARTMENTS = [
+    {
+        "id": "dept-after-sales",
+        "name": "售后部",
+        "code": "after-sales",
+        "parentId": None,
+        "userCount": 8,
+        "createdAt": "2026-07-01T09:00:00+08:00",
+    },
+    {
+        "id": "dept-product",
+        "name": "产品部",
+        "code": "product",
+        "parentId": None,
+        "userCount": 5,
+        "createdAt": "2026-07-01T09:10:00+08:00",
+    },
+]
+
+INITIAL_SPACES = [
+    {
+        "id": "space-001",
+        "name": "客服知识库",
+        "code": "customer-service",
+        "description": "客服与售后标准知识。",
+        "status": "ACTIVE",
+        "sortOrder": 10,
+        "createdAt": "2026-07-01T09:00:00+08:00",
+        "updatedAt": "2026-07-01T09:00:00+08:00",
+    },
+    {
+        "id": "space-002",
+        "name": "内部知识库",
+        "code": "internal",
+        "description": "内部流程知识。",
+        "status": "ACTIVE",
+        "sortOrder": 20,
+        "createdAt": "2026-07-01T09:20:00+08:00",
+        "updatedAt": "2026-07-01T09:20:00+08:00",
+    },
+]
+
+INITIAL_CATEGORIES = [
+    {
+        "id": "cat-refund",
+        "spaceId": "space-001",
+        "departmentId": "dept-after-sales",
+        "parentId": None,
+        "name": "退款专题",
+        "code": "refund",
+        "categoryType": "TOPIC",
+        "description": "退款政策与 SOP。",
+        "status": "ACTIVE",
+        "sortOrder": 10,
+        "createdAt": "2026-07-01T10:00:00+08:00",
+        "updatedAt": "2026-07-01T10:00:00+08:00",
+    },
+    {
+        "id": "cat-logistics",
+        "spaceId": "space-001",
+        "departmentId": "dept-after-sales",
+        "parentId": None,
+        "name": "物流专题",
+        "code": "logistics",
+        "categoryType": "TOPIC",
+        "description": "物流与签收问题。",
+        "status": "ACTIVE",
+        "sortOrder": 20,
+        "createdAt": "2026-07-01T10:10:00+08:00",
+        "updatedAt": "2026-07-01T10:10:00+08:00",
+    },
+    {
+        "id": "cat-product-faq",
+        "spaceId": "space-001",
+        "departmentId": "dept-product",
+        "parentId": None,
+        "name": "产品 FAQ",
+        "code": "product-faq",
+        "categoryType": "PROJECT",
+        "description": "产品常见问题。",
+        "status": "ACTIVE",
+        "sortOrder": 30,
+        "createdAt": "2026-07-01T10:20:00+08:00",
+        "updatedAt": "2026-07-01T10:20:00+08:00",
+    },
+]
+
+BASE_DOCUMENT = {
     "id": "doc-ready",
     "title": "Refund SOP",
     "fileName": "refund.md",
@@ -58,72 +152,292 @@ READY_DOCUMENT = {
     "updatedAt": "2026-07-05T10:10:00+08:00",
 }
 
-FAILED_DOCUMENT = {
-    **READY_DOCUMENT,
-    "id": "doc-failed",
-    "title": "Broken Manual",
-    "fileName": "broken.pdf",
-    "fileType": "PDF",
-    "mimeType": "application/pdf",
-    "fileSize": 300,
-    "status": "FAILED",
-    "parserName": None,
-    "parserVersion": None,
-    "pageCount": None,
-    "qaPairCount": 0,
-    "chunkCount": 0,
-    "objectKey": "uploads/broken.pdf",
-    "checksum": "sha256:broken",
-    "permissions": {
-        "allAuthenticated": False,
-        "departments": [{"id": "dept-support", "name": "Support"}],
-        "roles": [],
-        "users": [],
-    },
-    "latestJob": {
-        "id": "job-failed",
-        "status": "FAILED",
-        "stage": "PARSING",
-        "progress": 20,
-        "retryCount": 1,
-        "errorCode": "PARSER_UNAVAILABLE",
-        "errorMessage": "MinerU 解析器尚未配置",
-        "failedStage": "PARSING",
-        "retryable": True,
-    },
-    "lastErrorCode": "PARSER_UNAVAILABLE",
-    "lastErrorMessage": "MinerU 解析器尚未配置",
-    "processingLogs": [
-        {
-            "id": "task-failed",
-            "taskType": "parse_document_task",
-            "queueName": "parse",
-            "stage": "PARSING",
-            "status": "FAILED",
-            "error": {
-                "code": "PARSER_UNAVAILABLE",
-                "message": "MinerU 解析器尚未配置",
-                "retryable": True,
-            },
-            "requestId": "req_failed_parse",
+
+class KnowledgeApiMock:
+    """Stateful mock API for Task 7 phase-2 frontend regression acceptance."""
+
+    def __init__(self) -> None:
+        self.spaces = deepcopy(INITIAL_SPACES)
+        self.categories = deepcopy(INITIAL_CATEGORIES)
+        self.departments = deepcopy(DEPARTMENTS)
+        self.document_category_id = "cat-refund"
+        self.requests: list[dict] = []
+
+    def handle(self, route: Route) -> None:
+        request = route.request
+        parsed = urlparse(request.url)
+        path = api_path(route)
+        method = request.method
+        query = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
+        body = request_json(request.post_data)
+        self.requests.append({"method": method, "path": path, "query": query, "body": body})
+
+        if method == "GET" and path == "/api/v1/departments":
+            fulfill_json(route, {"data": self.departments})
+            return
+
+        if method == "GET" and path == "/api/v1/knowledge-spaces":
+            fulfill_json(route, {"data": self.spaces})
+            return
+
+        if method == "POST" and path == "/api/v1/knowledge-spaces":
+            payload = body or {}
+            space = {
+                "id": "space-created",
+                "createdAt": NOW,
+                "updatedAt": NOW,
+                **payload,
+            }
+            self.spaces.append(space)
+            fulfill_json(route, space, status=201)
+            return
+
+        if method == "PUT" and path.startswith("/api/v1/knowledge-spaces/"):
+            space_id = path.rsplit("/", 1)[-1]
+            payload = body or {}
+            space = self._space(space_id)
+            space.update(payload)
+            space["updatedAt"] = NOW
+            fulfill_json(route, space)
+            return
+
+        if method == "DELETE" and path.startswith("/api/v1/knowledge-spaces/"):
+            space_id = path.rsplit("/", 1)[-1]
+            if space_id == "space-001":
+                fulfill_json(
+                    route,
+                    api_error("KNOWLEDGE_SPACE_IN_USE", "存在项目 / 专题或文档引用，无法删除知识库空间。"),
+                    status=409,
+                )
+                return
+            self.spaces = [space for space in self.spaces if space["id"] != space_id]
+            self.categories = [category for category in self.categories if category["spaceId"] != space_id]
+            fulfill_json(route, {"ok": True})
+            return
+
+        if method == "GET" and path == "/api/v1/knowledge-categories":
+            space_id = query.get("spaceId")
+            department_id = query.get("departmentId")
+            categories = [
+                category
+                for category in self.categories
+                if (not space_id or category["spaceId"] == space_id)
+                and (not department_id or category["departmentId"] == department_id)
+            ]
+            fulfill_json(route, {"data": categories})
+            return
+
+        if method == "POST" and path == "/api/v1/knowledge-categories":
+            payload = body or {}
+            category = {
+                "id": "cat-created",
+                "createdAt": NOW,
+                "updatedAt": NOW,
+                **payload,
+            }
+            self.categories.append(category)
+            fulfill_json(route, category, status=201)
+            return
+
+        if method == "PUT" and path.startswith("/api/v1/knowledge-categories/"):
+            category_id = path.rsplit("/", 1)[-1]
+            payload = body or {}
+            category = self._category(category_id)
+            category.update(payload)
+            category["updatedAt"] = NOW
+            fulfill_json(route, category)
+            return
+
+        if method == "DELETE" and path.startswith("/api/v1/knowledge-categories/"):
+            category_id = path.rsplit("/", 1)[-1]
+            self.categories = [category for category in self.categories if category["id"] != category_id]
+            fulfill_json(route, {"ok": True})
+            return
+
+        if method == "GET" and path == "/api/v1/documents":
+            documents = [self._document()]
+            if query.get("spaceId") and query["spaceId"] != "space-001":
+                documents = []
+            if query.get("classificationDepartmentId") and query["classificationDepartmentId"] != "dept-after-sales":
+                documents = []
+            if query.get("categoryId") and query["categoryId"] != self.document_category_id:
+                documents = []
+            fulfill_json(
+                route,
+                {
+                    "data": documents,
+                    "pagination": {
+                        "page": int(query.get("page", 1)),
+                        "pageSize": int(query.get("pageSize", 20)),
+                        "totalItems": len(documents),
+                        "totalPages": 1 if documents else 0,
+                    },
+                },
+            )
+            return
+
+        if method == "GET" and path == "/api/v1/documents/doc-ready":
+            fulfill_json(route, self._document())
+            return
+
+        if method == "GET" and path == "/api/v1/documents/doc-ready/chunks":
+            fulfill_json(
+                route,
+                {
+                    "data": [
+                        {
+                            "id": "chunk-ready",
+                            "documentId": "doc-ready",
+                            "chunkIndex": 0,
+                            "titlePath": ["退款流程"],
+                            "content": "退款需要主管审批。",
+                            "pageNo": 1,
+                            "tokenCount": 4,
+                            "sourceLocator": {"lineStart": 1},
+                            "status": "ACTIVE",
+                        }
+                    ],
+                    "pagination": {"page": 1, "pageSize": 20, "totalItems": 1, "totalPages": 1},
+                },
+            )
+            return
+
+        if method == "GET" and path == "/api/v1/documents/doc-ready/qa-pairs":
+            fulfill_json(
+                route,
+                {
+                    "data": [
+                        {
+                            "id": "qa-ready",
+                            "documentId": "doc-ready",
+                            "chunkId": "chunk-ready",
+                            "question": "退款需要谁审批？",
+                            "answer": "退款需要主管审批。",
+                            "quote": "退款需要主管审批。",
+                            "pageNo": 1,
+                            "embeddingStatus": "READY",
+                            "status": "ACTIVE",
+                        }
+                    ],
+                    "pagination": {"page": 1, "pageSize": 20, "totalItems": 1, "totalPages": 1},
+                },
+            )
+            return
+
+        if method == "PATCH" and path == "/api/v1/documents/doc-ready/classification":
+            payload = body or {}
+            self.document_category_id = payload.get("categoryId") or "cat-refund"
+            fulfill_json(route, self._classification(self.document_category_id))
+            return
+
+        if method == "POST" and path == "/api/v1/import-jobs":
+            fulfill_json(
+                route,
+                {
+                    "id": "job-upload",
+                    "documentId": None,
+                    "status": "PENDING",
+                    "stage": "CREATED",
+                    "progress": 0,
+                    "retryCount": 0,
+                    "errorCode": None,
+                    "errorMessage": None,
+                    "failedStage": None,
+                    "retryable": False,
+                    "file": None,
+                },
+                status=201,
+            )
+            return
+
+        if method == "POST" and path == "/api/v1/import-jobs/job-upload/file":
+            fulfill_json(
+                route,
+                {
+                    "id": "job-upload",
+                    "documentId": "doc-ready",
+                    "status": "COMPLETED",
+                    "stage": "COMPLETED",
+                    "progress": 100,
+                    "retryCount": 0,
+                    "errorCode": None,
+                    "errorMessage": None,
+                    "failedStage": None,
+                    "retryable": False,
+                    "file": {
+                        "id": "file-upload",
+                        "objectKey": "uploads/playwright-refund.md",
+                        "fileName": "playwright-refund.md",
+                        "mimeType": "text/markdown",
+                        "fileSize": 34,
+                        "checksum": "sha256:playwright",
+                    },
+                },
+            )
+            return
+
+        fulfill_json(
+            route,
+            api_error("MOCK_NOT_FOUND", f"未配置 mock: {method} {path}"),
+            status=404,
+        )
+
+    def find_request(self, method: str, path: str, **query: str) -> dict:
+        for request in reversed(self.requests):
+            if request["method"] != method or request["path"] != path:
+                continue
+            if all(request["query"].get(key) == value for key, value in query.items()):
+                return request
+        raise AssertionError(f"未捕获请求: {method} {path} query={query}; captured={self.requests}")
+
+    def _space(self, space_id: str) -> dict:
+        for space in self.spaces:
+            if space["id"] == space_id:
+                return space
+        raise AssertionError(f"未知知识库空间: {space_id}")
+
+    def _category(self, category_id: str) -> dict:
+        for category in self.categories:
+            if category["id"] == category_id:
+                return category
+        raise AssertionError(f"未知项目 / 专题: {category_id}")
+
+    def _department(self, department_id: str) -> dict:
+        for department in self.departments:
+            if department["id"] == department_id:
+                return department
+        raise AssertionError(f"未知部门: {department_id}")
+
+    def _classification(self, category_id: str) -> dict:
+        category = self._category(category_id)
+        return {
+            "knowledgeSpaceId": category["spaceId"],
+            "knowledgeSpace": self._space(category["spaceId"]),
+            "categoryDepartmentId": category["departmentId"],
+            "categoryDepartment": self._department(category["departmentId"]),
+            "knowledgeCategoryId": category["id"],
+            "knowledgeCategory": category,
         }
-    ],
-    "updatedAt": "2026-07-05T10:20:00+08:00",
-}
+
+    def _document(self) -> dict:
+        document = deepcopy(BASE_DOCUMENT)
+        document["classification"] = self._classification(self.document_category_id)
+        return document
 
 
 def fulfill_json(route: Route, payload: dict, status: int = 200) -> None:
     route.fulfill(
         status=status,
         content_type="application/json",
-        body=json_dumps(payload),
+        body=json.dumps(payload, ensure_ascii=False),
     )
 
 
-def json_dumps(payload: dict) -> str:
-    import json
-
-    return json.dumps(payload, ensure_ascii=False)
+def api_error(code: str, message: str) -> dict:
+    return {
+        "error": {"code": code, "message": message, "details": {}},
+        "requestId": "req_playwright_mock",
+    }
 
 
 def api_path(route: Route) -> str:
@@ -135,183 +449,243 @@ def api_path(route: Route) -> str:
     return path
 
 
-def mock_api(route: Route) -> None:
-    request = route.request
-    path = api_path(route)
-    method = request.method
-
-    if method == "GET" and path == "/api/v1/documents":
-        fulfill_json(
-            route,
-            {
-                "data": [READY_DOCUMENT, FAILED_DOCUMENT],
-                "pagination": {
-                    "page": 1,
-                    "pageSize": 20,
-                    "totalItems": 2,
-                    "totalPages": 1,
-                },
-            },
-        )
-        return
-
-    if method == "GET" and path == "/api/v1/documents/doc-ready":
-        fulfill_json(route, READY_DOCUMENT)
-        return
-
-    if method == "GET" and path == "/api/v1/documents/doc-failed":
-        fulfill_json(route, FAILED_DOCUMENT)
-        return
-
-    if method == "GET" and path == "/api/v1/documents/doc-ready/chunks":
-        fulfill_json(
-            route,
-            {
-                "data": [
-                    {
-                        "id": "chunk-ready",
-                        "documentId": "doc-ready",
-                        "chunkIndex": 0,
-                        "titlePath": ["退款流程"],
-                        "content": "退款需要主管审批。",
-                        "pageNo": 1,
-                        "tokenCount": 4,
-                        "sourceLocator": {"lineStart": 1},
-                        "status": "ACTIVE",
-                    }
-                ],
-                "pagination": {
-                    "page": 1,
-                    "pageSize": 20,
-                    "totalItems": 1,
-                    "totalPages": 1,
-                },
-            },
-        )
-        return
-
-    if method == "GET" and path == "/api/v1/documents/doc-failed/chunks":
-        fulfill_json(
-            route,
-            {
-                "data": [],
-                "pagination": {
-                    "page": 1,
-                    "pageSize": 20,
-                    "totalItems": 0,
-                    "totalPages": 0,
-                },
-            },
-        )
-        return
-
-    if method == "GET" and path == "/api/v1/documents/doc-ready/qa-pairs":
-        fulfill_json(
-            route,
-            {
-                "data": [
-                    {
-                        "id": "qa-ready",
-                        "documentId": "doc-ready",
-                        "chunkId": "chunk-ready",
-                        "question": "退款需要谁审批？",
-                        "answer": "退款需要主管审批。",
-                        "quote": "退款需要主管审批。",
-                        "pageNo": 1,
-                        "embeddingStatus": "READY",
-                        "status": "ACTIVE",
-                    }
-                ],
-                "pagination": {
-                    "page": 1,
-                    "pageSize": 20,
-                    "totalItems": 1,
-                    "totalPages": 1,
-                },
-            },
-        )
-        return
-
-    if method == "GET" and path == "/api/v1/documents/doc-failed/qa-pairs":
-        fulfill_json(route, {"data": [], "pagination": {"page": 1, "pageSize": 20, "totalItems": 0, "totalPages": 0}})
-        return
-
-    if method == "PATCH" and path.endswith("/permissions"):
-        fulfill_json(route, READY_DOCUMENT["permissions"])
-        return
-
-    if method == "DELETE" and path.startswith("/api/v1/documents/"):
-        fulfill_json(route, {"id": path.rsplit("/", 1)[-1], "status": "DELETED"})
-        return
-
-    if method == "POST" and path == "/api/v1/import-jobs/job-failed/retries":
-        fulfill_json(
-            route,
-            {
-                "id": "job-failed",
-                "documentId": "doc-failed",
-                "status": "RUNNING",
-                "stage": "PARSING",
-                "progress": 20,
-                "retryCount": 2,
-                "errorCode": None,
-                "errorMessage": None,
-                "failedStage": None,
-                "retryable": False,
-                "file": None,
-            },
-        )
-        return
-
-    fulfill_json(
-        route,
-        {
-            "error": {
-                "code": "MOCK_NOT_FOUND",
-                "message": f"未配置 mock: {method} {path}",
-                "details": {},
-            },
-            "requestId": "req_mock_not_found",
-        },
-        status=404,
-    )
+def request_json(raw: str | None) -> dict | None:
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
 
 
-def prepare_page(page: Page) -> list[str]:
+def prepare_page(page: Page) -> tuple[list[str], KnowledgeApiMock]:
     console_errors: list[str] = []
+    api = KnowledgeApiMock()
     page.on(
         "console",
         lambda message: console_errors.append(message.text)
         if message.type in {"error", "warning"}
+        and "409 (Conflict)" not in message.text
         else None,
     )
-    page.route("**/*/api/v1/**", mock_api)
-    page.route("**/api/v1/**", mock_api)
-    page.add_init_script("localStorage.setItem('lingxi_access_token', 'playwright-token')")
-    return console_errors
+    page.route("**/*/api/v1/**", api.handle)
+    page.route("**/api/v1/**", api.handle)
+    page.add_init_script(
+        """
+        localStorage.setItem('lingxi_access_token', 'playwright-token');
+        localStorage.setItem('lingxi_user', JSON.stringify({
+          id: 'admin-playwright',
+          email: 'admin@example.com',
+          name: 'Playwright 管理员',
+          roles: ['admin'],
+          permissions: [
+            'DASHBOARD_READ', 'DOCUMENT_READ', 'DOCUMENT_WRITE',
+            'DOCUMENT_PERMISSION_WRITE', 'DOCUMENT_DELETE', 'TASK_RETRY'
+          ]
+        }));
+        """
+    )
+    return console_errors, api
 
 
-def verify_knowledge_page(page: Page, screenshot_name: str) -> list[str]:
-    errors = prepare_page(page)
-    page.goto(APP_URL, wait_until="networkidle")
+def verify_phase_two_desktop_flow(page: Page) -> tuple[list[str], KnowledgeApiMock]:
+    errors, api = prepare_page(page)
 
-    expect(page.get_by_role("heading", name="文档入库、权限和 QA 结果")).to_be_visible()
-    expect(page.get_by_text("Refund SOP").first).to_be_visible()
-    expect(page.get_by_text("Broken Manual").first).to_be_visible()
-    expect(page.get_by_text("退款需要主管审批。").first).to_be_visible()
-    expect(page.get_by_text("QA 对").first).to_be_visible()
-    expect(page.get_by_text("处理日志").first).to_be_visible()
+    verify_classification_admin_flow(page, api)
+    verify_upload_flow(page, api)
+    verify_document_filter_detail_edit_flow(page, api)
+    verify_no_overflow(page)
 
-    page.get_by_role("button", name="权限").first.click()
-    expect(page.get_by_role("dialog")).to_be_visible()
-    page.get_by_role("button", name="关闭").click()
+    return errors, api
 
-    page.get_by_role("button", name="Broken Manual").click()
-    expect(page.get_by_text("PARSER_UNAVAILABLE").first).to_be_visible()
+
+def verify_classification_admin_flow(page: Page, api: KnowledgeApiMock) -> None:
+    page.goto(f"{APP_ORIGIN}/#knowledge-classification", wait_until="networkidle")
+    expect(page.get_by_role("heading", name="知识库分类")).to_be_visible()
+    expect(page.get_by_text("客服知识库").first).to_be_visible()
+    expect(page.get_by_text("退款专题").first).to_be_visible()
+
+    page.get_by_role("button", name="新建空间").click()
+    space_dialog = page.get_by_role("dialog", name="新建知识库空间")
+    space_dialog.get_by_label("空间名称").fill("运营知识库")
+    space_dialog.get_by_label("空间编码").fill("operations")
+    space_dialog.get_by_label("描述").fill("运营 SOP 分类空间")
+    space_dialog.get_by_label("排序").fill("30")
+    space_dialog.get_by_role("button", name="保存").click()
+    expect(page.get_by_text("知识库空间已创建。")).to_be_visible()
+    created_space = api.find_request("POST", "/api/v1/knowledge-spaces")["body"]
+    assert created_space == {
+        "name": "运营知识库",
+        "code": "operations",
+        "description": "运营 SOP 分类空间",
+        "sortOrder": 30,
+        "status": "ACTIVE",
+    }
+
+    page.locator(".classification-space-row", has_text="运营知识库").get_by_role(
+        "button", name="编辑"
+    ).click()
+    edit_space_dialog = page.get_by_role("dialog", name="编辑知识库空间")
+    edit_space_dialog.get_by_label("空间名称").fill("运营知识库 v2")
+    edit_space_dialog.get_by_role("button", name="保存").click()
+    expect(page.get_by_text("知识库空间已更新。")).to_be_visible()
+    updated_space = api.find_request("PUT", "/api/v1/knowledge-spaces/space-created")["body"]
+    assert updated_space["name"] == "运营知识库 v2"
+
     page.once("dialog", lambda dialog: dialog.accept())
-    page.get_by_role("button", name="重试失败阶段").click()
-    expect(page.get_by_text("PARSING").first).to_be_visible()
+    page.locator(".classification-space-row", has_text="运营知识库 v2").get_by_role(
+        "button", name="删除"
+    ).click()
+    expect(page.get_by_text("知识库空间已删除。")).to_be_visible()
+    api.find_request("DELETE", "/api/v1/knowledge-spaces/space-created")
 
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator(".classification-space-row", has_text="客服知识库").get_by_role(
+        "button", name="删除"
+    ).click()
+    expect(page.get_by_text("存在项目 / 专题或文档引用，无法删除知识库空间。")).to_be_visible()
+
+    page.get_by_role("button", name="新建项目 / 专题").click()
+    category_dialog = page.get_by_role("dialog", name="新建项目 / 专题")
+    category_dialog.get_by_label("名称").fill("售后知识")
+    category_dialog.get_by_label("编码").fill("after-sales-guide")
+    category_dialog.get_by_label("类型").select_option("PROJECT")
+    category_dialog.get_by_label("排序").fill("40")
+    category_dialog.get_by_label("描述").fill("售后知识分类验收。")
+    category_dialog.get_by_role("button", name="保存").click()
+    expect(page.get_by_text("项目 / 专题已创建。")).to_be_visible()
+    created_category = api.find_request("POST", "/api/v1/knowledge-categories")["body"]
+    assert created_category == {
+        "spaceId": "space-001",
+        "departmentId": "dept-after-sales",
+        "name": "售后知识",
+        "code": "after-sales-guide",
+        "categoryType": "PROJECT",
+        "description": "售后知识分类验收。",
+        "parentId": None,
+        "sortOrder": 40,
+        "status": "ACTIVE",
+    }
+
+    page.locator(".classification-category-row", has_text="售后知识").get_by_role(
+        "button", name="编辑"
+    ).click()
+    edit_category_dialog = page.get_by_role("dialog", name="编辑项目 / 专题")
+    edit_category_dialog.get_by_label("名称").fill("售后知识 v2")
+    edit_category_dialog.get_by_role("button", name="保存").click()
+    expect(page.get_by_text("项目 / 专题已更新。")).to_be_visible()
+    updated_category = api.find_request("PUT", "/api/v1/knowledge-categories/cat-created")["body"]
+    assert updated_category["name"] == "售后知识 v2"
+    assert updated_category["spaceId"] == "space-001"
+    assert updated_category["departmentId"] == "dept-after-sales"
+
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator(".classification-category-row", has_text="售后知识 v2").get_by_role(
+        "button", name="删除"
+    ).click()
+    expect(page.get_by_text("项目 / 专题已删除。")).to_be_visible()
+    api.find_request("DELETE", "/api/v1/knowledge-categories/cat-created")
+
+    categories_request = api.find_request(
+        "GET",
+        "/api/v1/knowledge-categories",
+        spaceId="space-001",
+        departmentId="dept-after-sales",
+    )
+    assert categories_request["query"] == {"spaceId": "space-001", "departmentId": "dept-after-sales"}
+    page.screenshot(path=str(SCREENSHOT_DIR / "t09-knowledge-classification-desktop.png"), full_page=True)
+
+
+def verify_upload_flow(page: Page, api: KnowledgeApiMock) -> None:
+    upload_dir = Path(tempfile.mkdtemp(prefix="lingxi-t09-"))
+    upload_file = upload_dir / "playwright-refund.md"
+    upload_file.write_text("# Refund SOP\n\n退款需要主管审批。\n", encoding="utf-8")
+
+    page.goto(f"{APP_ORIGIN}/#knowledge", wait_until="networkidle")
+    expect(page.get_by_role("heading", name="文档入库、权限和 QA 结果")).to_be_visible()
+    expect(page.locator("#knowledge-classification-space")).to_be_enabled()
+    page.locator("#knowledge-classification-space").select_option("space-001")
+    expect(page.locator("#knowledge-classification-department")).to_be_enabled()
+    page.locator("#knowledge-classification-department").select_option("dept-after-sales")
+    expect(page.locator("#knowledge-classification-category")).to_be_enabled()
+    page.locator("#knowledge-classification-category").select_option("cat-refund")
+    page.locator("input[type=file]").set_input_files(str(upload_file))
+    page.get_by_role("button", name="创建导入任务").click()
+    expect(page.get_by_text("当前状态：COMPLETED · COMPLETED · 100%")).to_be_visible()
+
+    import_request = api.find_request("POST", "/api/v1/import-jobs")
+    assert import_request["body"]["title"] == "playwright-refund"
+    assert import_request["body"]["classification"] == {
+        "spaceId": "space-001",
+        "departmentId": "dept-after-sales",
+        "categoryId": "cat-refund",
+    }
+    api.find_request("POST", "/api/v1/import-jobs/job-upload/file")
+    page.screenshot(path=str(SCREENSHOT_DIR / "t09-knowledge-upload-desktop.png"), full_page=True)
+
+
+def verify_document_filter_detail_edit_flow(page: Page, api: KnowledgeApiMock) -> None:
+    page.goto(f"{APP_ORIGIN}/#documents", wait_until="networkidle")
+    expect(page.get_by_role("heading", name="文档列表").first).to_be_visible()
+    expect(page.get_by_text("Refund SOP").first).to_be_visible()
+    expect(page.get_by_text("客服知识库 / 售后部 / 退款专题").first).to_be_visible()
+    expect(page.get_by_text("退款需要主管审批。").first).to_be_visible()
+
+    page.locator("#document-list-classification-space").select_option("space-001")
+    expect(page.locator("#document-list-classification-department")).to_be_enabled()
+    page.locator("#document-list-classification-department").select_option("dept-after-sales")
+    expect(page.locator("#document-list-classification-category")).to_be_enabled()
+    page.locator("#document-list-classification-category").select_option("cat-refund")
+    expect(page.get_by_text("客服知识库 / 售后部 / 退款专题").first).to_be_visible()
+
+    filtered_request = api.find_request(
+        "GET",
+        "/api/v1/documents",
+        spaceId="space-001",
+        classificationDepartmentId="dept-after-sales",
+        categoryId="cat-refund",
+    )
+    assert filtered_request["query"]["page"] == "1"
+    assert filtered_request["query"]["pageSize"] == "20"
+
+    page.get_by_role("button", name="编辑分类").click()
+    modal = page.get_by_role("dialog")
+    expect(modal.get_by_text("当前分类：客服知识库 / 售后部 / 退款专题")).to_be_visible()
+    modal.locator("#document-classification-edit-category").select_option("cat-logistics")
+    modal.get_by_role("button", name="保存分类").click()
+    expect(page.get_by_text("客服知识库 / 售后部 / 物流专题").first).to_be_visible()
+
+    update_request = api.find_request("PATCH", "/api/v1/documents/doc-ready/classification")
+    assert update_request["body"] == {
+        "spaceId": "space-001",
+        "departmentId": "dept-after-sales",
+        "categoryId": "cat-logistics",
+    }
+
+    page.locator("#document-list-classification-category").select_option("cat-logistics")
+    expect(page.get_by_text("Refund SOP").first).to_be_visible()
+    expect(page.get_by_text("客服知识库 / 售后部 / 物流专题").first).to_be_visible()
+    api.find_request(
+        "GET",
+        "/api/v1/documents",
+        spaceId="space-001",
+        classificationDepartmentId="dept-after-sales",
+        categoryId="cat-logistics",
+    )
+    page.screenshot(path=str(SCREENSHOT_DIR / "t09-knowledge-documents-desktop.png"), full_page=True)
+
+
+def verify_mobile_smoke(page: Page) -> list[str]:
+    errors, _api = prepare_page(page)
+    page.goto(f"{APP_ORIGIN}/#knowledge", wait_until="networkidle")
+    expect(page.get_by_role("heading", name="文档入库、权限和 QA 结果")).to_be_visible()
+    expect(page.locator("#knowledge-classification-space")).to_be_visible()
+    verify_no_overflow(page)
+    page.screenshot(path=str(SCREENSHOT_DIR / "t09-knowledge-mobile.png"), full_page=True)
+    return errors
+
+
+def verify_no_overflow(page: Page) -> None:
     overflow = page.evaluate("document.documentElement.scrollWidth > window.innerWidth + 1")
     if overflow:
         raise AssertionError("页面存在水平溢出")
@@ -330,8 +704,17 @@ def verify_knowledge_page(page: Page, screenshot_name: str) -> list[str]:
     if local_overflows:
         raise AssertionError(f"关键容器存在局部水平溢出: {local_overflows}")
 
-    page.screenshot(path=str(SCREENSHOT_DIR / screenshot_name), full_page=True)
-    return errors
+
+def assert_phase_two_contracts(api: KnowledgeApiMock) -> None:
+    api.find_request("POST", "/api/v1/import-jobs")
+    api.find_request("POST", "/api/v1/import-jobs/job-upload/file")
+    api.find_request("PATCH", "/api/v1/documents/doc-ready/classification")
+    api.find_request("POST", "/api/v1/knowledge-spaces")
+    api.find_request("PUT", "/api/v1/knowledge-spaces/space-created")
+    api.find_request("DELETE", "/api/v1/knowledge-spaces/space-created")
+    api.find_request("POST", "/api/v1/knowledge-categories")
+    api.find_request("PUT", "/api/v1/knowledge-categories/cat-created")
+    api.find_request("DELETE", "/api/v1/knowledge-categories/cat-created")
 
 
 def main() -> None:
@@ -339,11 +722,12 @@ def main() -> None:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         desktop_page = browser.new_page(viewport={"width": 1440, "height": 900})
-        desktop_errors = verify_knowledge_page(desktop_page, "t09-knowledge-desktop.png")
+        desktop_errors, desktop_api = verify_phase_two_desktop_flow(desktop_page)
+        assert_phase_two_contracts(desktop_api)
         desktop_page.close()
 
         mobile_page = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True)
-        mobile_errors = verify_knowledge_page(mobile_page, "t09-knowledge-mobile.png")
+        mobile_errors = verify_mobile_smoke(mobile_page)
         mobile_page.close()
         browser.close()
 
@@ -351,8 +735,10 @@ def main() -> None:
     if all_errors:
         raise AssertionError(f"浏览器控制台存在错误或警告: {all_errors}")
 
-    print("T09 Playwright acceptance passed")
-    print(f"desktop={SCREENSHOT_DIR / 't09-knowledge-desktop.png'}")
+    print("T09 Playwright phase-2 knowledge classification acceptance passed")
+    print(f"classification={SCREENSHOT_DIR / 't09-knowledge-classification-desktop.png'}")
+    print(f"upload={SCREENSHOT_DIR / 't09-knowledge-upload-desktop.png'}")
+    print(f"documents={SCREENSHOT_DIR / 't09-knowledge-documents-desktop.png'}")
     print(f"mobile={SCREENSHOT_DIR / 't09-knowledge-mobile.png'}")
 
 

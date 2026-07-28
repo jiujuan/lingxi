@@ -310,6 +310,14 @@ label {
   grid-template-columns: minmax(360px, 0.9fr) minmax(520px, 1.1fr);
 }
 
+.classification-admin-grid > .panel {
+  min-width: 0;
+}
+
+.classification-admin-grid .table-list {
+  overflow-x: auto;
+}
+
 .table-row.classification-space-row {
   grid-template-columns: minmax(160px, 1.2fr) 120px minmax(120px, 1fr) 110px 140px minmax(120px, auto);
 }
