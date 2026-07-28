@@ -21,6 +21,7 @@ def seed_document_center_data(SessionLocal):
         DocumentStatus,
     )
     from server.app.models.import_job import ImportJob, ImportJobStatus
+    from server.app.models.knowledge_category import KnowledgeCategory, KnowledgeSpace
     from server.app.models.logs import TaskRun
     from server.app.models.qa_pair import DocumentChunk, QaPair
     from server.app.models.user import Department, Tenant
@@ -29,6 +30,36 @@ def seed_document_center_data(SessionLocal):
         tenant = session.scalar(select(Tenant))
         support = session.scalar(select(Department).where(Department.code == "SUPPORT"))
         private = session.scalar(select(Department).where(Department.code == "PRIVATE"))
+
+        support_space = KnowledgeSpace(
+            tenant_id=tenant.id,
+            name="客服知识库",
+            code="support-kb",
+        )
+        private_space = KnowledgeSpace(
+            tenant_id=tenant.id,
+            name="内部知识库",
+            code="internal-kb",
+        )
+        session.add_all([support_space, private_space])
+        session.flush()
+
+        refund_category = KnowledgeCategory(
+            tenant_id=tenant.id,
+            space_id=support_space.id,
+            department_id=support.id,
+            name="退款专题",
+            code="refund",
+        )
+        private_category = KnowledgeCategory(
+            tenant_id=tenant.id,
+            space_id=private_space.id,
+            department_id=private.id,
+            name="内部制度",
+            code="policy",
+        )
+        session.add_all([refund_category, private_category])
+        session.flush()
 
         ready_doc = Document(
             tenant_id=tenant.id,
@@ -45,6 +76,9 @@ def seed_document_center_data(SessionLocal):
             page_count=2,
             qa_pair_count=1,
             chunk_count=1,
+            knowledge_space_id=support_space.id,
+            category_department_id=support.id,
+            knowledge_category_id=refund_category.id,
         )
         private_doc = Document(
             tenant_id=tenant.id,
@@ -56,6 +90,9 @@ def seed_document_center_data(SessionLocal):
             object_key="uploads/private.md",
             checksum="private-checksum",
             status=DocumentStatus.READY,
+            knowledge_space_id=private_space.id,
+            category_department_id=private.id,
+            knowledge_category_id=private_category.id,
         )
         failed_doc = Document(
             tenant_id=tenant.id,
@@ -167,6 +204,11 @@ def seed_document_center_data(SessionLocal):
             "failed_document_id": failed_doc.id,
             "failed_job_id": failed_job.id,
             "support_department_id": support.id,
+            "private_department_id": private.id,
+            "support_space_id": support_space.id,
+            "private_space_id": private_space.id,
+            "refund_category_id": refund_category.id,
+            "private_category_id": private_category.id,
         }
 
 
@@ -186,6 +228,17 @@ def test_document_list_detail_and_chunks_follow_document_center_contract():
     assert body["data"][0]["title"] == "Refund SOP"
     assert body["data"][0]["latestJob"]["stage"] == "COMPLETED"
     assert body["data"][0]["permissions"]["allAuthenticated"] is True
+    classification = body["data"][0]["classification"]
+    assert classification["knowledgeSpaceId"] == ids["support_space_id"]
+    assert classification["categoryDepartmentId"] == ids["support_department_id"]
+    assert classification["knowledgeCategoryId"] == ids["refund_category_id"]
+    assert classification["knowledgeSpace"] == {
+        "id": ids["support_space_id"],
+        "name": "客服知识库",
+        "code": "support-kb",
+    }
+    assert classification["categoryDepartment"]["code"] == "SUPPORT"
+    assert classification["knowledgeCategory"]["name"] == "退款专题"
 
     employee_list = client.get("/api/v1/documents?page=1&pageSize=20", headers=employee_headers)
     assert employee_list.status_code == 200
@@ -202,6 +255,10 @@ def test_document_list_detail_and_chunks_follow_document_center_contract():
     assert detail_body["id"] == ids["ready_document_id"]
     assert detail_body["chunkCount"] == 1
     assert detail_body["latestJob"]["progress"] == 100
+    assert detail_body["classification"]["knowledgeCategoryId"] == ids[
+        "refund_category_id"
+    ]
+    assert detail_body["classification"]["knowledgeCategory"]["code"] == "refund"
 
     chunks = client.get(
         f"/api/v1/documents/{ids['ready_document_id']}/chunks?page=1&pageSize=10",
@@ -216,8 +273,134 @@ def test_document_list_detail_and_chunks_follow_document_center_contract():
         headers=admin_headers,
     )
     assert failed_detail.status_code == 200
-    assert failed_detail.json()["lastErrorCode"] == "PARSER_UNAVAILABLE"
-    assert failed_detail.json()["processingLogs"][0]["requestId"] == "req_failed_parse"
+    failed_body = failed_detail.json()
+    assert failed_body["lastErrorCode"] == "PARSER_UNAVAILABLE"
+    assert failed_body["processingLogs"][0]["requestId"] == "req_failed_parse"
+    assert failed_body["classification"] is None
+
+
+def test_document_list_supports_classification_filters_without_permission_leakage():
+    client, SessionLocal = build_test_client()
+    admin_headers = login_admin(client)
+    employee_headers = login_employee(client)
+    ids = seed_document_center_data(SessionLocal)
+
+    by_space = client.get(
+        f"/api/v1/documents?spaceId={ids['support_space_id']}&pageSize=20",
+        headers=admin_headers,
+    )
+    assert by_space.status_code == 200
+    assert {item["title"] for item in by_space.json()["data"]} == {"Refund SOP"}
+
+    by_department = client.get(
+        "/api/v1/documents"
+        f"?classificationDepartmentId={ids['private_department_id']}&pageSize=20",
+        headers=admin_headers,
+    )
+    assert by_department.status_code == 200
+    assert {item["title"] for item in by_department.json()["data"]} == {
+        "Private Playbook"
+    }
+
+    by_category = client.get(
+        f"/api/v1/documents?categoryId={ids['refund_category_id']}&pageSize=20",
+        headers=admin_headers,
+    )
+    assert by_category.status_code == 200
+    assert {item["title"] for item in by_category.json()["data"]} == {
+        "Refund SOP"
+    }
+
+    employee_private_category = client.get(
+        f"/api/v1/documents?categoryId={ids['private_category_id']}&pageSize=20",
+        headers=employee_headers,
+    )
+    assert employee_private_category.status_code == 200
+    assert employee_private_category.json()["data"] == []
+
+    mixed_department_filters = client.get(
+        "/api/v1/documents"
+        f"?departmentId={ids['support_department_id']}"
+        f"&classificationDepartmentId={ids['private_department_id']}"
+        "&pageSize=20",
+        headers=admin_headers,
+    )
+    assert mixed_department_filters.status_code == 200
+    assert mixed_department_filters.json()["data"] == []
+
+
+def test_document_classification_update_validates_path_and_writes_audit():
+    client, SessionLocal = build_test_client()
+    admin_headers = login_admin(client)
+    ids = seed_document_center_data(SessionLocal)
+
+    updated = client.patch(
+        f"/api/v1/documents/{ids['ready_document_id']}/classification",
+        headers=admin_headers,
+        json={
+            "spaceId": ids["private_space_id"],
+            "departmentId": ids["private_department_id"],
+            "categoryId": ids["private_category_id"],
+        },
+    )
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["knowledgeSpaceId"] == ids["private_space_id"]
+    assert body["categoryDepartmentId"] == ids["private_department_id"]
+    assert body["knowledgeCategoryId"] == ids["private_category_id"]
+    assert body["knowledgeSpace"]["name"] == "内部知识库"
+    assert body["knowledgeCategory"]["code"] == "policy"
+
+    from server.app.models.document import Document
+    from server.app.models.logs import AuditLog
+
+    with SessionLocal() as session:
+        document = session.get(Document, ids["ready_document_id"])
+        assert document.knowledge_space_id == ids["private_space_id"]
+        assert document.category_department_id == ids["private_department_id"]
+        assert document.knowledge_category_id == ids["private_category_id"]
+        audit = session.scalar(
+            select(AuditLog).where(
+                AuditLog.resource_id == ids["ready_document_id"],
+                AuditLog.action == "DOCUMENT_CLASSIFICATION_UPDATED",
+            )
+        )
+        assert audit is not None
+        assert audit.before_snapshot["knowledge_category_id"] == ids[
+            "refund_category_id"
+        ]
+        assert audit.after_snapshot["knowledge_category_id"] == ids[
+            "private_category_id"
+        ]
+
+    old_category = client.get(
+        f"/api/v1/documents?categoryId={ids['refund_category_id']}&pageSize=20",
+        headers=admin_headers,
+    )
+    assert old_category.status_code == 200
+    assert old_category.json()["data"] == []
+
+    new_category = client.get(
+        f"/api/v1/documents?categoryId={ids['private_category_id']}&pageSize=20",
+        headers=admin_headers,
+    )
+    assert new_category.status_code == 200
+    assert {item["title"] for item in new_category.json()["data"]} == {
+        "Refund SOP",
+        "Private Playbook",
+    }
+
+    invalid = client.patch(
+        f"/api/v1/documents/{ids['ready_document_id']}/classification",
+        headers=admin_headers,
+        json={
+            "spaceId": ids["private_space_id"],
+            "departmentId": ids["support_department_id"],
+            "categoryId": ids["private_category_id"],
+        },
+    )
+    assert invalid.status_code == 400
+    assert invalid.json()["error"]["code"] == "CLASSIFICATION_PATH_INVALID"
 
 
 def test_permissions_update_and_delete_write_audit_and_change_visibility():

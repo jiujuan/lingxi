@@ -3,12 +3,21 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from server.app.schemas.knowledge_category import DocumentClassificationResponse
 from server.app.schemas.qa_pair import PaginationResponse
 
 
 class NamedSubjectResponse(BaseModel):
     id: str
     name: str
+
+
+class DocumentClassificationUpdateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    knowledge_space_id: str | None = Field(default=None, alias="spaceId")
+    category_department_id: str | None = Field(default=None, alias="departmentId")
+    knowledge_category_id: str | None = Field(default=None, alias="categoryId")
 
 
 class DocumentPermissionRequest(BaseModel):
@@ -70,6 +79,7 @@ class DocumentListItemResponse(BaseModel):
     qa_pair_count: int = Field(alias="qaPairCount")
     chunk_count: int = Field(alias="chunkCount")
     permissions: DocumentPermissionResponse
+    classification: DocumentClassificationResponse | None = None
     latest_job: DocumentJobSummaryResponse | None = Field(alias="latestJob")
     last_error_code: str | None = Field(alias="lastErrorCode")
     last_error_message: str | None = Field(alias="lastErrorMessage")

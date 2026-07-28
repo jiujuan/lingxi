@@ -13,12 +13,14 @@ from server.app.repositories.document_repo import DocumentRepository
 from server.app.repositories.qa_pair_repo import QaPairRepository
 from server.app.schemas.document import (
     DocumentChunkListResponse,
+    DocumentClassificationUpdateRequest,
     DocumentDeleteResponse,
     DocumentDetailResponse,
     DocumentListResponse,
     DocumentPermissionRequest,
     DocumentPermissionResponse,
 )
+from server.app.schemas.knowledge_category import DocumentClassificationResponse
 from server.app.schemas.qa_pair import QaPairListResponse, QaRegenerationResponse
 from server.app.services.document_center_service import DocumentCenterService
 from server.app.services.qa_split_service import QaSplitService
@@ -33,6 +35,11 @@ def list_documents(
     status: str | None = Query(default=None),
     department_id: str | None = Query(default=None, alias="departmentId"),
     role_id: str | None = Query(default=None, alias="roleId"),
+    space_id: str | None = Query(default=None, alias="spaceId"),
+    classification_department_id: str | None = Query(
+        default=None, alias="classificationDepartmentId"
+    ),
+    category_id: str | None = Query(default=None, alias="categoryId"),
     updated_after: datetime | None = Query(default=None, alias="updatedAfter"),
     updated_before: datetime | None = Query(default=None, alias="updatedBefore"),
     page: int = Query(default=1, ge=1),
@@ -47,6 +54,9 @@ def list_documents(
         status=status,
         department_id=department_id,
         role_id=role_id,
+        space_id=space_id,
+        classification_department_id=classification_department_id,
+        category_id=category_id,
         updated_after=updated_after,
         updated_before=updated_before,
         page=page,
@@ -120,6 +130,21 @@ def update_document_permissions(
 ) -> dict:
     return DocumentCenterService(db).update_permissions(
         context, document_id, payload.model_dump(by_alias=True)
+    )
+
+
+@router.patch(
+    "/{document_id}/classification",
+    response_model=DocumentClassificationResponse,
+)
+def update_document_classification(
+    document_id: str,
+    payload: DocumentClassificationUpdateRequest,
+    context: AccessContext = Depends(require_permission("DOCUMENT_WRITE")),
+    db: Session = Depends(get_db),
+) -> dict:
+    return DocumentCenterService(db).update_classification(
+        context, document_id, payload
     )
 
 

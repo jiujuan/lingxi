@@ -19,6 +19,7 @@ from server.app.models.qa_pair import DocumentChunk
 from server.app.models.role import Role
 from server.app.models.user import Department, User
 from server.app.repositories.document_repo import DocumentRepository
+from server.app.services.knowledge_category_service import KnowledgeCategoryService
 
 
 class DocumentCenterService:
@@ -35,6 +36,9 @@ class DocumentCenterService:
         status: str | None,
         department_id: str | None,
         role_id: str | None,
+        space_id: str | None,
+        classification_department_id: str | None,
+        category_id: str | None,
         updated_after: datetime | None,
         updated_before: datetime | None,
         page: int,
@@ -47,6 +51,9 @@ class DocumentCenterService:
             status=status,
             department_id=department_id,
             role_id=role_id,
+            space_id=space_id,
+            classification_department_id=classification_department_id,
+            category_id=category_id,
             updated_after=updated_after,
             updated_before=updated_before,
             page=page,
@@ -113,6 +120,41 @@ class DocumentCenterService:
         self.session.commit()
         return self.permission_to_dict(context.tenant_id, document.id)
 
+    def update_classification(
+        self, context: AccessContext, document_id: str, classification: object
+    ) -> dict:
+        document = self._get_document(context, document_id)
+        classification_service = KnowledgeCategoryService(self.session)
+        before_snapshot = self.classification_to_dict(context.tenant_id, document)
+        validated = classification_service.validate_classification(
+            context, classification
+        )
+
+        document.knowledge_space_id = (
+            validated.knowledge_space.id if validated.knowledge_space else None
+        )
+        document.category_department_id = (
+            validated.category_department.id
+            if validated.category_department
+            else None
+        )
+        document.knowledge_category_id = (
+            validated.knowledge_category.id if validated.knowledge_category else None
+        )
+
+        after_snapshot = classification_service.classification_to_dict(
+            context.tenant_id, document
+        )
+        self._add_audit(
+            context,
+            action="DOCUMENT_CLASSIFICATION_UPDATED",
+            resource_id=document.id,
+            before_snapshot=before_snapshot,
+            after_snapshot=after_snapshot,
+        )
+        self.session.commit()
+        return after_snapshot
+
     def delete_document(self, context: AccessContext, document_id: str) -> dict:
         document = self._get_document(context, document_id)
         before_snapshot = {
@@ -146,12 +188,26 @@ class DocumentCenterService:
             "qa_pair_count": document.qa_pair_count,
             "chunk_count": document.chunk_count,
             "permissions": self.permission_to_dict(tenant_id, document.id),
+            "classification": self.classification_to_dict(tenant_id, document),
             "latest_job": self.job_to_dict(latest_job) if latest_job else None,
             "last_error_code": document.last_error_code,
             "last_error_message": document.last_error_message,
             "created_at": document.created_at,
             "updated_at": document.updated_at,
         }
+
+    def classification_to_dict(
+        self, tenant_id: str, document: Document
+    ) -> dict | None:
+        if not (
+            document.knowledge_space_id
+            or document.category_department_id
+            or document.knowledge_category_id
+        ):
+            return None
+        return KnowledgeCategoryService(self.session).classification_to_dict(
+            tenant_id, document
+        )
 
     def permission_to_dict(self, tenant_id: str, document_id: str) -> dict:
         rules = self.documents.list_access_rules(tenant_id, document_id)
@@ -309,8 +365,8 @@ class DocumentCenterService:
         *,
         action: str,
         resource_id: str,
-        before_snapshot: dict,
-        after_snapshot: dict,
+        before_snapshot: dict | None,
+        after_snapshot: dict | None,
     ) -> None:
         self.session.add(
             AuditLog(

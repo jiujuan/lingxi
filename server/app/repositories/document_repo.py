@@ -29,6 +29,9 @@ class DocumentRepository:
         status: str | None = None,
         department_id: str | None = None,
         role_id: str | None = None,
+        space_id: str | None = None,
+        classification_department_id: str | None = None,
+        category_id: str | None = None,
         updated_after: datetime | None = None,
         updated_before: datetime | None = None,
         page: int = 1,
@@ -41,6 +44,9 @@ class DocumentRepository:
             status=status,
             department_id=department_id,
             role_id=role_id,
+            space_id=space_id,
+            classification_department_id=classification_department_id,
+            category_id=category_id,
             updated_after=updated_after,
             updated_before=updated_before,
         )
@@ -176,6 +182,9 @@ class DocumentRepository:
         status: str | None,
         department_id: str | None,
         role_id: str | None,
+        space_id: str | None,
+        classification_department_id: str | None,
+        category_id: str | None,
         updated_after: datetime | None,
         updated_before: datetime | None,
     ) -> list:
@@ -205,6 +214,14 @@ class DocumentRepository:
             filters.append(
                 self._specific_access_exists(DocumentAccessSubjectType.ROLE, role_id)
             )
+        if space_id:
+            filters.append(Document.knowledge_space_id == space_id)
+        if classification_department_id:
+            filters.append(
+                Document.category_department_id == classification_department_id
+            )
+        if category_id:
+            filters.append(Document.knowledge_category_id == category_id)
         if updated_after:
             filters.append(Document.updated_at >= updated_after)
         if updated_before:
