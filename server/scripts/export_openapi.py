@@ -14,9 +14,13 @@ import json
 from pathlib import Path
 import sys
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from server.app.main import create_app
 
-DEFAULT_OUTPUT = Path(__file__).resolve().parents[2] / "web" / "admin" / "openapi.json"
+DEFAULT_OUTPUT = REPO_ROOT / "web" / "admin" / "openapi.json"
 
 
 def export_openapi(output_path: Path) -> Path:

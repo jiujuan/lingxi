@@ -168,6 +168,140 @@ def test_create_import_job_rejects_inconsistent_classification_path():
     assert response.json()["error"]["code"] == "CLASSIFICATION_PATH_INVALID"
 
 
+def test_phase1_classification_api_flow_updates_document_category(monkeypatch, tmp_path):
+    client, SessionLocal = build_test_client()
+    headers = login_admin(client)
+    queued: list[str] = []
+
+    from server.app.integrations.storage.local import LocalObjectStorage
+    from server.app.models.user import Department
+    from server.app.services import import_service
+
+    monkeypatch.setattr(
+        import_service,
+        "get_storage_adapter",
+        lambda: LocalObjectStorage(tmp_path),
+    )
+    monkeypatch.setattr(import_service, "enqueue_parse_task", queued.append)
+
+    with SessionLocal() as session:
+        support = session.scalar(select(Department).where(Department.code == "SUPPORT"))
+        assert support is not None
+        department_id = support.id
+
+    first_space = client.post(
+        "/api/v1/knowledge-spaces",
+        headers=headers,
+        json={"name": "客服知识库", "code": "support-kb"},
+    )
+    assert first_space.status_code == 201
+    second_space = client.post(
+        "/api/v1/knowledge-spaces",
+        headers=headers,
+        json={"name": "运营知识库", "code": "ops-kb"},
+    )
+    assert second_space.status_code == 201
+
+    first_category = client.post(
+        "/api/v1/knowledge-categories",
+        headers=headers,
+        json={
+            "spaceId": first_space.json()["id"],
+            "departmentId": department_id,
+            "name": "退款专题",
+            "code": "refund",
+        },
+    )
+    assert first_category.status_code == 201
+    second_category = client.post(
+        "/api/v1/knowledge-categories",
+        headers=headers,
+        json={
+            "spaceId": second_space.json()["id"],
+            "departmentId": department_id,
+            "name": "售后专题",
+            "code": "after-sales",
+        },
+    )
+    assert second_category.status_code == 201
+
+    job_response = client.post(
+        "/api/v1/import-jobs",
+        headers=headers,
+        json={
+            "title": "Phase1 Refund SOP",
+            "classification": {
+                "spaceId": first_space.json()["id"],
+                "departmentId": department_id,
+                "categoryId": first_category.json()["id"],
+            },
+            "permission": {"allAuthenticated": True},
+        },
+    )
+    assert job_response.status_code == 201
+    job = job_response.json()
+
+    file_response = client.post(
+        f"/api/v1/import-jobs/{job['id']}/files",
+        headers=headers,
+        json={
+            "objectKey": "uploads/phase1-refund.md",
+            "fileName": "phase1-refund.md",
+            "mimeType": "text/markdown",
+            "fileSize": 28,
+            "checksum": "sha256:phase1-refund",
+            "contentBase64": b64encode(b"# Refund\n\nUse refund flow.").decode("ascii"),
+        },
+    )
+    assert file_response.status_code == 201
+    assert queued == [job["id"]]
+
+    first_list = client.get(
+        f"/api/v1/documents?categoryId={first_category.json()['id']}&pageSize=20",
+        headers=headers,
+    )
+    assert first_list.status_code == 200
+    assert [item["id"] for item in first_list.json()["data"]] == [job["documentId"]]
+    assert first_list.json()["data"][0]["classification"]["knowledgeCategory"] == {
+        "id": first_category.json()["id"],
+        "name": "退款专题",
+        "code": "refund",
+    }
+
+    updated = client.patch(
+        f"/api/v1/documents/{job['documentId']}/classification",
+        headers=headers,
+        json={
+            "spaceId": second_space.json()["id"],
+            "departmentId": department_id,
+            "categoryId": second_category.json()["id"],
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["knowledgeCategoryId"] == second_category.json()["id"]
+
+    moved_from_first = client.get(
+        f"/api/v1/documents?categoryId={first_category.json()['id']}&pageSize=20",
+        headers=headers,
+    )
+    assert moved_from_first.status_code == 200
+    assert moved_from_first.json()["data"] == []
+
+    moved_to_second = client.get(
+        f"/api/v1/documents?categoryId={second_category.json()['id']}&pageSize=20",
+        headers=headers,
+    )
+    assert moved_to_second.status_code == 200
+    assert [item["id"] for item in moved_to_second.json()["data"]] == [
+        job["documentId"]
+    ]
+    assert moved_to_second.json()["data"][0]["classification"]["knowledgeSpace"] == {
+        "id": second_space.json()["id"],
+        "name": "运营知识库",
+        "code": "ops-kb",
+    }
+
+
 def test_bind_import_file_validates_object_key_and_enqueues_parser(monkeypatch, tmp_path):
     client, _ = build_test_client()
     headers = login_admin(client)

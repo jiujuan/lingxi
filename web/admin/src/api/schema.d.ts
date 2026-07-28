@@ -417,6 +417,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{document_id}/classification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Document Classification */
+        patch: operations["update_document_classification_api_v1_documents__document_id__classification_patch"];
+        trace?: never;
+    };
     "/api/v1/documents/{document_id}/permissions": {
         parameters: {
             query?: never;
@@ -548,6 +565,78 @@ export interface paths {
         /** Retry Import Job */
         post: operations["retry_import_job_api_v1_import_jobs__job_id__retries_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge-categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Knowledge Categories */
+        get: operations["list_knowledge_categories_api_v1_knowledge_categories_get"];
+        put?: never;
+        /** Create Knowledge Category */
+        post: operations["create_knowledge_category_api_v1_knowledge_categories_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge-categories/{category_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Knowledge Category */
+        put: operations["update_knowledge_category_api_v1_knowledge_categories__category_id__put"];
+        post?: never;
+        /** Delete Knowledge Category */
+        delete: operations["delete_knowledge_category_api_v1_knowledge_categories__category_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge-spaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Knowledge Spaces */
+        get: operations["list_knowledge_spaces_api_v1_knowledge_spaces_get"];
+        put?: never;
+        /** Create Knowledge Space */
+        post: operations["create_knowledge_space_api_v1_knowledge_spaces_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge-spaces/{space_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Knowledge Space */
+        put: operations["update_knowledge_space_api_v1_knowledge_spaces__space_id__put"];
+        post?: never;
+        /** Delete Knowledge Space */
+        delete: operations["delete_knowledge_space_api_v1_knowledge_spaces__space_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1337,6 +1426,27 @@ export interface components {
             /** Tokencount */
             tokenCount: number;
         };
+        /** DocumentClassificationResponse */
+        DocumentClassificationResponse: {
+            categoryDepartment: components["schemas"]["NamedClassificationNodeResponse"] | null;
+            /** Categorydepartmentid */
+            categoryDepartmentId: string | null;
+            knowledgeCategory: components["schemas"]["NamedClassificationNodeResponse"] | null;
+            /** Knowledgecategoryid */
+            knowledgeCategoryId: string | null;
+            knowledgeSpace: components["schemas"]["NamedClassificationNodeResponse"] | null;
+            /** Knowledgespaceid */
+            knowledgeSpaceId: string | null;
+        };
+        /** DocumentClassificationUpdateRequest */
+        DocumentClassificationUpdateRequest: {
+            /** Categoryid */
+            categoryId?: string | null;
+            /** Departmentid */
+            departmentId?: string | null;
+            /** Spaceid */
+            spaceId?: string | null;
+        };
         /** DocumentDeleteResponse */
         DocumentDeleteResponse: {
             /** Id */
@@ -1350,6 +1460,7 @@ export interface components {
             checksum: string;
             /** Chunkcount */
             chunkCount: number;
+            classification?: components["schemas"]["DocumentClassificationResponse"] | null;
             /**
              * Createdat
              * Format: date-time
@@ -1418,6 +1529,7 @@ export interface components {
         DocumentListItemResponse: {
             /** Chunkcount */
             chunkCount: number;
+            classification?: components["schemas"]["DocumentClassificationResponse"] | null;
             /**
              * Createdat
              * Format: date-time
@@ -1504,8 +1616,18 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** ImportClassificationRequest */
+        ImportClassificationRequest: {
+            /** Categoryid */
+            categoryId?: string | null;
+            /** Departmentid */
+            departmentId?: string | null;
+            /** Spaceid */
+            spaceId?: string | null;
+        };
         /** ImportJobCreateRequest */
         ImportJobCreateRequest: {
+            classification?: components["schemas"]["ImportClassificationRequest"] | null;
             /** Parseoptions */
             parseOptions?: {
                 [key: string]: unknown;
@@ -1603,6 +1725,145 @@ export interface components {
             trend: {
                 [key: string]: unknown;
             }[];
+        };
+        /** KnowledgeCategoryCreateRequest */
+        KnowledgeCategoryCreateRequest: {
+            /** @default TOPIC */
+            categoryType: components["schemas"]["KnowledgeCategoryType"];
+            /** Code */
+            code: string;
+            /** Departmentid */
+            departmentId: string;
+            /** Description */
+            description?: string | null;
+            /** Name */
+            name: string;
+            /** Parentid */
+            parentId?: string | null;
+            /**
+             * Sortorder
+             * @default 0
+             */
+            sortOrder: number;
+            /** Spaceid */
+            spaceId: string;
+            /**
+             * Status
+             * @default ACTIVE
+             */
+            status: string;
+        };
+        /** KnowledgeCategoryListResponse */
+        KnowledgeCategoryListResponse: {
+            /** Data */
+            data: components["schemas"]["KnowledgeCategoryResponse"][];
+        };
+        /** KnowledgeCategoryResponse */
+        KnowledgeCategoryResponse: {
+            categoryType: components["schemas"]["KnowledgeCategoryType"];
+            /** Code */
+            code: string;
+            /** Createdat */
+            createdAt: string | null;
+            /** Departmentid */
+            departmentId: string;
+            /** Description */
+            description: string | null;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Parentid */
+            parentId: string | null;
+            /** Sortorder */
+            sortOrder: number;
+            /** Spaceid */
+            spaceId: string;
+            /** Status */
+            status: string;
+            /** Updatedat */
+            updatedAt: string | null;
+        };
+        /**
+         * KnowledgeCategoryType
+         * @enum {string}
+         */
+        KnowledgeCategoryType: "PROJECT" | "TOPIC";
+        /** KnowledgeCategoryUpdateRequest */
+        KnowledgeCategoryUpdateRequest: {
+            categoryType?: components["schemas"]["KnowledgeCategoryType"] | null;
+            /** Code */
+            code?: string | null;
+            /** Departmentid */
+            departmentId?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Parentid */
+            parentId?: string | null;
+            /** Sortorder */
+            sortOrder?: number | null;
+            /** Spaceid */
+            spaceId?: string | null;
+            /** Status */
+            status?: string | null;
+        };
+        /** KnowledgeSpaceCreateRequest */
+        KnowledgeSpaceCreateRequest: {
+            /** Code */
+            code: string;
+            /** Description */
+            description?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Sortorder
+             * @default 0
+             */
+            sortOrder: number;
+            /**
+             * Status
+             * @default ACTIVE
+             */
+            status: string;
+        };
+        /** KnowledgeSpaceListResponse */
+        KnowledgeSpaceListResponse: {
+            /** Data */
+            data: components["schemas"]["KnowledgeSpaceResponse"][];
+        };
+        /** KnowledgeSpaceResponse */
+        KnowledgeSpaceResponse: {
+            /** Code */
+            code: string;
+            /** Createdat */
+            createdAt: string | null;
+            /** Description */
+            description: string | null;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Sortorder */
+            sortOrder: number;
+            /** Status */
+            status: string;
+            /** Updatedat */
+            updatedAt: string | null;
+        };
+        /** KnowledgeSpaceUpdateRequest */
+        KnowledgeSpaceUpdateRequest: {
+            /** Code */
+            code?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Sortorder */
+            sortOrder?: number | null;
+            /** Status */
+            status?: string | null;
         };
         /** LoginRequest */
         LoginRequest: {
@@ -1789,6 +2050,15 @@ export interface components {
             name?: string | null;
             /** Status */
             status?: string | null;
+        };
+        /** NamedClassificationNodeResponse */
+        NamedClassificationNodeResponse: {
+            /** Code */
+            code: string;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
         };
         /** NamedSubjectResponse */
         NamedSubjectResponse: {
@@ -2952,6 +3222,9 @@ export interface operations {
                 status?: string | null;
                 departmentId?: string | null;
                 roleId?: string | null;
+                spaceId?: string | null;
+                classificationDepartmentId?: string | null;
+                categoryId?: string | null;
                 updatedAfter?: string | null;
                 updatedBefore?: string | null;
                 page?: number;
@@ -3066,6 +3339,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentChunkListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_document_classification_api_v1_documents__document_id__classification_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentClassificationUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentClassificationResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3331,6 +3639,256 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_knowledge_categories_api_v1_knowledge_categories_get: {
+        parameters: {
+            query?: {
+                spaceId?: string | null;
+                departmentId?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeCategoryListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_knowledge_category_api_v1_knowledge_categories_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeCategoryCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeCategoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_knowledge_category_api_v1_knowledge_categories__category_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeCategoryUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeCategoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_knowledge_category_api_v1_knowledge_categories__category_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_knowledge_spaces_api_v1_knowledge_spaces_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeSpaceListResponse"];
+                };
+            };
+        };
+    };
+    create_knowledge_space_api_v1_knowledge_spaces_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeSpaceCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeSpaceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_knowledge_space_api_v1_knowledge_spaces__space_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                space_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeSpaceUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeSpaceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_knowledge_space_api_v1_knowledge_spaces__space_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                space_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
                 };
             };
             /** @description Validation Error */
