@@ -548,3 +548,246 @@ def test_classification_to_dict_returns_named_nodes():
     assert serialized["knowledge_space"]["name"] == "客服知识库"
     assert serialized["category_department"]["code"] == "SUPPORT"
     assert serialized["knowledge_category"]["name"] == "退款专题"
+
+
+def _login_admin_headers(client) -> dict:
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.com", "password": "Admin123!"},
+    )
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['accessToken']}"}
+
+
+def _login_employee_headers(client) -> dict:
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "employee@example.com", "password": "Employee123!"},
+    )
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['accessToken']}"}
+
+
+def _department_ids(SessionLocal) -> dict[str, str]:
+    from server.app.models.user import Department
+
+    with SessionLocal() as session:
+        return {
+            department.code: department.id
+            for department in session.scalars(select(Department)).all()
+        }
+
+
+def test_knowledge_classification_openapi_contains_management_paths():
+    from server.tests.test_auth_rbac import build_test_client
+
+    client, _SessionLocal = build_test_client()
+    schema = client.get("/openapi.json").json()
+
+    assert "/api/v1/knowledge-spaces" in schema["paths"]
+    assert "/api/v1/knowledge-spaces/{space_id}" in schema["paths"]
+    assert "/api/v1/knowledge-categories" in schema["paths"]
+    assert "/api/v1/knowledge-categories/{category_id}" in schema["paths"]
+
+
+def test_admin_can_crud_knowledge_spaces_over_http():
+    from server.tests.test_auth_rbac import build_test_client
+
+    client, _SessionLocal = build_test_client()
+    headers = _login_admin_headers(client)
+
+    created = client.post(
+        "/api/v1/knowledge-spaces",
+        headers=headers,
+        json={
+            "name": "客服知识库",
+            "code": "support-kb",
+            "description": "客服团队使用",
+            "sortOrder": 2,
+        },
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["name"] == "客服知识库"
+    assert body["sortOrder"] == 2
+    assert "sort_order" not in body
+
+    listed = client.get("/api/v1/knowledge-spaces", headers=headers)
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()["data"]] == [body["id"]]
+
+    updated = client.put(
+        f"/api/v1/knowledge-spaces/{body['id']}",
+        headers=headers,
+        json={"name": "客服资料库", "code": "support-docs"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "客服资料库"
+    assert updated.json()["code"] == "support-docs"
+
+    deleted = client.delete(f"/api/v1/knowledge-spaces/{body['id']}", headers=headers)
+    assert deleted.status_code == 200
+    assert deleted.json() == {"ok": True}
+    assert client.get("/api/v1/knowledge-spaces", headers=headers).json()["data"] == []
+
+
+def test_admin_can_crud_and_filter_knowledge_categories_over_http():
+    from server.tests.test_auth_rbac import build_test_client
+
+    client, SessionLocal = build_test_client()
+    headers = _login_admin_headers(client)
+    departments = _department_ids(SessionLocal)
+    support_id = departments["SUPPORT"]
+    private_id = departments["PRIVATE"]
+
+    space = client.post(
+        "/api/v1/knowledge-spaces",
+        headers=headers,
+        json={"name": "客服知识库", "code": "support-kb"},
+    ).json()
+    other_space = client.post(
+        "/api/v1/knowledge-spaces",
+        headers=headers,
+        json={"name": "内部知识库", "code": "internal-kb"},
+    ).json()
+    category = client.post(
+        "/api/v1/knowledge-categories",
+        headers=headers,
+        json={
+            "spaceId": space["id"],
+            "departmentId": support_id,
+            "name": "退款专题",
+            "code": "refund",
+            "categoryType": "TOPIC",
+            "sortOrder": 5,
+        },
+    )
+    assert category.status_code == 201
+    body = category.json()
+    assert body["spaceId"] == space["id"]
+    assert body["departmentId"] == support_id
+    assert body["categoryType"] == "TOPIC"
+    assert body["sortOrder"] == 5
+
+    second = client.post(
+        "/api/v1/knowledge-categories",
+        headers=headers,
+        json={
+            "spaceId": other_space["id"],
+            "departmentId": private_id,
+            "name": "内部制度",
+            "code": "policy",
+        },
+    ).json()
+
+    listed_by_space = client.get(
+        "/api/v1/knowledge-categories",
+        headers=headers,
+        params={"spaceId": space["id"]},
+    )
+    assert listed_by_space.status_code == 200
+    assert [item["id"] for item in listed_by_space.json()["data"]] == [body["id"]]
+
+    listed_by_department = client.get(
+        "/api/v1/knowledge-categories",
+        headers=headers,
+        params={"departmentId": private_id},
+    )
+    assert listed_by_department.status_code == 200
+    assert [item["id"] for item in listed_by_department.json()["data"]] == [
+        second["id"]
+    ]
+
+    updated = client.put(
+        f"/api/v1/knowledge-categories/{body['id']}",
+        headers=headers,
+        json={"name": "退款项目", "categoryType": "PROJECT"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "退款项目"
+    assert updated.json()["categoryType"] == "PROJECT"
+
+    deleted = client.delete(
+        f"/api/v1/knowledge-categories/{body['id']}", headers=headers
+    )
+    assert deleted.status_code == 200
+    assert deleted.json() == {"ok": True}
+
+
+def test_knowledge_classification_api_error_mapping_and_permissions():
+    from server.tests.test_auth_rbac import build_test_client
+
+    client, SessionLocal = build_test_client()
+    admin_headers = _login_admin_headers(client)
+    employee_headers = _login_employee_headers(client)
+    support_id = _department_ids(SessionLocal)["SUPPORT"]
+
+    unauthorized_write = client.post(
+        "/api/v1/knowledge-spaces",
+        headers=employee_headers,
+        json={"name": "客服知识库", "code": "support-kb"},
+    )
+    assert unauthorized_write.status_code == 403
+    assert unauthorized_write.json()["error"]["code"] == "FORBIDDEN"
+
+    space = client.post(
+        "/api/v1/knowledge-spaces",
+        headers=admin_headers,
+        json={"name": "客服知识库", "code": "support-kb"},
+    ).json()
+    duplicate = client.post(
+        "/api/v1/knowledge-spaces",
+        headers=admin_headers,
+        json={"name": "客服知识库", "code": "support-kb"},
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["error"]["code"] == "KNOWLEDGE_SPACE_CODE_EXISTS"
+
+    missing_space_category = client.post(
+        "/api/v1/knowledge-categories",
+        headers=admin_headers,
+        json={
+            "spaceId": "missing-space",
+            "departmentId": support_id,
+            "name": "退款专题",
+            "code": "refund",
+        },
+    )
+    assert missing_space_category.status_code == 404
+    assert missing_space_category.json()["error"]["code"] == "NOT_FOUND"
+
+    missing_filter = client.get(
+        "/api/v1/knowledge-categories",
+        headers=admin_headers,
+        params={"spaceId": "missing-space"},
+    )
+    assert missing_filter.status_code == 404
+
+    category = client.post(
+        "/api/v1/knowledge-categories",
+        headers=admin_headers,
+        json={
+            "spaceId": space["id"],
+            "departmentId": support_id,
+            "name": "退款专题",
+            "code": "refund",
+        },
+    ).json()
+    duplicate_category = client.post(
+        "/api/v1/knowledge-categories",
+        headers=admin_headers,
+        json={
+            "spaceId": space["id"],
+            "departmentId": support_id,
+            "name": "退款专题",
+            "code": "refund",
+        },
+    )
+    assert duplicate_category.status_code == 409
+    assert duplicate_category.json()["error"]["code"] == (
+        "KNOWLEDGE_CATEGORY_CODE_EXISTS"
+    )
+
+    assert client.delete(
+        f"/api/v1/knowledge-categories/{category['id']}", headers=employee_headers
+    ).status_code == 403

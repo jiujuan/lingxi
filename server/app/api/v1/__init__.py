@@ -9,6 +9,7 @@ from server.app.api.v1 import (
     departments,
     documents,
     import_jobs,
+    knowledge_categories,
     logs,
     model_config,
     query_runs,
@@ -24,6 +25,7 @@ api_router.include_router(departments.router)
 api_router.include_router(users.router)
 api_router.include_router(model_config.router)
 api_router.include_router(import_jobs.router)
+api_router.include_router(knowledge_categories.router)
 api_router.include_router(documents.router)
 api_router.include_router(chat.router)
 api_router.include_router(query_runs.router)
