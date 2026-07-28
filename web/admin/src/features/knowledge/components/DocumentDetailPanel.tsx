@@ -2,6 +2,7 @@ import type { DocumentChunk, KnowledgeDocumentDetail } from '../api/documentApi'
 import type { ImportJob } from '../api/importJobApi';
 import { PermissionGate } from '../../../auth/PermissionGate';
 import { formatDateTime } from '../../../shared/format';
+import { formatClassificationPath } from './KnowledgeClassificationSelect';
 import { ImportJobTimeline } from './ImportJobTimeline';
 import { QaPairList } from './QaPairList';
 
@@ -12,6 +13,7 @@ type Props = {
   error: string | null;
   onRefresh: () => void;
   onEditPermissions: (document: KnowledgeDocumentDetail) => void;
+  onEditClassification: (document: KnowledgeDocumentDetail) => void;
   onDelete: (document: KnowledgeDocumentDetail) => void;
   onRetry: (document: KnowledgeDocumentDetail) => void;
   onJobUpdated: (job: ImportJob) => void;
@@ -24,6 +26,7 @@ export function DocumentDetailPanel({
   error,
   onRefresh,
   onEditPermissions,
+  onEditClassification,
   onDelete,
   onRetry,
   onJobUpdated,
@@ -67,6 +70,11 @@ export function DocumentDetailPanel({
               编辑权限
             </button>
           </PermissionGate>
+          <PermissionGate permission="DOCUMENT_WRITE">
+            <button onClick={() => onEditClassification(detail)} type="button">
+              编辑分类
+            </button>
+          </PermissionGate>
           {detail.latestJob?.retryable ? (
             <PermissionGate permission="TASK_RETRY">
               <button onClick={() => onRetry(detail)} type="button">
@@ -88,6 +96,10 @@ export function DocumentDetailPanel({
         <div>
           <span className="field-label">权限范围</span>
           <strong>{permissionText(detail.permissions)}</strong>
+        </div>
+        <div>
+          <span className="field-label">分类路径</span>
+          <strong>{renderClassification(detail)}</strong>
         </div>
         <div>
           <span className="field-label">解析器</span>
@@ -205,6 +217,10 @@ function errorHint(code: string | null | undefined): string[] | null {
     return null;
   }
   return ERROR_HINTS[code] ?? null;
+}
+
+function renderClassification(document: KnowledgeDocumentDetail) {
+  return formatClassificationPath(document.classification);
 }
 
 function permissionText(permission: KnowledgeDocumentDetail['permissions']) {

@@ -13,6 +13,7 @@ import {
   type Pagination,
 } from '../api/documentApi';
 import { getImportJob, retryImportJob, type ImportJob } from '../api/importJobApi';
+import { DocumentClassificationModal } from '../components/DocumentClassificationModal';
 import { DocumentDetailPanel } from '../components/DocumentDetailPanel';
 import { DocumentList } from '../components/DocumentList';
 import { DocumentPermissionModal } from '../components/DocumentPermissionModal';
@@ -50,6 +51,9 @@ export function DocumentListPage() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<ImportJob | null>(null);
   const [permissionTarget, setPermissionTarget] = useState<KnowledgeDocument | null>(null);
+  const [classificationTarget, setClassificationTarget] = useState<
+    KnowledgeDocument | KnowledgeDocumentDetail | null
+  >(null);
 
   useEffect(() => {
     void loadDocuments(filters);
@@ -168,6 +172,14 @@ export function DocumentListPage() {
     }
   }
 
+  async function handleClassificationUpdated() {
+    setClassificationTarget(null);
+    await loadDocuments(filters);
+    if (selectedId) {
+      await loadDetail(selectedId);
+    }
+  }
+
   return (
     <div className="page-stack">
       <section className="toolbar-row">
@@ -202,6 +214,7 @@ export function DocumentListPage() {
           loading={detailLoading}
           onDelete={(document) => void handleDelete(document)}
           onEditPermissions={setPermissionTarget}
+          onEditClassification={setClassificationTarget}
           onJobUpdated={setActiveJob}
           onRefresh={() => void loadDetail()}
           onRetry={(document) => void handleRetry(document)}
@@ -212,6 +225,11 @@ export function DocumentListPage() {
         document={permissionTarget}
         onClose={() => setPermissionTarget(null)}
         onSaved={() => void refreshAfterPermissionSaved()}
+      />
+      <DocumentClassificationModal
+        document={classificationTarget}
+        onClose={() => setClassificationTarget(null)}
+        onSaved={() => void handleClassificationUpdated()}
       />
     </div>
   );
