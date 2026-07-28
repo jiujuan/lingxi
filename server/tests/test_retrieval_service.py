@@ -26,6 +26,9 @@ def _seed_retrieval_dataset(session, identity):
         object_key="documents/refund.md",
         checksum="refund",
         status=DocumentStatus.READY,
+        knowledge_space_id="space-support",
+        category_department_id=support.id,
+        knowledge_category_id="cat-refund",
     )
     invoice_doc = Document(
         tenant_id=tenant_id,
@@ -37,6 +40,9 @@ def _seed_retrieval_dataset(session, identity):
         object_key="documents/invoice.md",
         checksum="invoice",
         status=DocumentStatus.READY,
+        knowledge_space_id="space-support",
+        category_department_id=support.id,
+        knowledge_category_id="cat-invoice",
     )
     private_doc = Document(
         tenant_id=tenant_id,
@@ -48,6 +54,9 @@ def _seed_retrieval_dataset(session, identity):
         object_key="documents/payroll.md",
         checksum="payroll",
         status=DocumentStatus.READY,
+        knowledge_space_id="space-support",
+        category_department_id=support.id,
+        knowledge_category_id="cat-refund",
     )
     session.add_all([refund_doc, invoice_doc, private_doc])
     session.flush()
@@ -171,6 +180,75 @@ def test_retrieval_filters_unauthorized_and_api_key_scope_before_scoring():
 
     assert scoped.candidates
     assert {item.document_id for item in scoped.candidates} == {ids["refund_doc"]}
+
+
+def test_retrieval_classification_scope_filters_without_expanding_access():
+    session, identity = build_session()
+    ids = _seed_retrieval_dataset(session, identity)
+
+    from server.app.schemas.retrieval import RetrievalAccessScope
+    from server.app.services.retrieval_service import RetrievalService
+
+    result = RetrievalService(session).retrieve(
+        _employee_context(identity),
+        "退款需要谁审批？",
+        access_scope=RetrievalAccessScope(
+            space_id="space-support",
+            classification_department_id=identity["departments"]["support"].id,
+            category_id="cat-refund",
+        ),
+    )
+
+    assert result.candidates
+    assert {item.document_id for item in result.candidates} == {ids["refund_doc"]}
+    assert result.snapshot["filters"]["scopeSpaceId"] == "space-support"
+    assert (
+        result.snapshot["filters"]["scopeClassificationDepartmentId"]
+        == identity["departments"]["support"].id
+    )
+    assert result.snapshot["filters"]["scopeCategoryId"] == "cat-refund"
+
+
+def test_retrieval_classification_scope_supports_space_only():
+    session, identity = build_session()
+    ids = _seed_retrieval_dataset(session, identity)
+
+    from server.app.schemas.retrieval import RetrievalAccessScope
+    from server.app.services.retrieval_service import RetrievalService
+
+    result = RetrievalService(session).retrieve(
+        _employee_context(identity),
+        "已开票订单退款前要做什么？",
+        access_scope=RetrievalAccessScope(space_id="space-support"),
+    )
+
+    assert {item.document_id for item in result.candidates} <= {
+        ids["refund_doc"],
+        ids["invoice_doc"],
+    }
+    assert ids["private_doc"] not in {item.document_id for item in result.candidates}
+
+
+def test_normalize_retrieval_scope_rejects_partial_classification_paths():
+    import pytest
+
+    from server.app.schemas.retrieval import RetrievalAccessScope
+    from server.app.services.retrieval_service import normalize_retrieval_scope
+
+    with pytest.raises(
+        ValueError, match="classification_department_id requires space_id"
+    ):
+        normalize_retrieval_scope(
+            RetrievalAccessScope(classification_department_id="dept-1")
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="category_id requires space_id and classification_department_id",
+    ):
+        normalize_retrieval_scope(
+            RetrievalAccessScope(space_id="space-1", category_id="cat-1")
+        )
 
 
 def test_snapshot_stages_are_capped_per_config():

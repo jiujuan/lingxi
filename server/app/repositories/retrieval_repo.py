@@ -37,12 +37,13 @@ class RetrievalRepository:
         context: AccessContext,
         access_scope: RetrievalAccessScope | None = None,
     ) -> list[QaPair]:
-        candidates = self.document_repo.list_authorized_qa_pairs(context)
-        if access_scope and access_scope.document_ids is not None:
-            candidates = [
-                item for item in candidates if item.document_id in access_scope.document_ids
-            ]
-        return candidates
+        statement = (
+            select(QaPair)
+            .join(Document, Document.id == QaPair.document_id)
+            .where(*self._filters(context, access_scope))
+            .order_by(QaPair.document_id, QaPair.pair_index)
+        )
+        return list(self.session.scalars(statement).unique().all())
 
     def vector_search(
         self,
@@ -126,9 +127,36 @@ class RetrievalRepository:
     def _filters(
         self, context: AccessContext, access_scope: RetrievalAccessScope | None
     ) -> list:
+        return [
+            *self._build_document_access_filters(context, access_scope),
+            *self._build_classification_filters(access_scope),
+        ]
+
+    def _build_document_access_filters(
+        self, context: AccessContext, access_scope: RetrievalAccessScope | None
+    ) -> list:
         filters = self.document_repo.authorized_qa_filters(context)
         if access_scope and access_scope.document_ids is not None:
             filters.append(QaPair.document_id.in_(access_scope.document_ids))
+        return filters
+
+    @staticmethod
+    def _build_classification_filters(
+        access_scope: RetrievalAccessScope | None,
+    ) -> list:
+        if access_scope is None:
+            return []
+
+        filters = []
+        if access_scope.space_id:
+            filters.append(Document.knowledge_space_id == access_scope.space_id)
+        if access_scope.classification_department_id:
+            filters.append(
+                Document.category_department_id
+                == access_scope.classification_department_id
+            )
+        if access_scope.category_id:
+            filters.append(Document.knowledge_category_id == access_scope.category_id)
         return filters
 
     @staticmethod

@@ -1,3 +1,4 @@
+import logging
 from time import perf_counter
 
 from sqlalchemy.orm import Session
@@ -21,6 +22,8 @@ from server.app.schemas.retrieval import (
 )
 from server.app.services.embedding_service import EmbeddingService
 from server.app.services.rerank_service import RerankService
+
+logger = logging.getLogger(__name__)
 
 
 class RetrievalService:
@@ -46,6 +49,15 @@ class RetrievalService:
         access_scope: RetrievalAccessScope | None = None,
     ) -> RetrievalResult:
         started = perf_counter()
+        access_scope = normalize_retrieval_scope(access_scope)
+        logger.debug(
+            "retrieval classification scope",
+            extra={
+                "tenant_id": context.tenant_id,
+                "request_id": current_request_id(),
+                **_scope_log_fields(access_scope),
+            },
+        )
         query_vector = self._embed_query(context.tenant_id, question)
         query_tokens = self.tokenizer.tokenize(question)
 
@@ -79,6 +91,11 @@ class RetrievalService:
                 "scopeDocumentIds": sorted(access_scope.document_ids)
                 if access_scope and access_scope.document_ids
                 else None,
+                "scopeSpaceId": access_scope.space_id if access_scope else None,
+                "scopeClassificationDepartmentId": (
+                    access_scope.classification_department_id if access_scope else None
+                ),
+                "scopeCategoryId": access_scope.category_id if access_scope else None,
             },
             "latencyMs": int((perf_counter() - started) * 1000),
             "requestId": current_request_id(),
@@ -165,3 +182,31 @@ class RetrievalService:
             "question": qa_pair.question,
             "score": round(score, 6),
         }
+
+
+def normalize_retrieval_scope(
+    access_scope: RetrievalAccessScope | None,
+) -> RetrievalAccessScope | None:
+    if access_scope is None:
+        return None
+    if access_scope.classification_department_id and not access_scope.space_id:
+        raise ValueError(
+            "classification_department_id requires space_id in retrieval scope"
+        )
+    if access_scope.category_id and (
+        not access_scope.space_id or not access_scope.classification_department_id
+    ):
+        raise ValueError(
+            "category_id requires space_id and classification_department_id in retrieval scope"
+        )
+    return access_scope
+
+
+def _scope_log_fields(access_scope: RetrievalAccessScope | None) -> dict:
+    return {
+        "scope_space_id": access_scope.space_id if access_scope else None,
+        "scope_classification_department_id": (
+            access_scope.classification_department_id if access_scope else None
+        ),
+        "scope_category_id": access_scope.category_id if access_scope else None,
+    }
