@@ -111,37 +111,116 @@ label {
 
 .shell {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   min-height: 100vh;
 }
 
 .sidebar {
   background: #ffffff;
   border-right: 1px solid #e4e9f2;
-  padding: 24px 18px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0;
 }
 
-.sidebar h1 {
-  font-size: 22px;
-  margin: 0 0 24px;
+.sidebar-brand {
+  align-items: center;
+  border-bottom: 1px solid #e8ecf3;
+  display: flex;
+  gap: 10px;
+  min-height: 70px;
+  padding: 16px 15px;
+}
+
+.sidebar-brand-mark {
+  align-items: center;
+  background: #2d6df6;
+  border-radius: 10px;
+  color: #ffffff;
+  display: flex;
+  flex: 0 0 34px;
+  font-size: 17px;
+  font-weight: 700;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.sidebar-brand strong,
+.sidebar-profile strong {
+  color: #1d2b45;
+  display: block;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.sidebar-brand span,
+.sidebar-profile span {
+  color: #8a98af;
+  display: block;
+  font-size: 11px;
+  line-height: 1.35;
+  margin-top: 2px;
 }
 
 .sidebar nav {
   display: grid;
-  gap: 6px;
+  gap: 4px;
+  padding: 15px 10px;
 }
 
 .sidebar a {
-  border-radius: 6px;
-  color: #526071;
-  padding: 10px 12px;
+  align-items: center;
+  border-radius: 8px;
+  color: #56657d;
+  display: flex;
+  font-size: 14px;
+  font-weight: 500;
+  gap: 12px;
+  min-height: 36px;
+  padding: 0 11px;
   text-decoration: none;
 }
 
 .sidebar a.active,
 .sidebar a:hover {
-  background: #eef4ff;
-  color: #1d4ed8;
+  background: #eaf1ff;
+  color: #2d6df6;
+}
+
+.sidebar a.active {
+  font-weight: 600;
+}
+
+.sidebar-icon {
+  flex: 0 0 16px;
+  height: 16px;
+  width: 16px;
+}
+
+.sidebar-profile {
+  align-items: center;
+  border-top: 1px solid #e8ecf3;
+  display: flex;
+  gap: 10px;
+  margin-top: auto;
+  min-height: 52px;
+  padding: 12px 15px;
+}
+
+.sidebar-avatar {
+  align-items: center;
+  background: #edf3ff;
+  border-radius: 50%;
+  color: #2d6df6;
+  display: flex;
+  flex: 0 0 30px;
+  font-size: 13px;
+  font-weight: 700;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
 }
 
 .content {
