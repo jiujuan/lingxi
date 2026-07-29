@@ -1789,6 +1789,172 @@ pre {
   width: 16px;
 }
 
+.management-list-panel {
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.management-list-heading {
+  border-bottom: 1px solid #edf1f7;
+  padding: 14px 20px 10px;
+}
+
+.management-list-heading h3 {
+  color: #263550;
+  font-size: 16px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.management-list {
+  min-width: 0;
+}
+
+.management-list-head,
+.management-list-row {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  padding: 0 20px;
+}
+
+.management-list-head {
+  background: #f8fafc;
+  color: #8a98af;
+  font-size: 13px;
+  font-weight: 500;
+  min-height: 44px;
+}
+
+.management-list-row {
+  border-bottom: 1px solid #edf1f7;
+  color: #55657d;
+  font-size: 14px;
+  min-height: 62px;
+}
+
+.management-list-row:last-child {
+  border-bottom: 0;
+}
+
+.management-list-primary {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.management-list-primary strong {
+  color: #263550;
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.management-list-primary span,
+.management-list-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.management-list-primary span {
+  color: #7a879c;
+  font-size: 12px;
+}
+
+.management-list-row .status-tag {
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 3px 7px;
+}
+
+.management-list-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-start;
+}
+
+.management-list-action {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: #3475e6;
+  display: inline-flex;
+  font-size: 14px;
+  gap: 5px;
+  padding: 5px 8px;
+}
+
+.management-list-action:hover:not(:disabled) {
+  background: #eaf2ff;
+  color: #2563eb;
+}
+
+.management-list-action.danger {
+  color: #e45560;
+}
+
+.management-list-action.danger:hover:not(:disabled) {
+  background: #fff0f1;
+  color: #d63c4a;
+}
+
+.management-list-action:disabled {
+  background: transparent;
+}
+
+.management-list-action svg {
+  flex: 0 0 15px;
+  height: 15px;
+  width: 15px;
+}
+
+.management-list-empty {
+  color: #7a879c;
+  font-size: 13px;
+  margin: 0;
+  min-height: 104px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.api-call-log-list .management-list-head,
+.api-call-log-list .management-list-row {
+  grid-template-columns: minmax(220px, 1.4fr) minmax(110px, 0.75fr) minmax(90px, 0.55fr)
+    minmax(76px, 0.5fr) minmax(130px, 0.8fr);
+}
+
+.model-provider-list .management-list-head,
+.model-provider-list .management-list-row {
+  grid-template-columns: minmax(210px, 1.3fr) minmax(140px, 0.8fr) minmax(130px, 0.8fr)
+    minmax(88px, 0.55fr) minmax(220px, auto);
+}
+
+.model-config-list .management-list-head,
+.model-config-list .management-list-row {
+  grid-template-columns: minmax(210px, 1.3fr) minmax(110px, 0.7fr) minmax(100px, 0.65fr)
+    minmax(88px, 0.55fr) minmax(220px, auto);
+}
+
+.department-list .management-list-head,
+.department-list .management-list-row {
+  grid-template-columns: minmax(220px, 1.35fr) minmax(100px, 0.6fr) minmax(90px, 0.55fr)
+    minmax(150px, 0.85fr) minmax(120px, auto);
+}
+
+.user-management-list .management-list-head,
+.user-management-list .management-list-row {
+  grid-template-columns: minmax(190px, 1.2fr) minmax(120px, 0.75fr) minmax(130px, 0.8fr)
+    minmax(88px, 0.55fr) minmax(150px, 0.85fr) minmax(270px, auto);
+}
+
 .observability-row p,
 .dashboard-row p {
   margin: 0;
@@ -1963,6 +2129,49 @@ a code {
 
   .logs-pagination-actions {
     flex-wrap: wrap;
+  }
+
+  .management-list-head {
+    display: none;
+  }
+
+  .management-list-row {
+    align-items: start;
+    gap: 7px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-height: 0;
+    padding: 12px 16px;
+  }
+
+  .management-list-primary {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .management-list-row > .management-list-cell,
+  .management-list-row > .status-tag {
+    grid-column: 1 / -1;
+  }
+
+  .management-list-row > .status-tag {
+    justify-self: start;
+  }
+
+  .management-list-actions {
+    grid-column: 2;
+    grid-row: 1;
+    justify-content: flex-end;
+  }
+
+  .management-list-actions.management-list-actions-wide {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    justify-content: flex-start;
+  }
+
+  .management-list-empty {
+    min-height: 92px;
+    padding: 34px 16px;
   }
 
   .classification-page-header,

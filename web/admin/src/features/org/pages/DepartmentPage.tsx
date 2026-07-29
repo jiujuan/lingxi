@@ -5,6 +5,7 @@ import { errorMessage } from '../../../api/client';
 import { queryKeys } from '../../../api/queryClient';
 import { hasPermission } from '../../../auth/authStore';
 import { formatDateTime } from '../../../shared/format';
+import { EditIcon, TrashIcon } from '../../../shared/ManagementListIcons';
 import {
   createDepartment,
   deleteDepartment,
@@ -114,35 +115,54 @@ export function DepartmentPage() {
       {deleteMutation.isError ? (
         <div className="error-box">{errorMessage(deleteMutation.error, '删除失败')}</div>
       ) : null}
-      <section className="panel">
-        <h3>部门列表</h3>
-        <div className="table-list">
+      <section className="panel management-list-panel">
+        <div className="management-list-heading">
+          <h3>部门列表</h3>
+        </div>
+        <div aria-label="部门列表" className="management-list department-list" role="table">
+          <div className="management-list-head" role="row">
+            <span role="columnheader">部门名称</span>
+            <span role="columnheader">编码</span>
+            <span role="columnheader">成员数</span>
+            <span role="columnheader">创建时间</span>
+            <span role="columnheader">操作</span>
+          </div>
           {rows.length === 0 && !departmentsQuery.isLoading ? (
-            <p className="muted">暂无部门，点击右上角「新建部门」创建。</p>
+            <p className="management-list-empty">暂无部门，点击右上角「新建部门」创建。</p>
           ) : null}
           {rows.map(({ department, depth }) => (
-            <div className="table-row" key={department.id}>
-              <strong style={{ paddingLeft: `${depth * 1.5}rem` }}>
-                {depth > 0 ? '└ ' : ''}
-                {department.name}
-              </strong>
-              <code>{department.code}</code>
-              <span className="muted">{department.userCount} 人</span>
-              <span className="muted">{formatDateTime(department.createdAt)}</span>
+            <div className="management-list-row" key={department.id} role="row">
+              <div className="management-list-primary" role="cell">
+                <strong style={{ paddingLeft: `${depth * 1.5}rem` }}>
+                  {depth > 0 ? '└ ' : ''}
+                  {department.name}
+                </strong>
+              </div>
+              <span className="management-list-cell" role="cell">
+                {department.code}
+              </span>
+              <span className="management-list-cell" role="cell">
+                {department.userCount} 人
+              </span>
+              <span className="management-list-cell" role="cell">
+                {formatDateTime(department.createdAt)}
+              </span>
               {canWrite ? (
-                <div className="button-row">
+                <div className="management-list-actions" role="cell">
                   <button
-                    className="secondary-button"
+                    className="management-list-action"
                     onClick={() => openEdit(department)}
                     type="button"
                   >
+                    <EditIcon />
                     编辑
                   </button>
                   <button
-                    className="danger-button"
+                    className="management-list-action danger"
                     onClick={() => remove(department)}
                     type="button"
                   >
+                    <TrashIcon />
                     删除
                   </button>
                 </div>

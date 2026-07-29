@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useState } from 'react';
 
 import { errorMessage } from '../../../api/client';
 import { queryKeys } from '../../../api/queryClient';
+import { EditIcon, TrashIcon } from '../../../shared/ManagementListIcons';
 import {
   ConnectionTestResult,
   ModelConfig,
@@ -262,35 +263,55 @@ export function ModelConfigPage() {
         </form>
       </section>
 
-      <section className="panel">
-        <h3>供应商列表</h3>
-        <div className="table-list">
+      <section className="panel management-list-panel">
+        <div className="management-list-heading">
+          <h3>供应商列表</h3>
+        </div>
+        <div aria-label="供应商列表" className="management-list model-provider-list" role="table">
+          <div className="management-list-head" role="row">
+            <span role="columnheader">供应商名称</span>
+            <span role="columnheader">类型</span>
+            <span role="columnheader">Secret 配置</span>
+            <span role="columnheader">状态</span>
+            <span role="columnheader">操作</span>
+          </div>
+          {providers.length === 0 ? <p className="management-list-empty">暂无供应商</p> : null}
           {providers.map((provider) => (
-            <div className="table-row" key={provider.id}>
-              <strong>{provider.name}</strong>
-              <span>{provider.providerType}</span>
-              <span>{provider.secretConfigured ? 'Secret 已配置' : '未配置 Secret'}</span>
-              <span>{provider.status}</span>
-              <div className="button-row">
+            <div className="management-list-row" key={provider.id} role="row">
+              <div className="management-list-primary" role="cell">
+                <strong>{provider.name}</strong>
+              </div>
+              <span className="management-list-cell" role="cell">
+                {provider.providerType}
+              </span>
+              <span className="management-list-cell" role="cell">
+                {provider.secretConfigured ? 'Secret 已配置' : '未配置 Secret'}
+              </span>
+              <span className={`status-tag status-${provider.status.toLowerCase()}`} role="cell">
+                {provider.status}
+              </span>
+              <div className="management-list-actions management-list-actions-wide" role="cell">
                 <button
-                  className="secondary-button"
+                  className="management-list-action"
                   type="button"
                   onClick={() => runConnectionTest(provider.id)}
                 >
                   测试连接
                 </button>
                 <button
-                  className="secondary-button"
+                  className="management-list-action"
                   type="button"
                   onClick={() => setEditingProvider(provider)}
                 >
+                  <EditIcon />
                   编辑
                 </button>
                 <button
-                  className="danger-button"
+                  className="management-list-action danger"
                   type="button"
                   onClick={() => removeProvider(provider)}
                 >
+                  <TrashIcon />
                   删除
                 </button>
               </div>
@@ -305,18 +326,36 @@ export function ModelConfigPage() {
         ) : null}
       </section>
 
-      <section className="panel">
-        <h3>模型实例</h3>
-        <div className="table-list">
+      <section className="panel management-list-panel">
+        <div className="management-list-heading">
+          <h3>模型实例</h3>
+        </div>
+        <div aria-label="模型实例" className="management-list model-config-list" role="table">
+          <div className="management-list-head" role="row">
+            <span role="columnheader">模型名称</span>
+            <span role="columnheader">能力</span>
+            <span role="columnheader">默认标识</span>
+            <span role="columnheader">状态</span>
+            <span role="columnheader">操作</span>
+          </div>
+          {configs.length === 0 ? <p className="management-list-empty">暂无模型实例</p> : null}
           {configs.map((item) => (
-            <div className="table-row" key={item.id}>
-              <strong>{item.modelName}</strong>
-              <span>{item.capability}</span>
-              <span>{item.isDefault ? '默认' : '非默认'}</span>
-              <span>{item.status}</span>
-              <div className="button-row">
+            <div className="management-list-row" key={item.id} role="row">
+              <div className="management-list-primary" role="cell">
+                <strong>{item.modelName}</strong>
+              </div>
+              <span className="management-list-cell" role="cell">
+                {item.capability}
+              </span>
+              <span className="management-list-cell" role="cell">
+                {item.isDefault ? '默认' : '非默认'}
+              </span>
+              <span className={`status-tag status-${item.status.toLowerCase()}`} role="cell">
+                {item.status}
+              </span>
+              <div className="management-list-actions management-list-actions-wide" role="cell">
                 <button
-                  className="secondary-button"
+                  className="management-list-action"
                   disabled={item.isDefault}
                   type="button"
                   onClick={() => setDefault(item.id)}
@@ -324,17 +363,19 @@ export function ModelConfigPage() {
                   设为默认
                 </button>
                 <button
-                  className="secondary-button"
+                  className="management-list-action"
                   type="button"
                   onClick={() => setEditingConfig(item)}
                 >
+                  <EditIcon />
                   编辑
                 </button>
                 <button
-                  className="danger-button"
+                  className="management-list-action danger"
                   type="button"
                   onClick={() => removeConfig(item)}
                 >
+                  <TrashIcon />
                   删除
                 </button>
               </div>

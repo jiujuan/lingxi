@@ -5,6 +5,7 @@ import { errorMessage } from '../../../api/client';
 import { queryKeys } from '../../../api/queryClient';
 import { hasPermission } from '../../../auth/authStore';
 import { formatDateTime } from '../../../shared/format';
+import { EditIcon, TrashIcon } from '../../../shared/ManagementListIcons';
 import {
   createUser,
   deleteUser,
@@ -18,7 +19,13 @@ import {
 } from '../api/orgApi';
 import { ResetPasswordModal } from '../components/ResetPasswordModal';
 import { UserFormModal } from '../components/UserFormModal';
-import type { AdminUser, UserCreatePayload, UserListFilters, UserPayload } from '../types';
+import type {
+  AdminUser,
+  Pagination,
+  UserCreatePayload,
+  UserListFilters,
+  UserPayload,
+} from '../types';
 
 const INITIAL_FILTERS: UserListFilters = {
   keyword: '',
@@ -187,53 +194,73 @@ export function UserPage() {
           </div>
         </div>
       </section>
-      <section className="panel">
-        <h3>用户列表</h3>
-        <div className="table-list">
+      <section className="panel management-list-panel">
+        <div className="management-list-heading">
+          <h3>用户列表</h3>
+        </div>
+        <div aria-label="用户列表" className="management-list user-management-list" role="table">
+          <div className="management-list-head" role="row">
+            <span role="columnheader">用户</span>
+            <span role="columnheader">部门</span>
+            <span role="columnheader">角色</span>
+            <span role="columnheader">状态</span>
+            <span role="columnheader">创建时间</span>
+            <span role="columnheader">操作</span>
+          </div>
           {users.length === 0 && !usersQuery.isLoading ? (
-            <p className="muted">没有匹配的用户</p>
+            <p className="management-list-empty">没有匹配的用户</p>
           ) : null}
           {users.map((user) => (
-            <div className="table-row user-row" key={user.id}>
-              <div>
+            <div className="management-list-row" key={user.id} role="row">
+              <div className="management-list-primary" role="cell">
                 <strong>{user.name}</strong>
-                <p className="muted">{user.email}</p>
+                <span>{user.email}</span>
               </div>
-              <span>{user.departmentName ?? '未分配部门'}</span>
-              <span className="muted">
+              <span className="management-list-cell" role="cell">
+                {user.departmentName ?? '未分配部门'}
+              </span>
+              <span className="management-list-cell" role="cell">
                 {user.roles.map((role) => role.name).join('、') || '无角色'}
               </span>
-              <span className={`status-tag status-${user.status.toLowerCase()}`}>
+              <span className={`status-tag status-${user.status.toLowerCase()}`} role="cell">
                 {user.status === 'ACTIVE' ? '启用' : '禁用'}
               </span>
-              <span className="muted">{formatDateTime(user.createdAt)}</span>
+              <span className="management-list-cell" role="cell">
+                {formatDateTime(user.createdAt)}
+              </span>
               {canWrite ? (
-                <div className="button-row">
+                <div className="management-list-actions" role="cell">
                   <button
-                    className="secondary-button"
+                    className="management-list-action"
                     onClick={() => {
                       setEditing(user);
                       setShowForm(true);
                     }}
                     type="button"
                   >
+                    <EditIcon />
                     编辑
                   </button>
                   <button
-                    className="secondary-button"
+                    className="management-list-action"
                     onClick={() => setResetting(user)}
                     type="button"
                   >
                     重置密码
                   </button>
                   <button
-                    className="secondary-button"
+                    className="management-list-action"
                     onClick={() => toggleStatus(user)}
                     type="button"
                   >
                     {user.status === 'ACTIVE' ? '禁用' : '启用'}
                   </button>
-                  <button className="danger-button" onClick={() => remove(user)} type="button">
+                  <button
+                    className="management-list-action danger"
+                    onClick={() => remove(user)}
+                    type="button"
+                  >
+                    <TrashIcon />
                     删除
                   </button>
                 </div>
@@ -242,27 +269,7 @@ export function UserPage() {
           ))}
         </div>
         {pagination ? (
-          <div className="pagination-row">
-            <button
-              className="secondary-button"
-              disabled={pagination.page <= 1}
-              onClick={() => changePage(pagination.page - 1)}
-              type="button"
-            >
-              上一页
-            </button>
-            <span className="muted">
-              第 {pagination.page} / {pagination.totalPages} 页 · 共 {pagination.totalItems} 人
-            </span>
-            <button
-              className="secondary-button"
-              disabled={pagination.page >= pagination.totalPages}
-              onClick={() => changePage(pagination.page + 1)}
-              type="button"
-            >
-              下一页
-            </button>
-          </div>
+          <UserPagination onChange={changePage} pagination={pagination} />
         ) : null}
       </section>
       {showForm ? (
@@ -288,4 +295,74 @@ export function UserPage() {
       ) : null}
     </div>
   );
+}
+
+function UserPagination({
+  onChange,
+  pagination,
+}: {
+  onChange: (page: number) => void;
+  pagination: Pagination;
+}) {
+  const totalPages = Math.max(pagination.totalPages, 1);
+  const pages = pageNumbers(pagination.page, totalPages);
+
+  return (
+    <div className="logs-pagination">
+      <span>
+        共 {pagination.totalItems} 人 · 每页 {pagination.pageSize} 条
+      </span>
+      <div className="logs-pagination-actions">
+        <button
+          className="logs-page-button logs-page-label"
+          disabled={pagination.page <= 1}
+          onClick={() => onChange(pagination.page - 1)}
+          type="button"
+        >
+          ‹ 上一页
+        </button>
+        {pages.map((page, index) =>
+          page === 'ellipsis' ? (
+            <span className="logs-page-ellipsis" key={`ellipsis-${index}`}>
+              …
+            </span>
+          ) : (
+            <button
+              aria-current={page === pagination.page ? 'page' : undefined}
+              className={page === pagination.page ? 'logs-page-button active' : 'logs-page-button'}
+              key={page}
+              onClick={() => onChange(page)}
+              type="button"
+            >
+              {page}
+            </button>
+          ),
+        )}
+        <button
+          className="logs-page-button logs-page-label"
+          disabled={pagination.page >= totalPages}
+          onClick={() => onChange(pagination.page + 1)}
+          type="button"
+        >
+          下一页 ›
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function pageNumbers(currentPage: number, totalPages: number): Array<number | 'ellipsis'> {
+  if (totalPages <= 5) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  if (currentPage <= 3) {
+    return [1, 2, 3, 'ellipsis', totalPages];
+  }
+
+  if (currentPage >= totalPages - 2) {
+    return [1, 'ellipsis', totalPages - 2, totalPages - 1, totalPages];
+  }
+
+  return [1, 'ellipsis', currentPage, 'ellipsis', totalPages];
 }
