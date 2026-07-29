@@ -54,18 +54,25 @@ export function KnowledgeSpaceModal({ space, onClose, onSubmit }: Props) {
   return (
     <div className="modal-backdrop" role="presentation">
       <section
-        aria-label={space ? '编辑知识库空间' : '新建知识库空间'}
-        className="modal-panel"
+        aria-label={space ? '编辑知识库空间' : '增加知识库空间'}
+        aria-modal="true"
+        className="modal-panel classification-form-modal"
         role="dialog"
       >
-        <div className="toolbar-row compact">
-          <h3>{space ? '编辑知识库空间' : '新建知识库空间'}</h3>
-          <button className="secondary-button" disabled={saving} onClick={onClose} type="button">
-            关闭
+        <header className="classification-modal-header">
+          <h3>{space ? '编辑知识库空间' : '增加知识库空间'}</h3>
+          <button
+            aria-label="关闭"
+            className="icon-button"
+            disabled={saving}
+            onClick={onClose}
+            type="button"
+          >
+            <CloseIcon />
           </button>
-        </div>
+        </header>
         {error ? <div className="error-box">{error}</div> : null}
-        <form className="form-grid" onSubmit={(event) => void submit(event)}>
+        <form className="classification-form" onSubmit={(event) => void submit(event)}>
           <label>
             空间名称
             <input onChange={(event) => setName(event.target.value)} required value={name} />
@@ -106,11 +113,29 @@ export function KnowledgeSpaceModal({ space, onClose, onSubmit }: Props) {
               </select>
             </label>
           </div>
-          <button disabled={saving} type="submit">
-            {saving ? '保存中…' : '保存'}
-          </button>
+          <footer className="classification-modal-actions">
+            <button
+              className="secondary-button"
+              disabled={saving}
+              onClick={onClose}
+              type="button"
+            >
+              取消
+            </button>
+            <button disabled={saving} type="submit">
+              {saving ? '保存中…' : '保存'}
+            </button>
+          </footer>
         </form>
       </section>
     </div>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="m7 7 10 10M17 7 7 17" />
+    </svg>
   );
 }

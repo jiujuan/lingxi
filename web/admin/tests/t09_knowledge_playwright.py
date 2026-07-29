@@ -176,6 +176,33 @@ class KnowledgeApiMock:
             fulfill_json(route, {"data": self.departments})
             return
 
+        if method == "POST" and path == "/api/v1/departments":
+            payload = body or {}
+            department = {
+                "id": "dept-created",
+                "userCount": 0,
+                "createdAt": NOW,
+                **payload,
+            }
+            self.departments.append(department)
+            fulfill_json(route, department, status=201)
+            return
+
+        if method == "PUT" and path.startswith("/api/v1/departments/"):
+            department_id = path.rsplit("/", 1)[-1]
+            department = self._department(department_id)
+            department.update(body or {})
+            fulfill_json(route, department)
+            return
+
+        if method == "DELETE" and path.startswith("/api/v1/departments/"):
+            department_id = path.rsplit("/", 1)[-1]
+            self.departments = [
+                department for department in self.departments if department["id"] != department_id
+            ]
+            fulfill_json(route, {"ok": True})
+            return
+
         if method == "GET" and path == "/api/v1/knowledge-spaces":
             fulfill_json(route, {"data": self.spaces})
             return
@@ -697,7 +724,7 @@ def prepare_page(page: Page) -> tuple[list[str], KnowledgeApiMock]:
           roles: ['admin'],
           permissions: [
             'DASHBOARD_READ', 'DOCUMENT_READ', 'DOCUMENT_WRITE',
-            'DOCUMENT_PERMISSION_WRITE', 'DOCUMENT_DELETE', 'TASK_RETRY'
+            'DOCUMENT_PERMISSION_WRITE', 'DOCUMENT_DELETE', 'TASK_RETRY', 'USER_WRITE'
           ]
         }));
         """
@@ -718,19 +745,14 @@ def verify_phase_two_desktop_flow(page: Page) -> tuple[list[str], KnowledgeApiMo
 
 def verify_classification_admin_flow(page: Page, api: KnowledgeApiMock) -> None:
     page.goto(f"{APP_ORIGIN}/#knowledge-classification", wait_until="networkidle")
-    expect(page.get_by_role("heading", name="知识库分类")).to_be_visible()
+    expect(page.get_by_role("heading", name="知识库分类管理")).to_be_visible()
     expect(page.get_by_text("客服知识库").first).to_be_visible()
-    expect(page.get_by_text("退款专题").first).to_be_visible()
     expect(
         page.locator(".classification-space-row", has_text="客服知识库").get_by_text("总数 3")
     ).to_be_visible()
-    expect(
-        page.locator(".classification-category-row", has_text="退款专题").get_by_text("总数 2")
-    ).to_be_visible()
-    expect(page.get_by_text("当前范围未分类：总数 1")).to_be_visible()
 
-    page.get_by_role("button", name="新建空间").click()
-    space_dialog = page.get_by_role("dialog", name="新建知识库空间")
+    page.get_by_role("button", name="增加知识库空间").click()
+    space_dialog = page.get_by_role("dialog", name="增加知识库空间")
     space_dialog.get_by_label("空间名称").fill("运营知识库")
     space_dialog.get_by_label("空间编码").fill("operations")
     space_dialog.get_by_label("描述").fill("运营 SOP 分类空间")
@@ -756,24 +778,62 @@ def verify_classification_admin_flow(page: Page, api: KnowledgeApiMock) -> None:
     updated_space = api.find_request("PUT", "/api/v1/knowledge-spaces/space-created")["body"]
     assert updated_space["name"] == "运营知识库 v2"
 
-    page.once("dialog", lambda dialog: dialog.accept())
     page.locator(".classification-space-row", has_text="运营知识库 v2").get_by_role(
         "button", name="删除"
     ).click()
+    delete_dialog = page.get_by_role("dialog", name="删除确认")
+    expect(delete_dialog.get_by_text("确定删除「运营知识库 v2」吗？")).to_be_visible()
+    delete_dialog.get_by_role("button", name="确认删除").click()
     expect(page.get_by_text("知识库空间已删除。")).to_be_visible()
     api.find_request("DELETE", "/api/v1/knowledge-spaces/space-created")
 
-    page.once("dialog", lambda dialog: dialog.accept())
     page.locator(".classification-space-row", has_text="客服知识库").get_by_role(
         "button", name="删除"
     ).click()
+    page.get_by_role("dialog", name="删除确认").get_by_role("button", name="确认删除").click()
     expect(page.get_by_text("知识库空间「客服知识库」下仍有 1 篇文档，请先迁移。")).to_be_visible()
     migration_dialog = page.locator(".classification-migration-modal")
     expect(migration_dialog.get_by_text("1 篇关联文档")).to_be_visible()
     migration_dialog.get_by_role("button", name="关闭").click()
 
-    page.get_by_role("button", name="新建项目 / 专题").click()
-    category_dialog = page.get_by_role("dialog", name="新建项目 / 专题")
+    page.get_by_role("tab", name="部门").click()
+    expect(page.locator(".classification-department-row", has_text="售后部")).to_be_visible()
+    page.get_by_role("button", name="增加部门").click()
+    department_dialog = page.get_by_role("dialog", name="增加部门")
+    department_dialog.get_by_label("部门名称").fill("运营部")
+    department_dialog.get_by_label("部门编码").fill("operations")
+    department_dialog.get_by_role("button", name="保存").click()
+    expect(page.get_by_text("部门已创建。")).to_be_visible()
+    created_department = api.find_request("POST", "/api/v1/departments")["body"]
+    assert created_department == {
+        "name": "运营部",
+        "code": "operations",
+        "parentId": None,
+    }
+
+    page.locator(".classification-department-row", has_text="运营部").get_by_role(
+        "button", name="编辑"
+    ).click()
+    edit_department_dialog = page.get_by_role("dialog", name="编辑部门")
+    edit_department_dialog.get_by_label("部门名称").fill("运营部 v2")
+    edit_department_dialog.get_by_role("button", name="保存").click()
+    expect(page.get_by_text("部门已更新。")).to_be_visible()
+    assert api.find_request("PUT", "/api/v1/departments/dept-created")["body"]["name"] == "运营部 v2"
+
+    page.locator(".classification-department-row", has_text="运营部 v2").get_by_role(
+        "button", name="删除"
+    ).click()
+    delete_dialog = page.get_by_role("dialog", name="删除确认")
+    expect(delete_dialog.get_by_text("确定删除「运营部 v2」吗？")).to_be_visible()
+    delete_dialog.get_by_role("button", name="确认删除").click()
+    expect(page.get_by_text("部门已删除。")).to_be_visible()
+    api.find_request("DELETE", "/api/v1/departments/dept-created")
+
+    page.get_by_role("tab", name="专题 / 项目").click()
+    expect(page.get_by_text("退款专题").first).to_be_visible()
+    expect(page.get_by_text("当前范围未分类：总数 1")).to_be_visible()
+    page.get_by_role("button", name="增加专题 / 项目").click()
+    category_dialog = page.get_by_role("dialog", name="增加专题 / 项目")
     category_dialog.get_by_label("名称").fill("售后知识")
     category_dialog.get_by_label("编码").fill("after-sales-guide")
     category_dialog.get_by_label("类型").select_option("PROJECT")
@@ -797,7 +857,7 @@ def verify_classification_admin_flow(page: Page, api: KnowledgeApiMock) -> None:
     page.locator(".classification-category-row", has_text="售后知识").get_by_role(
         "button", name="编辑"
     ).click()
-    edit_category_dialog = page.get_by_role("dialog", name="编辑项目 / 专题")
+    edit_category_dialog = page.get_by_role("dialog", name="编辑专题 / 项目")
     edit_category_dialog.get_by_label("名称").fill("售后知识 v2")
     edit_category_dialog.get_by_role("button", name="保存").click()
     expect(page.get_by_text("项目 / 专题已更新。")).to_be_visible()
@@ -806,10 +866,10 @@ def verify_classification_admin_flow(page: Page, api: KnowledgeApiMock) -> None:
     assert updated_category["spaceId"] == "space-001"
     assert updated_category["departmentId"] == "dept-after-sales"
 
-    page.once("dialog", lambda dialog: dialog.accept())
     page.locator(".classification-category-row", has_text="售后知识 v2").get_by_role(
         "button", name="删除"
     ).click()
+    page.get_by_role("dialog", name="删除确认").get_by_role("button", name="确认删除").click()
     expect(page.get_by_text("项目 / 专题已删除。")).to_be_visible()
     api.find_request("DELETE", "/api/v1/knowledge-categories/cat-created")
     api.find_request("GET", "/api/v1/knowledge-spaces/stats")
@@ -941,13 +1001,14 @@ def verify_document_filter_detail_edit_flow(page: Page, api: KnowledgeApiMock) -
 
 def verify_category_migration_flow(page: Page, api: KnowledgeApiMock) -> None:
     page.goto(f"{APP_ORIGIN}/#knowledge-classification", wait_until="networkidle")
-    expect(page.get_by_role("heading", name="知识库分类")).to_be_visible()
+    expect(page.get_by_role("heading", name="知识库分类管理")).to_be_visible()
+    page.get_by_role("tab", name="专题 / 项目").click()
     expect(page.get_by_text("物流专题").first).to_be_visible()
 
-    page.once("dialog", lambda dialog: dialog.accept())
     page.locator(".classification-category-row", has_text="物流专题").get_by_role(
         "button", name="删除"
     ).click()
+    page.get_by_role("dialog", name="删除确认").get_by_role("button", name="确认删除").click()
     expect(page.get_by_text("项目 / 专题「物流专题」下仍有 1 篇文档，请先迁移。")).to_be_visible()
 
     migration_dialog = page.locator(".classification-migration-modal")
@@ -969,10 +1030,10 @@ def verify_category_migration_flow(page: Page, api: KnowledgeApiMock) -> None:
         "targetCategoryId": "cat-refund",
     }
 
-    page.once("dialog", lambda dialog: dialog.accept())
     page.locator(".classification-category-row", has_text="物流专题").get_by_role(
         "button", name="删除"
     ).click()
+    page.get_by_role("dialog", name="删除确认").get_by_role("button", name="确认删除").click()
     expect(page.get_by_text("项目 / 专题已删除。")).to_be_visible()
     api.find_request("DELETE", "/api/v1/knowledge-categories/cat-logistics")
 
@@ -1015,6 +1076,9 @@ def assert_phase_two_contracts(api: KnowledgeApiMock) -> None:
     api.find_request("POST", "/api/v1/knowledge-spaces")
     api.find_request("PUT", "/api/v1/knowledge-spaces/space-created")
     api.find_request("DELETE", "/api/v1/knowledge-spaces/space-created")
+    api.find_request("POST", "/api/v1/departments")
+    api.find_request("PUT", "/api/v1/departments/dept-created")
+    api.find_request("DELETE", "/api/v1/departments/dept-created")
     api.find_request("POST", "/api/v1/knowledge-categories")
     api.find_request("PUT", "/api/v1/knowledge-categories/cat-created")
     api.find_request("DELETE", "/api/v1/knowledge-categories/cat-created")

@@ -87,18 +87,25 @@ export function KnowledgeCategoryModal({
   return (
     <div className="modal-backdrop" role="presentation">
       <section
-        aria-label={category ? '编辑项目 / 专题' : '新建项目 / 专题'}
-        className="modal-panel"
+        aria-label={category ? '编辑专题 / 项目' : '增加专题 / 项目'}
+        aria-modal="true"
+        className="modal-panel classification-form-modal"
         role="dialog"
       >
-        <div className="toolbar-row compact">
-          <h3>{category ? '编辑项目 / 专题' : '新建项目 / 专题'}</h3>
-          <button className="secondary-button" disabled={saving} onClick={onClose} type="button">
-            关闭
+        <header className="classification-modal-header">
+          <h3>{category ? '编辑专题 / 项目' : '增加专题 / 项目'}</h3>
+          <button
+            aria-label="关闭"
+            className="icon-button"
+            disabled={saving}
+            onClick={onClose}
+            type="button"
+          >
+            <CloseIcon />
           </button>
-        </div>
+        </header>
         {error ? <div className="error-box">{error}</div> : null}
-        <form className="form-grid" onSubmit={(event) => void submit(event)}>
+        <form className="classification-form" onSubmit={(event) => void submit(event)}>
           <div className="filter-grid">
             <label>
               知识库空间
@@ -177,11 +184,29 @@ export function KnowledgeCategoryModal({
               value={description}
             />
           </label>
-          <button disabled={saving} type="submit">
-            {saving ? '保存中…' : '保存'}
-          </button>
+          <footer className="classification-modal-actions">
+            <button
+              className="secondary-button"
+              disabled={saving}
+              onClick={onClose}
+              type="button"
+            >
+              取消
+            </button>
+            <button disabled={saving} type="submit">
+              {saving ? '保存中…' : '保存'}
+            </button>
+          </footer>
         </form>
       </section>
     </div>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="m7 7 10 10M17 7 7 17" />
+    </svg>
   );
 }
