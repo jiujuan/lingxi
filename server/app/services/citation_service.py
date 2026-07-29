@@ -7,12 +7,14 @@ from server.app.models.document import Document, DocumentStatus
 from server.app.models.qa_pair import DocumentChunk, QaPair
 from server.app.repositories.citation_repo import CitationRepository
 from server.app.repositories.document_repo import DocumentRepository
+from server.app.services.classification_path_service import ClassificationPathService
 
 
 class CitationService:
     def __init__(self, session: Session) -> None:
         self.session = session
         self.repo = CitationRepository(session)
+        self.classification_paths = ClassificationPathService(session)
 
     def get_run(self, context: AccessContext, run_public_id: str):
         run = self.repo.get_run_by_public_id(context.tenant_id, run_public_id)
@@ -59,10 +61,13 @@ class CitationService:
             "document_id": citation.document_id,
             "document_title": document.title if document is not None else snapshot.get("title"),
             "document_deleted": bool(document is None or document.status == DocumentStatus.DELETED),
-            "page_no": citation.snapshot.get("pageNo") or (qa_pair.page_no if qa_pair else None),
+            "page_no": snapshot.get("pageNo") or (qa_pair.page_no if qa_pair else None),
             "quote": citation.quote,
             "source_text": chunk.content if chunk is not None else citation.quote,
             "source_locator": chunk.source_locator if chunk is not None else {},
+            "classification": self.classification_paths.for_document(
+                context.tenant_id, document, snapshot
+            ),
         }
 
     def _ensure_run_visible(self, context: AccessContext, run) -> None:
@@ -87,4 +92,7 @@ class CitationService:
             "quote": citation.quote,
             "rank": citation.rank,
             "score": float(snapshot.get("rerankScore") or snapshot.get("score") or 0),
+            "classification": self.classification_paths.for_document(
+                citation.tenant_id, document, snapshot
+            ),
         }

@@ -1,4 +1,4 @@
-import type { ChatCitation } from '../types';
+import type { ChatCitation, ClassificationPath } from '../types';
 
 type Props = {
   citations: ChatCitation[];
@@ -28,6 +28,9 @@ export function CitationPanel({ citations, onOpenSource }: Props) {
             <small>
               页码 {citation.pageNo || '-'} · 分数 {citation.score?.toFixed(3) || '-'}
             </small>
+            <small className="classification-path">
+              分类 {formatClassificationPath(citation.classification)}
+            </small>
             <p>{citation.quote}</p>
             <code>{citation.qaPairId}</code>
           </button>
@@ -35,4 +38,19 @@ export function CitationPanel({ citations, onOpenSource }: Props) {
       </div>
     </aside>
   );
+}
+
+function formatClassificationPath(
+  classification: ClassificationPath | null | undefined,
+  fallback = '未分类',
+) {
+  if (classification?.displayPath) {
+    return classification.displayPath;
+  }
+  const parts = [
+    classification?.spaceName || classification?.spaceId,
+    classification?.classificationDepartmentName || classification?.classificationDepartmentId,
+    classification?.categoryName || classification?.categoryId,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' / ') : fallback;
 }

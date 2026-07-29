@@ -821,6 +821,20 @@ label {
   color: #64748b;
 }
 
+.classification-path,
+.classification-scope {
+  color: #475569;
+  font-size: 13px;
+}
+
+.classification-scope {
+  background: #f8fafc;
+  border: 1px solid #edf1f7;
+  border-radius: 8px;
+  margin: 0;
+  padding: 10px;
+}
+
 .chat-side-stack {
   align-content: start;
   display: grid;

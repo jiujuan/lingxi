@@ -1,4 +1,4 @@
-import type { CitationSource } from '../types';
+import type { CitationSource, ClassificationPath } from '../types';
 
 type Props = {
   source: CitationSource | null;
@@ -36,6 +36,10 @@ export function CitationSourceDrawer({ source, error, onClose }: Props) {
                 <span className="field-label">状态</span>
                 <strong>{source.documentDeleted ? '文档已删除' : '当前可访问'}</strong>
               </div>
+              <div>
+                <span className="field-label">分类路径</span>
+                <strong>{formatClassificationPath(source.classification)}</strong>
+              </div>
             </div>
             <blockquote>{source.quote}</blockquote>
             <pre>{source.sourceText}</pre>
@@ -44,4 +48,19 @@ export function CitationSourceDrawer({ source, error, onClose }: Props) {
       </section>
     </div>
   );
+}
+
+function formatClassificationPath(
+  classification: ClassificationPath | null | undefined,
+  fallback = '未分类',
+) {
+  if (classification?.displayPath) {
+    return classification.displayPath;
+  }
+  const parts = [
+    classification?.spaceName || classification?.spaceId,
+    classification?.classificationDepartmentName || classification?.classificationDepartmentId,
+    classification?.categoryName || classification?.categoryId,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' / ') : fallback;
 }

@@ -1,5 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
+from server.app.schemas.classification import ClassificationPathResponse
+
 
 class QueryRunResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -11,6 +13,9 @@ class QueryRunResponse(BaseModel):
     status: str
     latency_ms: int | None = Field(alias="latencyMs")
     request_id: str | None = Field(alias="requestId")
+    retrieval_scope: ClassificationPathResponse | None = Field(
+        default=None, alias="retrievalScope"
+    )
 
 
 class RetrievalExplanationResponse(BaseModel):
@@ -20,3 +25,6 @@ class RetrievalExplanationResponse(BaseModel):
     question: str
     stages: dict
     filters: dict
+    retrieval_scope: ClassificationPathResponse | None = Field(
+        default=None, alias="retrievalScope"
+    )

@@ -1,5 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
+from server.app.schemas.classification import ClassificationPathResponse
+
 
 class CitationResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -13,6 +15,7 @@ class CitationResponse(BaseModel):
     quote: str
     rank: int
     score: float
+    classification: ClassificationPathResponse
 
 
 class CitationListResponse(BaseModel):
@@ -30,3 +33,4 @@ class CitationSourceResponse(BaseModel):
     quote: str
     source_text: str = Field(alias="sourceText")
     source_locator: dict = Field(alias="sourceLocator")
+    classification: ClassificationPathResponse

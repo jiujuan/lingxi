@@ -33,6 +33,68 @@ def mock_api(route: Route) -> None:
     path = api_path(route)
     method = route.request.method
 
+    if method == "GET" and path == "/api/v1/knowledge-spaces":
+        fulfill_json(
+            route,
+            {
+                "data": [
+                    {
+                        "id": "space-support",
+                        "code": "SUPPORT",
+                        "name": "客服知识库",
+                        "description": "售后客服知识",
+                        "status": "ACTIVE",
+                        "sortOrder": 10,
+                        "createdAt": "2026-07-05T09:00:00+08:00",
+                        "updatedAt": "2026-07-05T09:00:00+08:00",
+                    }
+                ]
+            },
+        )
+        return
+
+    if method == "GET" and path == "/api/v1/departments":
+        fulfill_json(
+            route,
+            {
+                "data": [
+                    {
+                        "id": "dept-support",
+                        "code": "SUPPORT",
+                        "name": "售后部",
+                        "parentId": None,
+                        "createdAt": "2026-07-05T09:00:00+08:00",
+                        "userCount": 3,
+                    }
+                ]
+            },
+        )
+        return
+
+    if method == "GET" and path == "/api/v1/knowledge-categories":
+        fulfill_json(
+            route,
+            {
+                "data": [
+                    {
+                        "id": "cat-refund",
+                        "spaceId": "space-support",
+                        "departmentId": "dept-support",
+                        "parentId": None,
+                        "code": "REFUND",
+                        "name": "退款专题",
+                        "categoryType": "TOPIC",
+                        "description": "退款政策与审批",
+                        "status": "ACTIVE",
+                        "sortOrder": 20,
+                        "createdAt": "2026-07-05T09:00:00+08:00",
+                        "updatedAt": "2026-07-05T09:00:00+08:00",
+                    }
+                ]
+            },
+        )
+        return
+
     if method == "GET" and path == "/api/v1/chat/sessions":
         fulfill_json(
             route,
@@ -70,6 +132,15 @@ def mock_api(route: Route) -> None:
                     "quote": "退款需要主管审批。",
                     "rank": 1,
                     "score": 1.93,
+                    "classification": {
+                        "spaceId": "space-support",
+                        "spaceName": "客服知识库",
+                        "classificationDepartmentId": "dept-support",
+                        "classificationDepartmentName": "售后部",
+                        "categoryId": "cat-refund",
+                        "categoryName": "退款专题",
+                        "displayPath": "客服知识库 / 售后部 / 退款专题",
+                    },
                 },
             )
             + sse_event("done", {"runId": "run-refund", "messageId": "msg-assistant"})
@@ -89,6 +160,15 @@ def mock_api(route: Route) -> None:
                 "quote": "退款需要主管审批。",
                 "sourceText": "退款申请提交后，由主管审批。",
                 "sourceLocator": {"lineStart": 1},
+                "classification": {
+                    "spaceId": "space-support",
+                    "spaceName": "客服知识库",
+                    "classificationDepartmentId": "dept-support",
+                    "classificationDepartmentName": "售后部",
+                    "categoryId": "cat-refund",
+                    "categoryName": "退款专题",
+                    "displayPath": "客服知识库 / 售后部 / 退款专题",
+                },
             },
         )
         return
@@ -99,7 +179,21 @@ def mock_api(route: Route) -> None:
             {
                 "runId": "run-refund",
                 "question": "退款需要谁审批？",
-                "filters": {"authorizedCandidates": 1},
+                "filters": {
+                    "authorizedCandidates": 1,
+                    "scopeSpaceId": "space-support",
+                    "scopeClassificationDepartmentId": "dept-support",
+                    "scopeCategoryId": "cat-refund",
+                },
+                "retrievalScope": {
+                    "spaceId": "space-support",
+                    "spaceName": "客服知识库",
+                    "classificationDepartmentId": "dept-support",
+                    "classificationDepartmentName": "售后部",
+                    "categoryId": "cat-refund",
+                    "categoryName": "退款专题",
+                    "displayPath": "客服知识库 / 售后部 / 退款专题",
+                },
                 "stages": {
                     "vector": [{"qaPairId": "qa-refund", "question": "退款需要谁审批？", "score": 0.91}],
                     "text": [{"qaPairId": "qa-refund", "question": "退款需要谁审批？", "score": 1}],
@@ -123,7 +217,28 @@ def prepare_page(page: Page) -> list[str]:
     )
     page.route("**/*/api/v1/**", mock_api)
     page.route("**/api/v1/**", mock_api)
-    page.add_init_script("localStorage.setItem('lingxi_access_token', 'playwright-token')")
+    user = {
+        "id": "user-playwright",
+        "email": "playwright@example.com",
+        "name": "Playwright",
+        "roles": ["admin"],
+        "permissions": [
+            "CHAT_READ",
+            "DOCUMENT_READ",
+            "DASHBOARD_READ",
+            "LOG_READ",
+            "API_KEY_READ",
+            "MODEL_CONFIG_READ",
+            "USER_READ",
+            "SETTING_READ",
+        ],
+    }
+    page.add_init_script(
+        "localStorage.setItem('lingxi_access_token', 'playwright-token');"
+        "localStorage.setItem('lingxi_user', "
+        + json_dumps(json_dumps(user))
+        + ");"
+    )
     return console_errors
 
 
@@ -135,12 +250,15 @@ def verify_page(page: Page, screenshot_name: str) -> list[str]:
 
     expect(page.get_by_text("Refund SOP")).to_be_visible()
     expect(page.get_by_text("页码 1")).to_be_visible()
+    expect(page.get_by_text("分类 客服知识库 / 售后部 / 退款专题")).to_be_visible()
     page.get_by_text("Refund SOP").click()
     expect(page.get_by_role("dialog", name="引用原文")).to_be_visible()
     expect(page.get_by_text("退款申请提交后，由主管审批。")).to_be_visible()
+    expect(page.get_by_role("dialog", name="引用原文").get_by_text("客服知识库 / 售后部 / 退款专题")).to_be_visible()
     page.get_by_role("button", name="关闭").click()
 
     page.get_by_role("button", name="查看").click()
+    expect(page.get_by_text("检索范围：客服知识库 / 售后部 / 退款专题")).to_be_visible()
     expect(page.get_by_text("向量召回")).to_be_visible()
     expect(page.get_by_text("全文召回")).to_be_visible()
     expect(page.get_by_text("RRF 融合")).to_be_visible()

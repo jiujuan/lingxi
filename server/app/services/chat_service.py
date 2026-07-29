@@ -18,6 +18,10 @@ from server.app.models.model_config import ModelCapability, ModelConfig, ModelPr
 from server.app.repositories.chat_repo import ChatRepository
 from server.app.repositories.feedback_repo import FeedbackRepository
 from server.app.repositories.query_run_repo import QueryRunRepository
+from server.app.services.classification_path_service import (
+    ClassificationPathService,
+    classification_path_to_public,
+)
 from server.app.services.prompt_service import PromptService
 from server.app.schemas.retrieval import RetrievalAccessScope
 from server.app.services.retrieval_service import RetrievalService, normalize_retrieval_scope
@@ -105,6 +109,15 @@ class ChatService:
         retrieval = RetrievalService(
             self.session, provider_factory=self._build_adapter
         ).retrieve(context, content, access_scope=retrieval_scope)
+        classification_paths = ClassificationPathService(self.session)
+        retrieval_snapshot = dict(retrieval.snapshot)
+        retrieval_scope_path = classification_paths.for_scope_filters(
+            context.tenant_id, retrieval_snapshot.get("filters")
+        )
+        if retrieval_scope_path is not None:
+            retrieval_snapshot["retrievalScope"] = classification_path_to_public(
+                retrieval_scope_path
+            )
         run_public_id = f"run_{uuid4().hex}"
         run = self.run_repo.create_run(
             tenant_id=context.tenant_id,
@@ -113,7 +126,7 @@ class ChatService:
             user_message_id=user_message.id,
             question=content,
             request_id=request_id,
-            retrieval_snapshot=retrieval.snapshot,
+            retrieval_snapshot=retrieval_snapshot,
         )
         self.session.commit()
 
@@ -193,7 +206,20 @@ class ChatService:
         run.assistant_message_id = assistant_message.id
         run.latency_ms = int((perf_counter() - started) * 1000)
         titles = self._document_titles({c.document_id for c in retrieval.candidates})
+        documents = self._documents_by_id({c.document_id for c in retrieval.candidates})
+        classifications = {
+            document_id: classification_paths.for_document(
+                context.tenant_id, documents.get(document_id)
+            )
+            for document_id in titles
+        }
         for rank, candidate in enumerate(retrieval.candidates, start=1):
+            candidate_snapshot = candidate.to_snapshot()
+            candidate_classification = classifications.get(candidate.document_id)
+            if candidate_classification is not None:
+                candidate_snapshot["classification"] = classification_path_to_public(
+                    candidate_classification
+                )
             citation = self.run_repo.add_citation(
                 tenant_id=context.tenant_id,
                 run_db_id=run.id,
@@ -202,22 +228,23 @@ class ChatService:
                 qa_pair_id=candidate.qa_pair_id,
                 quote=candidate.quote or candidate.answer,
                 rank=rank,
-                snapshot=candidate.to_snapshot(),
+                snapshot=candidate_snapshot,
             )
-            yield self.sse.event(
-                "citation",
-                {
-                    "runId": run_public_id,
-                    "citationId": citation.id,
-                    "documentId": candidate.document_id,
-                    "qaPairId": candidate.qa_pair_id,
-                    "title": titles.get(candidate.document_id),
-                    "quote": citation.quote,
-                    "rank": rank,
-                    "pageNo": candidate.page_no,
-                    "score": round(candidate.rerank_score, 6),
-                },
-            )
+            payload = {
+                "runId": run_public_id,
+                "citationId": citation.id,
+                "documentId": candidate.document_id,
+                "qaPairId": candidate.qa_pair_id,
+                "title": titles.get(candidate.document_id),
+                "quote": citation.quote,
+                "rank": rank,
+                "pageNo": candidate.page_no,
+                "score": round(candidate.rerank_score, 6),
+            }
+            public_classification = classification_path_to_public(candidate_classification)
+            if public_classification is not None:
+                payload["classification"] = public_classification
+            yield self.sse.event("citation", payload)
         self.session.commit()
         yield self.sse.event(
             "done",
@@ -262,3 +289,11 @@ class ChatService:
             select(Document.id, Document.title).where(Document.id.in_(document_ids))
         ).all()
         return {row.id: row.title for row in rows}
+
+    def _documents_by_id(self, document_ids: set[str]) -> dict[str, Document]:
+        if not document_ids:
+            return {}
+        documents = self.session.scalars(
+            select(Document).where(Document.id.in_(document_ids))
+        ).all()
+        return {document.id: document for document in documents}

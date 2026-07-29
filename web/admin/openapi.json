@@ -700,6 +700,9 @@
       },
       "CitationResponse": {
         "properties": {
+          "classification": {
+            "$ref": "#/components/schemas/ClassificationPathResponse"
+          },
           "documentId": {
             "anyOf": [
               {
@@ -774,7 +777,8 @@
           "pageNo",
           "quote",
           "rank",
-          "score"
+          "score",
+          "classification"
         ],
         "title": "CitationResponse",
         "type": "object"
@@ -784,6 +788,9 @@
           "citationId": {
             "title": "Citationid",
             "type": "string"
+          },
+          "classification": {
+            "$ref": "#/components/schemas/ClassificationPathResponse"
           },
           "documentDeleted": {
             "title": "Documentdeleted",
@@ -844,9 +851,89 @@
           "pageNo",
           "quote",
           "sourceText",
-          "sourceLocator"
+          "sourceLocator",
+          "classification"
         ],
         "title": "CitationSourceResponse",
+        "type": "object"
+      },
+      "ClassificationPathResponse": {
+        "properties": {
+          "categoryId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Categoryid"
+          },
+          "categoryName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Categoryname"
+          },
+          "classificationDepartmentId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classificationdepartmentid"
+          },
+          "classificationDepartmentName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classificationdepartmentname"
+          },
+          "displayPath": {
+            "title": "Displaypath",
+            "type": "string"
+          },
+          "spaceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spaceid"
+          },
+          "spaceName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spacename"
+          }
+        },
+        "required": [
+          "displayPath"
+        ],
+        "title": "ClassificationPathResponse",
         "type": "object"
       },
       "ConnectionTestResponse": {
@@ -3691,6 +3778,16 @@
             ],
             "title": "Requestid"
           },
+          "retrievalScope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClassificationPathResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "runId": {
             "title": "Runid",
             "type": "string"
@@ -3843,6 +3940,16 @@
           "question": {
             "title": "Question",
             "type": "string"
+          },
+          "retrievalScope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClassificationPathResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "runId": {
             "title": "Runid",

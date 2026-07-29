@@ -10,11 +10,37 @@ def _seed_retrieval_dataset(session, identity):
         DocumentAccessSubjectType,
         DocumentStatus,
     )
+    from server.app.models.knowledge_category import KnowledgeCategory, KnowledgeSpace
     from server.app.models.qa_pair import QaPair
 
     tenant_id = identity["tenant"].id
     support = identity["departments"]["support"]
     private = identity["departments"]["private"]
+
+    support_space = KnowledgeSpace(
+        id="space-support",
+        tenant_id=tenant_id,
+        name="客服知识库",
+        code="support-kb",
+    )
+    refund_category = KnowledgeCategory(
+        id="cat-refund",
+        tenant_id=tenant_id,
+        space_id=support_space.id,
+        department_id=support.id,
+        name="退款专题",
+        code="refund",
+    )
+    invoice_category = KnowledgeCategory(
+        id="cat-invoice",
+        tenant_id=tenant_id,
+        space_id=support_space.id,
+        department_id=support.id,
+        name="发票专题",
+        code="invoice",
+    )
+    session.add_all([support_space, refund_category, invoice_category])
+    session.flush()
 
     refund_doc = Document(
         tenant_id=tenant_id,

@@ -1290,6 +1290,7 @@ export interface components {
         };
         /** CitationResponse */
         CitationResponse: {
+            classification: components["schemas"]["ClassificationPathResponse"];
             /** Documentid */
             documentId: string | null;
             /** Id */
@@ -1313,6 +1314,7 @@ export interface components {
         CitationSourceResponse: {
             /** Citationid */
             citationId: string;
+            classification: components["schemas"]["ClassificationPathResponse"];
             /** Documentdeleted */
             documentDeleted: boolean;
             /** Documentid */
@@ -1329,6 +1331,23 @@ export interface components {
             };
             /** Sourcetext */
             sourceText: string;
+        };
+        /** ClassificationPathResponse */
+        ClassificationPathResponse: {
+            /** Categoryid */
+            categoryId?: string | null;
+            /** Categoryname */
+            categoryName?: string | null;
+            /** Classificationdepartmentid */
+            classificationDepartmentId?: string | null;
+            /** Classificationdepartmentname */
+            classificationDepartmentName?: string | null;
+            /** Displaypath */
+            displayPath: string;
+            /** Spaceid */
+            spaceId?: string | null;
+            /** Spacename */
+            spaceName?: string | null;
         };
         /** ConnectionTestResponse */
         ConnectionTestResponse: {
@@ -2206,6 +2225,7 @@ export interface components {
             question: string;
             /** Requestid */
             requestId: string | null;
+            retrievalScope?: components["schemas"]["ClassificationPathResponse"] | null;
             /** Runid */
             runId: string;
             /** Sessionid */
@@ -2253,6 +2273,7 @@ export interface components {
             };
             /** Question */
             question: string;
+            retrievalScope?: components["schemas"]["ClassificationPathResponse"] | null;
             /** Runid */
             runId: string;
             /** Stages */

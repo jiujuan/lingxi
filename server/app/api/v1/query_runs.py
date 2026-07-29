@@ -6,6 +6,7 @@ from server.app.db.session import get_db
 from server.app.schemas.citation import CitationListResponse
 from server.app.schemas.query_run import QueryRunResponse, RetrievalExplanationResponse
 from server.app.services.citation_service import CitationService
+from server.app.services.classification_path_service import ClassificationPathService
 from server.app.services.retrieval_explanation_service import RetrievalExplanationService
 
 router = APIRouter(prefix="/query-runs", tags=["query-runs"])
@@ -26,6 +27,9 @@ def get_query_run(
         "status": run.status,
         "latency_ms": run.latency_ms,
         "request_id": run.request_id,
+        "retrieval_scope": ClassificationPathService(db).for_run_snapshot(
+            context.tenant_id, run.retrieval_snapshot
+        ),
     }
 
 

@@ -1,4 +1,4 @@
-import type { RetrievalExplanation } from '../types';
+import type { ClassificationPath, RetrievalExplanation } from '../types';
 
 const STAGES = [
   ['vector', '向量召回'],
@@ -23,6 +23,12 @@ export function RetrievalExplanationPanel({ explanation, isLoading, onLoad }: Pr
         </button>
       </div>
       {!explanation ? <p className="muted">选择一次回答后可查看四阶段候选和分数。</p> : null}
+      {explanation ? (
+        <p className="classification-scope">
+          <strong>检索范围：</strong>
+          {formatClassificationPath(explanation.retrievalScope, '全部可访问知识')}
+        </p>
+      ) : null}
       {explanation
         ? STAGES.map(([key, label]) => (
             <div className="explain-stage" key={key}>
@@ -41,4 +47,19 @@ export function RetrievalExplanationPanel({ explanation, isLoading, onLoad }: Pr
         : null}
     </section>
   );
+}
+
+function formatClassificationPath(
+  classification: ClassificationPath | null | undefined,
+  fallback = '未分类',
+) {
+  if (classification?.displayPath) {
+    return classification.displayPath;
+  }
+  const parts = [
+    classification?.spaceName || classification?.spaceId,
+    classification?.classificationDepartmentName || classification?.classificationDepartmentId,
+    classification?.categoryName || classification?.categoryId,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' / ') : fallback;
 }

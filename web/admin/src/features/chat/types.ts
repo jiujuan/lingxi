@@ -18,16 +18,19 @@ export type ChatMessage = {
   createdAt: string;
 };
 
+export type ClassificationPath = Schemas['ClassificationPathResponse'];
+
 export type ChatCitation = {
   runId: string;
   citationId: string;
-  documentId: string;
-  qaPairId: string;
+  documentId: string | null;
+  qaPairId: string | null;
   title?: string | null;
   pageNo?: number | null;
   quote: string;
   rank: number;
   score?: number;
+  classification?: ClassificationPath | null;
 };
 
 export type CitationSource = {
@@ -39,6 +42,7 @@ export type CitationSource = {
   quote: string;
   sourceText: string;
   sourceLocator: Record<string, unknown>;
+  classification?: ClassificationPath | null;
 };
 
 export type RetrievalExplanation = {
@@ -46,6 +50,7 @@ export type RetrievalExplanation = {
   question: string;
   stages: Record<string, Array<Record<string, unknown>>>;
   filters: Record<string, unknown>;
+  retrievalScope?: ClassificationPath | null;
 };
 
 export type StreamEvent = {
