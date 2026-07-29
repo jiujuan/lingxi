@@ -39,10 +39,72 @@ def sse_event(name: str, payload: dict) -> str:
     return f"event: {name}\ndata: {json_dumps(payload)}\n\n"
 
 
-def mock_api(route: Route) -> None:
+def mock_api(route: Route, sent_message_runs: list[dict]) -> None:
     request = route.request
     path = api_path(route)
     method = request.method
+
+    if method == "GET" and path == "/api/v1/knowledge-spaces":
+        fulfill_json(
+            route,
+            {
+                "data": [
+                    {
+                        "id": "space-support",
+                        "code": "SUPPORT",
+                        "name": "客服知识库",
+                        "description": "售后客服知识",
+                        "status": "ACTIVE",
+                        "sortOrder": 10,
+                        "createdAt": "2026-07-05T09:00:00+08:00",
+                        "updatedAt": "2026-07-05T09:00:00+08:00",
+                    }
+                ]
+            },
+        )
+        return
+
+    if method == "GET" and path == "/api/v1/departments":
+        fulfill_json(
+            route,
+            {
+                "data": [
+                    {
+                        "id": "dept-support",
+                        "code": "SUPPORT",
+                        "name": "客服部",
+                        "parentId": None,
+                        "createdAt": "2026-07-05T09:00:00+08:00",
+                        "userCount": 3,
+                    }
+                ]
+            },
+        )
+        return
+
+    if method == "GET" and path == "/api/v1/knowledge-categories":
+        fulfill_json(
+            route,
+            {
+                "data": [
+                    {
+                        "id": "cat-refund",
+                        "spaceId": "space-support",
+                        "departmentId": "dept-support",
+                        "parentId": None,
+                        "code": "REFUND",
+                        "name": "退款专题",
+                        "categoryType": "TOPIC",
+                        "description": "退款政策与审批",
+                        "status": "ACTIVE",
+                        "sortOrder": 20,
+                        "createdAt": "2026-07-05T09:00:00+08:00",
+                        "updatedAt": "2026-07-05T09:00:00+08:00",
+                    }
+                ]
+            },
+        )
+        return
 
     if method == "GET" and path == "/api/v1/chat/sessions":
         fulfill_json(route, {"data": [SESSION]})
@@ -81,6 +143,7 @@ def mock_api(route: Route) -> None:
         return
 
     if method == "POST" and path == "/api/v1/chat/sessions/session-refund/message-runs":
+        sent_message_runs.append(request.post_data_json)
         body = (
             sse_event("run_started", {"runId": "run-chat", "requestId": "req_chat"})
             + sse_event("delta", {"runId": "run-chat", "content": "退款需要"})
@@ -122,7 +185,7 @@ def mock_api(route: Route) -> None:
     )
 
 
-def prepare_page(page: Page) -> list[str]:
+def prepare_page(page: Page, sent_message_runs: list[dict]) -> list[str]:
     console_errors: list[str] = []
     page.on(
         "console",
@@ -130,25 +193,61 @@ def prepare_page(page: Page) -> list[str]:
         if message.type in {"error", "warning"}
         else None,
     )
-    page.route("**/*/api/v1/**", mock_api)
-    page.route("**/api/v1/**", mock_api)
-    page.add_init_script("localStorage.setItem('lingxi_access_token', 'playwright-token')")
+    page.route("**/*/api/v1/**", lambda route: mock_api(route, sent_message_runs))
+    page.route("**/api/v1/**", lambda route: mock_api(route, sent_message_runs))
+    user = {
+        "id": "user-playwright",
+        "email": "playwright@example.com",
+        "name": "Playwright",
+        "roles": ["admin"],
+        "permissions": [
+            "CHAT_READ",
+            "DOCUMENT_READ",
+            "DASHBOARD_READ",
+            "LOG_READ",
+            "API_KEY_READ",
+            "MODEL_CONFIG_READ",
+            "USER_READ",
+            "SETTING_READ",
+        ],
+    }
+    page.add_init_script(
+        "localStorage.setItem('lingxi_access_token', 'playwright-token');"
+        "localStorage.setItem('lingxi_user', "
+        + json_dumps(json_dumps(user))
+        + ");"
+    )
     return console_errors
 
 
 def verify_chat_page(page: Page, screenshot_name: str) -> list[str]:
-    errors = prepare_page(page)
+    sent_message_runs: list[dict] = []
+    errors = prepare_page(page, sent_message_runs)
     page.goto(APP_URL, wait_until="networkidle")
 
     expect(page.get_by_role("heading", name="知识库问答")).to_be_visible()
     expect(page.get_by_text("退款咨询")).to_be_visible()
     expect(page.get_by_text("退款需要主管审批。").first).to_be_visible()
 
+    expect(page.get_by_text("检索范围")).to_be_visible()
+    page.locator("#chat-retrieval-scope-space").select_option("space-support")
+    page.locator("#chat-retrieval-scope-department").select_option("dept-support")
+    expect(page.locator("#chat-retrieval-scope-category")).to_contain_text("退款专题")
+    page.locator("#chat-retrieval-scope-category").select_option("cat-refund")
+
     composer = page.get_by_label("输入问题")
     composer.fill("退款需要谁审批？")
     page.get_by_role("button", name="发送").click()
     expect(page.get_by_text("退款需要主管审批。").first).to_be_visible()
     expect(page.get_by_text("qa-refund")).to_be_visible()
+    assert sent_message_runs[-1] == {
+        "content": "退款需要谁审批？",
+        "retrievalScope": {
+            "spaceId": "space-support",
+            "classificationDepartmentId": "dept-support",
+            "categoryId": "cat-refund",
+        },
+    }
 
     page.get_by_role("button", name="赞").first.click()
     expect(page.get_by_text("FEEDBACK")).not_to_be_visible()

@@ -14,7 +14,13 @@ import { CitationPanel } from '../components/CitationPanel';
 import { CitationSourceDrawer } from '../components/CitationSourceDrawer';
 import { RetrievalExplanationPanel } from '../components/RetrievalExplanationPanel';
 import { useChatStream } from '../hooks/useChatStream';
-import type { ChatMessage, ChatSession, CitationSource, RetrievalExplanation } from '../types';
+import type {
+  ChatMessage,
+  ChatRetrievalScope,
+  ChatSession,
+  CitationSource,
+  RetrievalExplanation,
+} from '../types';
 
 export function ChatPage() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -76,7 +82,7 @@ export function ChatPage() {
     reset();
   }
 
-  async function submitMessage(content: string) {
+  async function submitMessage(content: string, retrievalScope: ChatRetrievalScope | null) {
     let sessionId = activeSessionId;
     if (!sessionId) {
       const session = await createChatSession(content.slice(0, 24));
@@ -98,7 +104,7 @@ export function ChatPage() {
     setMessages((current) => [...current, localUserMessage]);
     setError(null);
 
-    await start(targetSessionId, content, {
+    await start(targetSessionId, content, retrievalScope, {
       onCompleted: async () => {
         await refreshMessages(targetSessionId, true);
         await refreshSessions();

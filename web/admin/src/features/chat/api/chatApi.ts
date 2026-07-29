@@ -1,6 +1,13 @@
 import { ApiError, apiRequest, toApiError } from '../../../api/client';
 import { getToken, redirectToLogin } from '../../../auth/authStore';
-import type { ChatCitation, ChatMessage, ChatSession, StreamEvent } from '../types';
+import type {
+  ChatCitation,
+  ChatMessage,
+  ChatRetrievalScope,
+  ChatSession,
+  SendMessagePayload,
+  StreamEvent,
+} from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -28,7 +35,7 @@ export function sendFeedback(messageId: string, feedback: 'up' | 'down') {
 
 export async function streamChatMessage(
   sessionId: string,
-  content: string,
+  payload: SendMessagePayload,
   handlers: {
     onEvent: (event: StreamEvent) => void;
     onCitation: (citation: ChatCitation) => void;
@@ -44,7 +51,7 @@ export async function streamChatMessage(
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(toMessageRunBody(payload)),
       signal: options.signal,
     });
   } catch (cause) {
@@ -110,6 +117,47 @@ export async function streamChatMessage(
     // Ensure the underlying connection is released on stop/error.
     reader.cancel().catch(() => undefined);
   }
+}
+
+function toMessageRunBody(payload: SendMessagePayload): SendMessagePayload {
+  const retrievalScope = normalizeRetrievalScope(payload.retrievalScope);
+  return retrievalScope
+    ? { content: payload.content, retrievalScope }
+    : { content: payload.content };
+}
+
+function normalizeRetrievalScope(
+  retrievalScope: ChatRetrievalScope | null | undefined,
+): ChatRetrievalScope | null {
+  if (!retrievalScope) {
+    return null;
+  }
+  const direct: ChatRetrievalScope = {
+    spaceId: normalizeScopeId(retrievalScope.spaceId),
+    classificationDepartmentId: normalizeScopeId(retrievalScope.classificationDepartmentId),
+    categoryId: normalizeScopeId(retrievalScope.categoryId),
+  };
+  if (direct.spaceId || direct.classificationDepartmentId || direct.categoryId) {
+    return direct;
+  }
+
+  const nested = retrievalScope.classification
+    ? {
+        spaceId: normalizeScopeId(retrievalScope.classification.spaceId),
+        classificationDepartmentId: normalizeScopeId(
+          retrievalScope.classification.classificationDepartmentId,
+        ),
+        categoryId: normalizeScopeId(retrievalScope.classification.categoryId),
+      }
+    : null;
+  return nested?.spaceId || nested?.classificationDepartmentId || nested?.categoryId
+    ? { classification: nested }
+    : null;
+}
+
+function normalizeScopeId(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed || null;
 }
 
 function dispatchBlock(

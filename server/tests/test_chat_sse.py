@@ -91,6 +91,95 @@ def test_chat_session_api_and_sse_event_order_persist_messages():
         assert session.scalar(select(QueryCitation))
 
 
+def test_chat_message_run_request_parses_retrieval_scope_direct_and_nested():
+    from server.app.schemas.chat import ChatMessageRunRequest
+
+    direct = ChatMessageRunRequest.model_validate(
+        {
+            "content": "退款规则是什么？",
+            "retrievalScope": {
+                "spaceId": "space-support",
+                "classificationDepartmentId": "dept-support",
+                "categoryId": "cat-refund",
+            },
+        }
+    )
+    assert direct.retrieval_scope is not None
+    direct_scope = direct.retrieval_scope.to_access_scope()
+    assert direct_scope.space_id == "space-support"
+    assert direct_scope.classification_department_id == "dept-support"
+    assert direct_scope.category_id == "cat-refund"
+
+    nested = ChatMessageRunRequest.model_validate(
+        {
+            "content": "退款规则是什么？",
+            "retrievalScope": {
+                "classification": {
+                    "spaceId": "space-support",
+                    "classificationDepartmentId": "dept-support",
+                    "categoryId": "cat-refund",
+                }
+            },
+        }
+    )
+    assert nested.retrieval_scope is not None
+    nested_scope = nested.retrieval_scope.to_access_scope()
+    assert nested_scope.space_id == "space-support"
+    assert nested_scope.classification_department_id == "dept-support"
+    assert nested_scope.category_id == "cat-refund"
+
+
+def test_chat_message_run_passes_retrieval_scope_to_sse_retrieval():
+    client, SessionLocal = build_test_client()
+    _seed_chat_data(SessionLocal)
+    headers = login_employee(client)
+    with SessionLocal() as session:
+        from server.app.models.user import Department
+
+        support_department_id = session.scalar(
+            select(Department.id).where(Department.code == "SUPPORT")
+        )
+    session_id = client.post(
+        "/api/v1/chat/sessions", headers=headers, json={"title": "分类检索"}
+    ).json()["id"]
+
+    response = client.post(
+        f"/api/v1/chat/sessions/{session_id}/message-runs",
+        headers=headers,
+        json={
+            "content": "退款需要谁审批？",
+            "retrievalScope": {
+                "spaceId": "space-support",
+                "classificationDepartmentId": support_department_id,
+                "categoryId": "cat-refund",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert "event: done" in response.text
+
+    from server.app.models.chat import QueryCitation, QueryRun
+    from server.app.models.document import Document
+
+    with SessionLocal() as session:
+        run = session.scalar(select(QueryRun).order_by(QueryRun.created_at.desc()))
+        assert run is not None
+        assert run.retrieval_snapshot["filters"]["scopeSpaceId"] == "space-support"
+        assert (
+            run.retrieval_snapshot["filters"]["scopeClassificationDepartmentId"]
+            == support_department_id
+        )
+        assert run.retrieval_snapshot["filters"]["scopeCategoryId"] == "cat-refund"
+
+        citations = session.scalars(select(QueryCitation)).all()
+        assert citations
+        cited_titles = {
+            session.get(Document, citation.document_id).title for citation in citations
+        }
+        assert cited_titles == {"Refund SOP"}
+
+
 def test_chat_low_confidence_refuses_without_citation():
     client, SessionLocal = build_test_client()
     _seed_chat_data(SessionLocal)

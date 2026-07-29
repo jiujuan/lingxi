@@ -57,7 +57,14 @@ def create_message_run(
 ):
     service = ChatService(db)
     # Validation happens here and raises 404/400 before streaming begins.
-    stream = service.stream_message_run(context, session_id, payload.content)
+    retrieval_scope = (
+        payload.retrieval_scope.to_access_scope()
+        if payload.retrieval_scope is not None
+        else None
+    )
+    stream = service.stream_message_run(
+        context, session_id, payload.content, retrieval_scope
+    )
     return StreamingResponse(
         service.sse.stream_with_heartbeat(stream),
         media_type="text/event-stream",

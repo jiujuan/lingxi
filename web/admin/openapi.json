@@ -541,12 +541,71 @@
             "minLength": 1,
             "title": "Content",
             "type": "string"
+          },
+          "retrievalScope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatRetrievalScope"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "content"
         ],
         "title": "ChatMessageRunRequest",
+        "type": "object"
+      },
+      "ChatRetrievalScope": {
+        "properties": {
+          "categoryId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Categoryid"
+          },
+          "classification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RetrievalAccessScopeRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "classificationDepartmentId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classificationdepartmentid"
+          },
+          "spaceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spaceid"
+          }
+        },
+        "title": "ChatRetrievalScope",
         "type": "object"
       },
       "ChatSessionCreateRequest": {
@@ -3733,6 +3792,45 @@
           "softDeleteDays"
         ],
         "title": "RetentionPolicy",
+        "type": "object"
+      },
+      "RetrievalAccessScopeRequest": {
+        "properties": {
+          "categoryId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Categoryid"
+          },
+          "classificationDepartmentId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classificationdepartmentid"
+          },
+          "spaceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spaceid"
+          }
+        },
+        "title": "RetrievalAccessScopeRequest",
         "type": "object"
       },
       "RetrievalExplanationResponse": {

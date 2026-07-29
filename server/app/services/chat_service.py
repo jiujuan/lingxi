@@ -19,7 +19,8 @@ from server.app.repositories.chat_repo import ChatRepository
 from server.app.repositories.feedback_repo import FeedbackRepository
 from server.app.repositories.query_run_repo import QueryRunRepository
 from server.app.services.prompt_service import PromptService
-from server.app.services.retrieval_service import RetrievalService
+from server.app.schemas.retrieval import RetrievalAccessScope
+from server.app.services.retrieval_service import RetrievalService, normalize_retrieval_scope
 from server.app.services.sse_service import SseService
 
 
@@ -62,7 +63,11 @@ class ChatService:
         return message
 
     def stream_message_run(
-        self, context: AccessContext, session_id: str, content: str
+        self,
+        context: AccessContext,
+        session_id: str,
+        content: str,
+        retrieval_scope: RetrievalAccessScope | None = None,
     ) -> Iterator[str]:
         """Validate preconditions eagerly, then return the streaming generator.
 
@@ -79,10 +84,18 @@ class ChatService:
         content = content.strip()
         if not content:
             raise bad_request("EMPTY_MESSAGE", "消息内容不能为空")
-        return self._run_stream(context, session_id, content)
+        try:
+            retrieval_scope = normalize_retrieval_scope(retrieval_scope)
+        except ValueError as exc:
+            raise bad_request("INVALID_RETRIEVAL_SCOPE", str(exc)) from exc
+        return self._run_stream(context, session_id, content, retrieval_scope)
 
     def _run_stream(
-        self, context: AccessContext, session_id: str, content: str
+        self,
+        context: AccessContext,
+        session_id: str,
+        content: str,
+        retrieval_scope: RetrievalAccessScope | None,
     ) -> Iterator[str]:
         request_id = current_request_id()
         started = perf_counter()
@@ -91,7 +104,7 @@ class ChatService:
         )
         retrieval = RetrievalService(
             self.session, provider_factory=self._build_adapter
-        ).retrieve(context, content)
+        ).retrieve(context, content, access_scope=retrieval_scope)
         run_public_id = f"run_{uuid4().hex}"
         run = self.run_repo.create_run(
             tenant_id=context.tenant_id,

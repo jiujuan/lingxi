@@ -1248,6 +1248,17 @@ export interface components {
         ChatMessageRunRequest: {
             /** Content */
             content: string;
+            retrievalScope?: components["schemas"]["ChatRetrievalScope"] | null;
+        };
+        /** ChatRetrievalScope */
+        ChatRetrievalScope: {
+            /** Categoryid */
+            categoryId?: string | null;
+            classification?: components["schemas"]["RetrievalAccessScopeRequest"] | null;
+            /** Classificationdepartmentid */
+            classificationDepartmentId?: string | null;
+            /** Spaceid */
+            spaceId?: string | null;
         };
         /** ChatSessionCreateRequest */
         ChatSessionCreateRequest: {
@@ -2224,6 +2235,15 @@ export interface components {
             softDeleteDays: number;
             /** Taskrundays */
             taskRunDays: number;
+        };
+        /** RetrievalAccessScopeRequest */
+        RetrievalAccessScopeRequest: {
+            /** Categoryid */
+            categoryId?: string | null;
+            /** Classificationdepartmentid */
+            classificationDepartmentId?: string | null;
+            /** Spaceid */
+            spaceId?: string | null;
         };
         /** RetrievalExplanationResponse */
         RetrievalExplanationResponse: {

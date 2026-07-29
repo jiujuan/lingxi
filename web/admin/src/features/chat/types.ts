@@ -1,3 +1,5 @@
+import type { Schemas } from '../../api/schema-helpers';
+
 export type ChatSession = {
   id: string;
   title: string | null;
@@ -50,3 +52,6 @@ export type StreamEvent = {
   type: string;
   data: Record<string, unknown>;
 };
+
+export type ChatRetrievalScope = Schemas['ChatRetrievalScope'];
+export type SendMessagePayload = Schemas['ChatMessageRunRequest'];

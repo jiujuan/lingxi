@@ -791,6 +791,15 @@ label {
   padding: 12px;
 }
 
+.chat-composer .classification-select {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.chat-composer .classification-select .filter-grid {
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+}
+
 .citation-item {
   background: #ffffff;
   border: 1px solid #edf1f7;
@@ -1049,7 +1058,8 @@ a code {
     min-height: 360px;
   }
 
-  .chat-composer {
+  .chat-composer,
+  .chat-composer .classification-select .filter-grid {
     grid-template-columns: 1fr;
   }
 
