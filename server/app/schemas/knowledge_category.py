@@ -48,6 +48,36 @@ class KnowledgeSpaceListResponse(BaseModel):
     data: list[KnowledgeSpaceResponse]
 
 
+class KnowledgeClassificationStatsRead(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    total_count: int = Field(alias="totalCount")
+    processing_count: int = Field(alias="processingCount")
+    ready_count: int = Field(alias="readyCount")
+    failed_count: int = Field(alias="failedCount")
+    unclassified_count: int = Field(alias="unclassifiedCount")
+
+
+class KnowledgeSpaceStatsRead(KnowledgeClassificationStatsRead):
+    space_id: str = Field(alias="spaceId")
+
+
+class KnowledgeCategoryStatsRead(KnowledgeClassificationStatsRead):
+    category_id: str = Field(alias="categoryId")
+    space_id: str = Field(alias="spaceId")
+    department_id: str = Field(alias="departmentId")
+
+
+class KnowledgeSpaceStatsListResponse(BaseModel):
+    data: list[KnowledgeSpaceStatsRead]
+    summary: KnowledgeClassificationStatsRead
+
+
+class KnowledgeCategoryStatsListResponse(BaseModel):
+    data: list[KnowledgeCategoryStatsRead]
+    unclassified: KnowledgeClassificationStatsRead
+
+
 class KnowledgeCategoryCreateRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

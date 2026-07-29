@@ -4,13 +4,22 @@ import type {
   CreateKnowledgeSpacePayload,
   KnowledgeCategory,
   KnowledgeCategoryFilters,
+  KnowledgeCategoryStats,
+  KnowledgeClassificationStats,
   KnowledgeSpace,
+  KnowledgeSpaceStats,
   UpdateKnowledgeCategoryPayload,
   UpdateKnowledgeSpacePayload,
 } from '../types/classification';
 
 export function listKnowledgeSpaces() {
   return apiRequest<{ data: KnowledgeSpace[] }>('/api/v1/knowledge-spaces');
+}
+
+export function listKnowledgeSpaceStats() {
+  return apiRequest<{ data: KnowledgeSpaceStats[]; summary: KnowledgeClassificationStats }>(
+    '/api/v1/knowledge-spaces/stats',
+  );
 }
 
 export function createKnowledgeSpace(payload: CreateKnowledgeSpacePayload) {
@@ -40,6 +49,17 @@ export function listKnowledgeCategories(filters: KnowledgeCategoryFilters = {}) 
   });
   const suffix = query ? `?${query}` : '';
   return apiRequest<{ data: KnowledgeCategory[] }>(`/api/v1/knowledge-categories${suffix}`);
+}
+
+export function listKnowledgeCategoryStats(filters: KnowledgeCategoryFilters = {}) {
+  const query = buildQuery({
+    spaceId: filters.spaceId,
+    departmentId: filters.departmentId,
+  });
+  const suffix = query ? `?${query}` : '';
+  return apiRequest<{ data: KnowledgeCategoryStats[]; unclassified: KnowledgeClassificationStats }>(
+    `/api/v1/knowledge-categories/stats${suffix}`,
+  );
 }
 
 export function createKnowledgeCategory(payload: CreateKnowledgeCategoryPayload) {

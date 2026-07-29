@@ -180,6 +180,10 @@ class KnowledgeApiMock:
             fulfill_json(route, {"data": self.spaces})
             return
 
+        if method == "GET" and path == "/api/v1/knowledge-spaces/stats":
+            fulfill_json(route, self._space_stats_response())
+            return
+
         if method == "POST" and path == "/api/v1/knowledge-spaces":
             payload = body or {}
             space = {
@@ -225,6 +229,13 @@ class KnowledgeApiMock:
                 and (not department_id or category["departmentId"] == department_id)
             ]
             fulfill_json(route, {"data": categories})
+            return
+
+        if method == "GET" and path == "/api/v1/knowledge-categories/stats":
+            fulfill_json(
+                route,
+                self._category_stats_response(query.get("spaceId"), query.get("departmentId")),
+            )
             return
 
         if method == "POST" and path == "/api/v1/knowledge-categories":
@@ -408,6 +419,89 @@ class KnowledgeApiMock:
                 return department
         raise AssertionError(f"未知部门: {department_id}")
 
+    def _space_stats_response(self) -> dict:
+        data = []
+        for space in self.spaces:
+            stats = self._zero_stats()
+            if space["id"] == "space-001":
+                stats.update(
+                    {
+                        "totalCount": 3,
+                        "processingCount": 1,
+                        "readyCount": 2,
+                        "failedCount": 0,
+                        "unclassifiedCount": 1,
+                    }
+                )
+            data.append({"spaceId": space["id"], **stats})
+        return {
+            "data": data,
+            "summary": {
+                "totalCount": 1,
+                "processingCount": 0,
+                "readyCount": 0,
+                "failedCount": 1,
+                "unclassifiedCount": 1,
+            },
+        }
+
+    def _category_stats_response(
+        self, space_id: str | None, department_id: str | None
+    ) -> dict:
+        stats_by_category = {
+            "cat-refund": {
+                "totalCount": 2,
+                "processingCount": 0,
+                "readyCount": 2,
+                "failedCount": 0,
+                "unclassifiedCount": 0,
+            },
+            "cat-logistics": {
+                "totalCount": 1,
+                "processingCount": 1,
+                "readyCount": 0,
+                "failedCount": 0,
+                "unclassifiedCount": 0,
+            },
+        }
+        categories = [
+            category
+            for category in self.categories
+            if (not space_id or category["spaceId"] == space_id)
+            and (not department_id or category["departmentId"] == department_id)
+        ]
+        has_after_sales_unclassified = (
+            space_id == "space-001" and department_id == "dept-after-sales"
+        )
+        return {
+            "data": [
+                {
+                    "categoryId": category["id"],
+                    "spaceId": category["spaceId"],
+                    "departmentId": category["departmentId"],
+                    **stats_by_category.get(category["id"], self._zero_stats()),
+                }
+                for category in categories
+            ],
+            "unclassified": {
+                "totalCount": 1 if has_after_sales_unclassified else 0,
+                "processingCount": 0,
+                "readyCount": 0,
+                "failedCount": 1 if has_after_sales_unclassified else 0,
+                "unclassifiedCount": 1 if has_after_sales_unclassified else 0,
+            },
+        }
+
+    @staticmethod
+    def _zero_stats() -> dict:
+        return {
+            "totalCount": 0,
+            "processingCount": 0,
+            "readyCount": 0,
+            "failedCount": 0,
+            "unclassifiedCount": 0,
+        }
+
     def _classification(self, category_id: str) -> dict:
         category = self._category(category_id)
         return {
@@ -504,6 +598,13 @@ def verify_classification_admin_flow(page: Page, api: KnowledgeApiMock) -> None:
     expect(page.get_by_role("heading", name="知识库分类")).to_be_visible()
     expect(page.get_by_text("客服知识库").first).to_be_visible()
     expect(page.get_by_text("退款专题").first).to_be_visible()
+    expect(
+        page.locator(".classification-space-row", has_text="客服知识库").get_by_text("总数 3")
+    ).to_be_visible()
+    expect(
+        page.locator(".classification-category-row", has_text="退款专题").get_by_text("总数 2")
+    ).to_be_visible()
+    expect(page.get_by_text("当前范围未分类：总数 1")).to_be_visible()
 
     page.get_by_role("button", name="新建空间").click()
     space_dialog = page.get_by_role("dialog", name="新建知识库空间")
@@ -585,6 +686,13 @@ def verify_classification_admin_flow(page: Page, api: KnowledgeApiMock) -> None:
     ).click()
     expect(page.get_by_text("项目 / 专题已删除。")).to_be_visible()
     api.find_request("DELETE", "/api/v1/knowledge-categories/cat-created")
+    api.find_request("GET", "/api/v1/knowledge-spaces/stats")
+    api.find_request(
+        "GET",
+        "/api/v1/knowledge-categories/stats",
+        spaceId="space-001",
+        departmentId="dept-after-sales",
+    )
 
     categories_request = api.find_request(
         "GET",
@@ -715,6 +823,13 @@ def assert_phase_two_contracts(api: KnowledgeApiMock) -> None:
     api.find_request("POST", "/api/v1/knowledge-categories")
     api.find_request("PUT", "/api/v1/knowledge-categories/cat-created")
     api.find_request("DELETE", "/api/v1/knowledge-categories/cat-created")
+    api.find_request("GET", "/api/v1/knowledge-spaces/stats")
+    api.find_request(
+        "GET",
+        "/api/v1/knowledge-categories/stats",
+        spaceId="space-001",
+        departmentId="dept-after-sales",
+    )
 
 
 def main() -> None:

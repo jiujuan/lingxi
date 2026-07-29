@@ -2431,6 +2431,74 @@
         "title": "KnowledgeCategoryResponse",
         "type": "object"
       },
+      "KnowledgeCategoryStatsListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeCategoryStatsRead"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "unclassified": {
+            "$ref": "#/components/schemas/KnowledgeClassificationStatsRead"
+          }
+        },
+        "required": [
+          "data",
+          "unclassified"
+        ],
+        "title": "KnowledgeCategoryStatsListResponse",
+        "type": "object"
+      },
+      "KnowledgeCategoryStatsRead": {
+        "properties": {
+          "categoryId": {
+            "title": "Categoryid",
+            "type": "string"
+          },
+          "departmentId": {
+            "title": "Departmentid",
+            "type": "string"
+          },
+          "failedCount": {
+            "title": "Failedcount",
+            "type": "integer"
+          },
+          "processingCount": {
+            "title": "Processingcount",
+            "type": "integer"
+          },
+          "readyCount": {
+            "title": "Readycount",
+            "type": "integer"
+          },
+          "spaceId": {
+            "title": "Spaceid",
+            "type": "string"
+          },
+          "totalCount": {
+            "title": "Totalcount",
+            "type": "integer"
+          },
+          "unclassifiedCount": {
+            "title": "Unclassifiedcount",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "totalCount",
+          "processingCount",
+          "readyCount",
+          "failedCount",
+          "unclassifiedCount",
+          "categoryId",
+          "spaceId",
+          "departmentId"
+        ],
+        "title": "KnowledgeCategoryStatsRead",
+        "type": "object"
+      },
       "KnowledgeCategoryType": {
         "enum": [
           "PROJECT",
@@ -2547,6 +2615,39 @@
           }
         },
         "title": "KnowledgeCategoryUpdateRequest",
+        "type": "object"
+      },
+      "KnowledgeClassificationStatsRead": {
+        "properties": {
+          "failedCount": {
+            "title": "Failedcount",
+            "type": "integer"
+          },
+          "processingCount": {
+            "title": "Processingcount",
+            "type": "integer"
+          },
+          "readyCount": {
+            "title": "Readycount",
+            "type": "integer"
+          },
+          "totalCount": {
+            "title": "Totalcount",
+            "type": "integer"
+          },
+          "unclassifiedCount": {
+            "title": "Unclassifiedcount",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "totalCount",
+          "processingCount",
+          "readyCount",
+          "failedCount",
+          "unclassifiedCount"
+        ],
+        "title": "KnowledgeClassificationStatsRead",
         "type": "object"
       },
       "KnowledgeSpaceCreateRequest": {
@@ -2679,6 +2780,64 @@
           "updatedAt"
         ],
         "title": "KnowledgeSpaceResponse",
+        "type": "object"
+      },
+      "KnowledgeSpaceStatsListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeSpaceStatsRead"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/KnowledgeClassificationStatsRead"
+          }
+        },
+        "required": [
+          "data",
+          "summary"
+        ],
+        "title": "KnowledgeSpaceStatsListResponse",
+        "type": "object"
+      },
+      "KnowledgeSpaceStatsRead": {
+        "properties": {
+          "failedCount": {
+            "title": "Failedcount",
+            "type": "integer"
+          },
+          "processingCount": {
+            "title": "Processingcount",
+            "type": "integer"
+          },
+          "readyCount": {
+            "title": "Readycount",
+            "type": "integer"
+          },
+          "spaceId": {
+            "title": "Spaceid",
+            "type": "string"
+          },
+          "totalCount": {
+            "title": "Totalcount",
+            "type": "integer"
+          },
+          "unclassifiedCount": {
+            "title": "Unclassifiedcount",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "totalCount",
+          "processingCount",
+          "readyCount",
+          "failedCount",
+          "unclassifiedCount",
+          "spaceId"
+        ],
+        "title": "KnowledgeSpaceStatsRead",
         "type": "object"
       },
       "KnowledgeSpaceUpdateRequest": {
@@ -6763,6 +6922,76 @@
         ]
       }
     },
+    "/api/v1/knowledge-categories/stats": {
+      "get": {
+        "operationId": "list_knowledge_category_stats_api_v1_knowledge_categories_stats_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "spaceId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Spaceid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "departmentId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Departmentid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeCategoryStatsListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Knowledge Category Stats",
+        "tags": [
+          "knowledge-classification"
+        ]
+      }
+    },
     "/api/v1/knowledge-categories/{category_id}": {
       "delete": {
         "operationId": "delete_knowledge_category_api_v1_knowledge_categories__category_id__delete",
@@ -6930,6 +7159,32 @@
           }
         ],
         "summary": "Create Knowledge Space",
+        "tags": [
+          "knowledge-classification"
+        ]
+      }
+    },
+    "/api/v1/knowledge-spaces/stats": {
+      "get": {
+        "operationId": "list_knowledge_space_stats_api_v1_knowledge_spaces_stats_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSpaceStatsListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Knowledge Space Stats",
         "tags": [
           "knowledge-classification"
         ]

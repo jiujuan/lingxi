@@ -588,6 +588,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/knowledge-categories/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Knowledge Category Stats */
+        get: operations["list_knowledge_category_stats_api_v1_knowledge_categories_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/knowledge-categories/{category_id}": {
         parameters: {
             query?: never;
@@ -618,6 +635,23 @@ export interface paths {
         put?: never;
         /** Create Knowledge Space */
         post: operations["create_knowledge_space_api_v1_knowledge_spaces_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge-spaces/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Knowledge Space Stats */
+        get: operations["list_knowledge_space_stats_api_v1_knowledge_spaces_stats_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1814,6 +1848,31 @@ export interface components {
             /** Updatedat */
             updatedAt: string | null;
         };
+        /** KnowledgeCategoryStatsListResponse */
+        KnowledgeCategoryStatsListResponse: {
+            /** Data */
+            data: components["schemas"]["KnowledgeCategoryStatsRead"][];
+            unclassified: components["schemas"]["KnowledgeClassificationStatsRead"];
+        };
+        /** KnowledgeCategoryStatsRead */
+        KnowledgeCategoryStatsRead: {
+            /** Categoryid */
+            categoryId: string;
+            /** Departmentid */
+            departmentId: string;
+            /** Failedcount */
+            failedCount: number;
+            /** Processingcount */
+            processingCount: number;
+            /** Readycount */
+            readyCount: number;
+            /** Spaceid */
+            spaceId: string;
+            /** Totalcount */
+            totalCount: number;
+            /** Unclassifiedcount */
+            unclassifiedCount: number;
+        };
         /**
          * KnowledgeCategoryType
          * @enum {string}
@@ -1838,6 +1897,19 @@ export interface components {
             spaceId?: string | null;
             /** Status */
             status?: string | null;
+        };
+        /** KnowledgeClassificationStatsRead */
+        KnowledgeClassificationStatsRead: {
+            /** Failedcount */
+            failedCount: number;
+            /** Processingcount */
+            processingCount: number;
+            /** Readycount */
+            readyCount: number;
+            /** Totalcount */
+            totalCount: number;
+            /** Unclassifiedcount */
+            unclassifiedCount: number;
         };
         /** KnowledgeSpaceCreateRequest */
         KnowledgeSpaceCreateRequest: {
@@ -1881,6 +1953,27 @@ export interface components {
             status: string;
             /** Updatedat */
             updatedAt: string | null;
+        };
+        /** KnowledgeSpaceStatsListResponse */
+        KnowledgeSpaceStatsListResponse: {
+            /** Data */
+            data: components["schemas"]["KnowledgeSpaceStatsRead"][];
+            summary: components["schemas"]["KnowledgeClassificationStatsRead"];
+        };
+        /** KnowledgeSpaceStatsRead */
+        KnowledgeSpaceStatsRead: {
+            /** Failedcount */
+            failedCount: number;
+            /** Processingcount */
+            processingCount: number;
+            /** Readycount */
+            readyCount: number;
+            /** Spaceid */
+            spaceId: string;
+            /** Totalcount */
+            totalCount: number;
+            /** Unclassifiedcount */
+            unclassifiedCount: number;
         };
         /** KnowledgeSpaceUpdateRequest */
         KnowledgeSpaceUpdateRequest: {
@@ -3758,6 +3851,38 @@ export interface operations {
             };
         };
     };
+    list_knowledge_category_stats_api_v1_knowledge_categories_stats_get: {
+        parameters: {
+            query?: {
+                spaceId?: string | null;
+                departmentId?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeCategoryStatsListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     update_knowledge_category_api_v1_knowledge_categories__category_id__put: {
         parameters: {
             query?: never;
@@ -3873,6 +3998,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_knowledge_space_stats_api_v1_knowledge_spaces_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeSpaceStatsListResponse"];
                 };
             };
         };

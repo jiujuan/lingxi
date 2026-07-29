@@ -1,8 +1,15 @@
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from server.app.models.document import Document, DocumentStatus
 from server.app.models.knowledge_category import KnowledgeCategory, KnowledgeSpace
+
+PROCESSING_DOCUMENT_STATUSES = (
+    DocumentStatus.UPLOADED,
+    DocumentStatus.PARSING,
+    DocumentStatus.QA_SPLITTING,
+    DocumentStatus.EMBEDDING,
+)
 
 
 class KnowledgeSpaceRepository:
@@ -47,6 +54,14 @@ class KnowledgeSpaceRepository:
                 )
             ).all()
         )
+
+    def get_space_stats(self, tenant_id: str) -> dict[str | None, dict]:
+        rows = self.session.execute(
+            _document_stats_statement(Document.knowledge_space_id)
+            .where(Document.tenant_id == tenant_id)
+            .group_by(Document.knowledge_space_id)
+        ).all()
+        return {row.group_id: _row_to_stats(row) for row in rows}
 
     def count_documents(self, tenant_id: str, space_id: str) -> int:
         return int(
@@ -129,6 +144,45 @@ class KnowledgeCategoryRepository:
             ).all()
         )
 
+    def get_category_stats(
+        self,
+        tenant_id: str,
+        space_id: str | None = None,
+        department_id: str | None = None,
+    ) -> dict[str | None, dict]:
+        statement = _document_stats_statement(Document.knowledge_category_id).where(
+            Document.tenant_id == tenant_id
+        )
+        if space_id:
+            statement = statement.where(Document.knowledge_space_id == space_id)
+        if department_id:
+            statement = statement.where(
+                Document.category_department_id == department_id
+            )
+        rows = self.session.execute(
+            statement.group_by(Document.knowledge_category_id)
+        ).all()
+        return {row.group_id: _row_to_stats(row) for row in rows}
+
+    def get_unclassified_stats(
+        self,
+        tenant_id: str,
+        space_id: str | None = None,
+        department_id: str | None = None,
+    ) -> dict:
+        statement = _document_stats_statement().where(
+            Document.tenant_id == tenant_id,
+            Document.knowledge_category_id.is_(None),
+        )
+        if space_id:
+            statement = statement.where(Document.knowledge_space_id == space_id)
+        if department_id:
+            statement = statement.where(
+                Document.category_department_id == department_id
+            )
+        row = self.session.execute(statement).one()
+        return _row_to_stats(row)
+
     def count_documents(self, tenant_id: str, category_id: str) -> int:
         return int(
             self.session.scalar(
@@ -169,3 +223,40 @@ class KnowledgeCategoryRepository:
     def delete(self, category: KnowledgeCategory) -> None:
         self.session.delete(category)
         self.session.flush()
+
+
+def _document_stats_statement(group_column=None):
+    columns = []
+    if group_column is not None:
+        columns.append(group_column.label("group_id"))
+    columns.extend(
+        [
+            func.count(Document.id).label("total_count"),
+            _sum_if(Document.status.in_(PROCESSING_DOCUMENT_STATUSES)).label(
+                "processing_count"
+            ),
+            _sum_if(Document.status == DocumentStatus.READY).label("ready_count"),
+            _sum_if(Document.status == DocumentStatus.FAILED).label("failed_count"),
+            _sum_if(Document.knowledge_category_id.is_(None)).label(
+                "unclassified_count"
+            ),
+        ]
+    )
+    return select(*columns).where(
+        Document.deleted_at.is_(None),
+        Document.status != DocumentStatus.DELETED,
+    )
+
+
+def _sum_if(condition):
+    return func.coalesce(func.sum(case((condition, 1), else_=0)), 0)
+
+
+def _row_to_stats(row) -> dict:
+    return {
+        "total_count": int(row.total_count or 0),
+        "processing_count": int(row.processing_count or 0),
+        "ready_count": int(row.ready_count or 0),
+        "failed_count": int(row.failed_count or 0),
+        "unclassified_count": int(row.unclassified_count or 0),
+    }

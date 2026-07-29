@@ -585,8 +585,10 @@ def test_knowledge_classification_openapi_contains_management_paths():
     schema = client.get("/openapi.json").json()
 
     assert "/api/v1/knowledge-spaces" in schema["paths"]
+    assert "/api/v1/knowledge-spaces/stats" in schema["paths"]
     assert "/api/v1/knowledge-spaces/{space_id}" in schema["paths"]
     assert "/api/v1/knowledge-categories" in schema["paths"]
+    assert "/api/v1/knowledge-categories/stats" in schema["paths"]
     assert "/api/v1/knowledge-categories/{category_id}" in schema["paths"]
 
 
@@ -791,3 +793,193 @@ def test_knowledge_classification_api_error_mapping_and_permissions():
     assert client.delete(
         f"/api/v1/knowledge-categories/{category['id']}", headers=employee_headers
     ).status_code == 403
+
+def test_classification_stats_service_counts_documents_by_status_and_scope():
+    from datetime import datetime, timezone
+
+    from server.app.models.document import Document, DocumentStatus
+    from server.app.models.user import Tenant
+    from server.app.schemas.knowledge_category import (
+        KnowledgeCategoryCreateRequest,
+        KnowledgeSpaceCreateRequest,
+    )
+
+    session, service, context, support, _private = _seed_classification_service()
+    space = service.create_space(
+        context, KnowledgeSpaceCreateRequest(name="客服知识库", code="support-kb")
+    )
+    refund = service.create_category(
+        context,
+        KnowledgeCategoryCreateRequest(
+            spaceId=space["id"], departmentId=support.id, name="退款专题", code="refund"
+        ),
+    )
+    invoice = service.create_category(
+        context,
+        KnowledgeCategoryCreateRequest(
+            spaceId=space["id"], departmentId=support.id, name="发票专题", code="invoice"
+        ),
+    )
+    other_tenant = Tenant(name="其他租户")
+    session.add(other_tenant)
+    session.flush()
+
+    def document(title, status, category_id=None, tenant_id=context.tenant_id, deleted=False):
+        return Document(
+            tenant_id=tenant_id,
+            title=title,
+            file_name=f"{title}.pdf",
+            file_type="PDF",
+            mime_type="application/pdf",
+            file_size=100,
+            object_key=f"documents/{title}.pdf",
+            checksum=title,
+            status=status,
+            knowledge_space_id=space["id"] if tenant_id == context.tenant_id else "foreign-space",
+            category_department_id=support.id if tenant_id == context.tenant_id else None,
+            knowledge_category_id=category_id,
+            deleted_at=datetime.now(timezone.utc) if deleted else None,
+        )
+
+    session.add_all(
+        [
+            document("refund-ready", DocumentStatus.READY, refund["id"]),
+            document("refund-failed", DocumentStatus.FAILED, refund["id"]),
+            document("invoice-parsing", DocumentStatus.PARSING, invoice["id"]),
+            document("space-unclassified", DocumentStatus.READY),
+            document("deleted-ready", DocumentStatus.READY, refund["id"], deleted=True),
+            document("status-deleted", DocumentStatus.DELETED, refund["id"]),
+            document("foreign-ready", DocumentStatus.READY, refund["id"], tenant_id=other_tenant.id),
+        ]
+    )
+    session.add(
+        Document(
+            tenant_id=context.tenant_id,
+            title="global-unclassified",
+            file_name="global-unclassified.pdf",
+            file_type="PDF",
+            mime_type="application/pdf",
+            file_size=100,
+            object_key="documents/global-unclassified.pdf",
+            checksum="global-unclassified",
+            status=DocumentStatus.UPLOADED,
+        )
+    )
+    session.commit()
+
+    space_stats = service.list_space_stats(context)
+    assert space_stats["summary"] == {
+        "total_count": 2,
+        "processing_count": 1,
+        "ready_count": 1,
+        "failed_count": 0,
+        "unclassified_count": 2,
+    }
+    assert space_stats["data"] == [
+        {
+            "space_id": space["id"],
+            "total_count": 4,
+            "processing_count": 1,
+            "ready_count": 2,
+            "failed_count": 1,
+            "unclassified_count": 1,
+        }
+    ]
+
+    category_stats = service.list_category_stats(
+        context, space_id=space["id"], department_id=support.id
+    )
+    stats_by_id = {item["category_id"]: item for item in category_stats["data"]}
+    assert stats_by_id[refund["id"]]["total_count"] == 2
+    assert stats_by_id[refund["id"]]["ready_count"] == 1
+    assert stats_by_id[refund["id"]]["failed_count"] == 1
+    assert stats_by_id[invoice["id"]]["total_count"] == 1
+    assert stats_by_id[invoice["id"]]["processing_count"] == 1
+    assert category_stats["unclassified"]["total_count"] == 1
+    assert category_stats["unclassified"]["unclassified_count"] == 1
+
+
+def test_classification_stats_api_returns_space_category_and_unclassified_counts():
+    from server.app.models.document import Document, DocumentStatus
+    from server.tests.test_auth_rbac import build_test_client
+
+    client, SessionLocal = build_test_client()
+    headers = _login_admin_headers(client)
+    support_id = _department_ids(SessionLocal)["SUPPORT"]
+
+    space = client.post(
+        "/api/v1/knowledge-spaces",
+        headers=headers,
+        json={"name": "客服知识库", "code": "support-kb"},
+    ).json()
+    category = client.post(
+        "/api/v1/knowledge-categories",
+        headers=headers,
+        json={
+            "spaceId": space["id"],
+            "departmentId": support_id,
+            "name": "退款专题",
+            "code": "refund",
+        },
+    ).json()
+    with SessionLocal() as session:
+        tenant_id = session.scalar(select(Document.tenant_id))
+        if tenant_id is None:
+            from server.app.models.user import Tenant
+
+            tenant_id = session.scalar(select(Tenant.id))
+        session.add_all(
+            [
+                Document(
+                    tenant_id=tenant_id,
+                    title="退款流程",
+                    file_name="refund.pdf",
+                    file_type="PDF",
+                    mime_type="application/pdf",
+                    file_size=200,
+                    object_key="documents/refund.pdf",
+                    checksum="refund",
+                    status=DocumentStatus.READY,
+                    knowledge_space_id=space["id"],
+                    category_department_id=support_id,
+                    knowledge_category_id=category["id"],
+                ),
+                Document(
+                    tenant_id=tenant_id,
+                    title="未分类",
+                    file_name="unclassified.pdf",
+                    file_type="PDF",
+                    mime_type="application/pdf",
+                    file_size=100,
+                    object_key="documents/unclassified.pdf",
+                    checksum="unclassified",
+                    status=DocumentStatus.FAILED,
+                    knowledge_space_id=space["id"],
+                    category_department_id=support_id,
+                ),
+            ]
+        )
+        session.commit()
+
+    space_stats = client.get("/api/v1/knowledge-spaces/stats", headers=headers)
+    assert space_stats.status_code == 200
+    space_stat = space_stats.json()["data"][0]
+    assert space_stat["spaceId"] == space["id"]
+    assert space_stat["totalCount"] == 2
+    assert space_stat["readyCount"] == 1
+    assert space_stat["failedCount"] == 1
+    assert space_stat["unclassifiedCount"] == 1
+    assert space_stats.json()["summary"]["unclassifiedCount"] == 1
+
+    category_stats = client.get(
+        "/api/v1/knowledge-categories/stats",
+        headers=headers,
+        params={"spaceId": space["id"], "departmentId": support_id},
+    )
+    assert category_stats.status_code == 200
+    category_body = category_stats.json()
+    assert category_body["data"][0]["categoryId"] == category["id"]
+    assert category_body["data"][0]["totalCount"] == 1
+    assert category_body["unclassified"]["totalCount"] == 1
+
+    assert client.get("/api/v1/knowledge-spaces/stats").status_code in {401, 403}

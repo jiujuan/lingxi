@@ -3,6 +3,9 @@ import type { Schemas } from '../../../api/schema-helpers';
 export type KnowledgeSpace = Schemas['KnowledgeSpaceResponse'];
 export type KnowledgeCategory = Schemas['KnowledgeCategoryResponse'];
 export type KnowledgeCategoryType = Schemas['KnowledgeCategoryType'];
+export type KnowledgeClassificationStats = Schemas['KnowledgeClassificationStatsRead'];
+export type KnowledgeSpaceStats = Schemas['KnowledgeSpaceStatsRead'];
+export type KnowledgeCategoryStats = Schemas['KnowledgeCategoryStatsRead'];
 
 export type KnowledgeClassificationPath = {
   spaceId: string | null;

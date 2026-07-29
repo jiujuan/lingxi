@@ -11,7 +11,9 @@ import {
   deleteKnowledgeCategory,
   deleteKnowledgeSpace,
   listKnowledgeCategories,
+  listKnowledgeCategoryStats,
   listKnowledgeSpaces,
+  listKnowledgeSpaceStats,
   updateKnowledgeCategory,
   updateKnowledgeSpace,
 } from '../api/classificationApi';
@@ -21,7 +23,10 @@ import type {
   CreateKnowledgeCategoryPayload,
   CreateKnowledgeSpacePayload,
   KnowledgeCategory,
+  KnowledgeCategoryStats,
+  KnowledgeClassificationStats,
   KnowledgeSpace,
+  KnowledgeSpaceStats,
   UpdateKnowledgeCategoryPayload,
   UpdateKnowledgeSpacePayload,
 } from '../types/classification';
@@ -31,14 +36,24 @@ export function KnowledgeClassificationPage() {
   const [spaces, setSpaces] = useState<KnowledgeSpace[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [categories, setCategories] = useState<KnowledgeCategory[]>([]);
+  const [spaceStats, setSpaceStats] = useState<KnowledgeSpaceStats[]>([]);
+  const [spaceStatsSummary, setSpaceStatsSummary] = useState<KnowledgeClassificationStats | null>(
+    null,
+  );
+  const [categoryStats, setCategoryStats] = useState<KnowledgeCategoryStats[]>([]);
+  const [categoryUnclassifiedStats, setCategoryUnclassifiedStats] =
+    useState<KnowledgeClassificationStats | null>(null);
   const [selectedSpaceId, setSelectedSpaceId] = useState('');
   const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
   const [spacesLoading, setSpacesLoading] = useState(false);
   const [departmentsLoading, setDepartmentsLoading] = useState(false);
   const [categoriesLoading, setCategoriesLoading] = useState(false);
+  const [spaceStatsLoading, setSpaceStatsLoading] = useState(false);
+  const [categoryStatsLoading, setCategoryStatsLoading] = useState(false);
   const [spacesError, setSpacesError] = useState<string | null>(null);
   const [departmentsError, setDepartmentsError] = useState<string | null>(null);
   const [categoriesError, setCategoriesError] = useState<string | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [editingSpace, setEditingSpace] = useState<KnowledgeSpace | null>(null);
   const [showSpaceModal, setShowSpaceModal] = useState(false);
@@ -48,6 +63,14 @@ export function KnowledgeClassificationPage() {
   const departmentById = useMemo(
     () => new Map(departments.map((department) => [department.id, department])),
     [departments],
+  );
+  const spaceStatsById = useMemo(
+    () => new Map(spaceStats.map((item) => [item.spaceId, item])),
+    [spaceStats],
+  );
+  const categoryStatsById = useMemo(
+    () => new Map(categoryStats.map((item) => [item.categoryId, item])),
+    [categoryStats],
   );
   const selectedSpace = spaces.find((space) => space.id === selectedSpaceId) ?? null;
   const selectedDepartment = departmentById.get(selectedDepartmentId) ?? null;
@@ -59,13 +82,31 @@ export function KnowledgeClassificationPage() {
       const result = await listKnowledgeSpaces();
       setSpaces(result.data);
       setSelectedSpaceId((current) =>
-        current && result.data.some((space) => space.id === current) ? current : result.data[0]?.id ?? '',
+        current && result.data.some((space) => space.id === current)
+          ? current
+          : (result.data[0]?.id ?? ''),
       );
     } catch (caught) {
       setSpaces([]);
       setSpacesError(errorMessage(caught, '知识库空间加载失败。'));
     } finally {
       setSpacesLoading(false);
+    }
+  }, []);
+
+  const loadSpaceStats = useCallback(async () => {
+    setSpaceStatsLoading(true);
+    setStatsError(null);
+    try {
+      const result = await listKnowledgeSpaceStats();
+      setSpaceStats(result.data);
+      setSpaceStatsSummary(result.summary);
+    } catch (caught) {
+      setSpaceStats([]);
+      setSpaceStatsSummary(null);
+      setStatsError(errorMessage(caught, '分类统计加载失败。'));
+    } finally {
+      setSpaceStatsLoading(false);
     }
   }, []);
 
@@ -78,7 +119,7 @@ export function KnowledgeClassificationPage() {
       setSelectedDepartmentId((current) =>
         current && result.data.some((department) => department.id === current)
           ? current
-          : result.data[0]?.id ?? '',
+          : (result.data[0]?.id ?? ''),
       );
     } catch (caught) {
       setDepartments([]);
@@ -88,36 +129,68 @@ export function KnowledgeClassificationPage() {
     }
   }, []);
 
-  const loadCategories = useCallback(async (spaceId = selectedSpaceId, departmentId = selectedDepartmentId) => {
-    if (!spaceId || !departmentId) {
-      setCategories([]);
+  const loadCategories = useCallback(
+    async (spaceId = selectedSpaceId, departmentId = selectedDepartmentId) => {
+      if (!spaceId || !departmentId) {
+        setCategories([]);
+        setCategoriesError(null);
+        return;
+      }
+      setCategoriesLoading(true);
       setCategoriesError(null);
-      return;
-    }
-    setCategoriesLoading(true);
-    setCategoriesError(null);
-    try {
-      const result = await listKnowledgeCategories({
-        spaceId,
-        departmentId,
-      });
-      setCategories(result.data);
-    } catch (caught) {
-      setCategories([]);
-      setCategoriesError(errorMessage(caught, '项目 / 专题加载失败。'));
-    } finally {
-      setCategoriesLoading(false);
-    }
-  }, [selectedDepartmentId, selectedSpaceId]);
+      try {
+        const result = await listKnowledgeCategories({
+          spaceId,
+          departmentId,
+        });
+        setCategories(result.data);
+      } catch (caught) {
+        setCategories([]);
+        setCategoriesError(errorMessage(caught, '项目 / 专题加载失败。'));
+      } finally {
+        setCategoriesLoading(false);
+      }
+    },
+    [selectedDepartmentId, selectedSpaceId],
+  );
+
+  const loadCategoryStats = useCallback(
+    async (spaceId = selectedSpaceId, departmentId = selectedDepartmentId) => {
+      if (!spaceId || !departmentId) {
+        setCategoryStats([]);
+        setCategoryUnclassifiedStats(null);
+        return;
+      }
+      setCategoryStatsLoading(true);
+      setStatsError(null);
+      try {
+        const result = await listKnowledgeCategoryStats({
+          spaceId,
+          departmentId,
+        });
+        setCategoryStats(result.data);
+        setCategoryUnclassifiedStats(result.unclassified);
+      } catch (caught) {
+        setCategoryStats([]);
+        setCategoryUnclassifiedStats(null);
+        setStatsError(errorMessage(caught, '分类统计加载失败。'));
+      } finally {
+        setCategoryStatsLoading(false);
+      }
+    },
+    [selectedDepartmentId, selectedSpaceId],
+  );
 
   useEffect(() => {
     void loadSpaces();
     void loadDepartments();
-  }, [loadDepartments, loadSpaces]);
+    void loadSpaceStats();
+  }, [loadDepartments, loadSpaceStats, loadSpaces]);
 
   useEffect(() => {
     void loadCategories();
-  }, [loadCategories]);
+    void loadCategoryStats();
+  }, [loadCategories, loadCategoryStats]);
 
   function openCreateSpace() {
     setEditingSpace(null);
@@ -142,13 +215,13 @@ export function KnowledgeClassificationPage() {
   async function handleCreateSpace(payload: CreateKnowledgeSpacePayload) {
     await createKnowledgeSpace(payload);
     setNotice('知识库空间已创建。');
-    await loadSpaces();
+    await Promise.all([loadSpaces(), loadSpaceStats()]);
   }
 
   async function handleUpdateSpace(spaceId: string, payload: UpdateKnowledgeSpacePayload) {
     await updateKnowledgeSpace(spaceId, payload);
     setNotice('知识库空间已更新。');
-    await loadSpaces();
+    await Promise.all([loadSpaces(), loadSpaceStats(), loadCategoryStats()]);
   }
 
   async function handleDeleteSpace(space: KnowledgeSpace) {
@@ -160,9 +233,11 @@ export function KnowledgeClassificationPage() {
     try {
       await deleteKnowledgeSpace(space.id);
       setNotice('知识库空间已删除。');
-      await loadSpaces();
+      await Promise.all([loadSpaces(), loadSpaceStats(), loadCategoryStats()]);
       if (space.id === selectedSpaceId) {
         setCategories([]);
+        setCategoryStats([]);
+        setCategoryUnclassifiedStats(null);
       }
     } catch (caught) {
       setSpacesError(errorMessage(caught, '知识库空间删除失败。'));
@@ -188,13 +263,14 @@ export function KnowledgeClassificationPage() {
     if (payload.departmentId !== selectedDepartmentId) {
       setSelectedDepartmentId(payload.departmentId);
     }
-    await loadCategories(payload.spaceId, payload.departmentId);
+    await Promise.all([
+      loadCategories(payload.spaceId, payload.departmentId),
+      loadCategoryStats(payload.spaceId, payload.departmentId),
+      loadSpaceStats(),
+    ]);
   }
 
-  async function handleUpdateCategory(
-    categoryId: string,
-    payload: UpdateKnowledgeCategoryPayload,
-  ) {
+  async function handleUpdateCategory(categoryId: string, payload: UpdateKnowledgeCategoryPayload) {
     await updateKnowledgeCategory(categoryId, payload);
     setNotice('项目 / 专题已更新。');
     const nextSpaceId = payload.spaceId || selectedSpaceId;
@@ -205,7 +281,11 @@ export function KnowledgeClassificationPage() {
     if (payload.departmentId && payload.departmentId !== selectedDepartmentId) {
       setSelectedDepartmentId(payload.departmentId);
     }
-    await loadCategories(nextSpaceId, nextDepartmentId);
+    await Promise.all([
+      loadCategories(nextSpaceId, nextDepartmentId),
+      loadCategoryStats(nextSpaceId, nextDepartmentId),
+      loadSpaceStats(),
+    ]);
   }
 
   async function handleDeleteCategory(category: KnowledgeCategory) {
@@ -217,7 +297,7 @@ export function KnowledgeClassificationPage() {
     try {
       await deleteKnowledgeCategory(category.id);
       setNotice('项目 / 专题已删除。');
-      await loadCategories();
+      await Promise.all([loadCategories(), loadCategoryStats(), loadSpaceStats()]);
     } catch (caught) {
       setCategoriesError(errorMessage(caught, '项目 / 专题删除失败。'));
     }
@@ -261,12 +341,24 @@ export function KnowledgeClassificationPage() {
               <h3>知识库空间</h3>
               <p className="muted">管理分类的第一层空间。</p>
             </div>
-            <button className="secondary-button" onClick={() => void loadSpaces()} type="button">
+            <button
+              className="secondary-button"
+              onClick={() => {
+                void loadSpaces();
+                void loadSpaceStats();
+              }}
+              type="button"
+            >
               重试 / 刷新
             </button>
           </div>
           {spacesError ? <div className="error-box">{spacesError}</div> : null}
+          {statsError ? <div className="error-box">{statsError}</div> : null}
           {spacesLoading ? <p className="muted">正在加载知识库空间...</p> : null}
+          {spaceStatsLoading ? <p className="muted">正在加载空间统计...</p> : null}
+          <p className="classification-stats-summary">
+            全局未分类：{formatClassificationStats(spaceStatsSummary)}
+          </p>
           {!spacesLoading && !spaces.length ? (
             <div className="empty-state">
               <strong>暂无知识库空间</strong>
@@ -282,10 +374,15 @@ export function KnowledgeClassificationPage() {
                   type="button"
                 >
                   <strong>{space.name}</strong>
-                  <span>{space.id === selectedSpaceId ? '当前筛选空间' : '点击筛选项目 / 专题'}</span>
+                  <span>
+                    {space.id === selectedSpaceId ? '当前筛选空间' : '点击筛选项目 / 专题'}
+                  </span>
                 </button>
                 <code>{space.code}</code>
                 <span>{space.description || '-'}</span>
+                <span className="classification-stats">
+                  {formatClassificationStats(spaceStatsById.get(space.id))}
+                </span>
                 <span>
                   {statusLabel(space.status)} · 排序 {space.sortOrder}
                 </span>
@@ -364,7 +461,10 @@ export function KnowledgeClassificationPage() {
             <button
               className="secondary-button"
               disabled={!selectedSpaceId || !selectedDepartmentId}
-              onClick={() => void loadCategories()}
+              onClick={() => {
+                void loadCategories();
+                void loadCategoryStats();
+              }}
               type="button"
             >
               刷新项目 / 专题
@@ -375,6 +475,12 @@ export function KnowledgeClassificationPage() {
           {categoriesError ? <div className="error-box">{categoriesError}</div> : null}
           {departmentsLoading ? <p className="muted">正在加载部门...</p> : null}
           {categoriesLoading ? <p className="muted">正在加载项目 / 专题...</p> : null}
+          {categoryStatsLoading ? <p className="muted">正在加载项目 / 专题统计...</p> : null}
+          {selectedSpaceId && selectedDepartmentId ? (
+            <p className="classification-stats-summary">
+              当前范围未分类：{formatClassificationStats(categoryUnclassifiedStats)}
+            </p>
+          ) : null}
           {!selectedSpaceId || !selectedDepartmentId ? (
             <div className="empty-state">
               <strong>请选择空间和分类部门</strong>
@@ -397,7 +503,12 @@ export function KnowledgeClassificationPage() {
                 <strong>{category.name}</strong>
                 <code>{category.code}</code>
                 <span>{categoryTypeLabel(category.categoryType)}</span>
-                <span>{departmentById.get(category.departmentId)?.name || category.departmentId}</span>
+                <span className="classification-stats">
+                  {formatClassificationStats(categoryStatsById.get(category.id))}
+                </span>
+                <span>
+                  {departmentById.get(category.departmentId)?.name || category.departmentId}
+                </span>
                 <span>{category.description || '-'}</span>
                 <span>
                   {statusLabel(category.status)} · 排序 {category.sortOrder}
@@ -446,6 +557,17 @@ export function KnowledgeClassificationPage() {
       ) : null}
     </div>
   );
+}
+
+function formatClassificationStats(stats?: KnowledgeClassificationStats | null) {
+  const value = stats ?? {
+    totalCount: 0,
+    processingCount: 0,
+    readyCount: 0,
+    failedCount: 0,
+    unclassifiedCount: 0,
+  };
+  return `总数 ${value.totalCount} · 解析中 ${value.processingCount} · 成功 ${value.readyCount} · 失败 ${value.failedCount} · 未分类 ${value.unclassifiedCount}`;
 }
 
 function statusLabel(status: string) {

@@ -303,7 +303,6 @@ label {
   margin: 0;
 }
 
-
 .classification-admin-grid {
   display: grid;
   gap: 18px;
@@ -319,11 +318,30 @@ label {
 }
 
 .table-row.classification-space-row {
-  grid-template-columns: minmax(160px, 1.2fr) 120px minmax(120px, 1fr) 110px 140px minmax(120px, auto);
+  grid-template-columns:
+    minmax(160px, 1.2fr) 120px minmax(120px, 0.8fr) minmax(210px, 1.2fr) 110px 140px
+    minmax(120px, auto);
 }
 
 .table-row.classification-category-row {
-  grid-template-columns: minmax(140px, 1.2fr) 120px 70px minmax(110px, 0.8fr) minmax(120px, 1fr) 110px minmax(120px, auto);
+  grid-template-columns:
+    minmax(140px, 1.2fr) 120px 70px minmax(210px, 1.2fr) minmax(110px, 0.8fr)
+    minmax(120px, 1fr) 110px minmax(120px, auto);
+}
+
+.classification-stats,
+.classification-stats-summary {
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.classification-stats-summary {
+  background: #f8fafc;
+  border: 1px solid #edf1f7;
+  border-radius: 8px;
+  margin: 10px 0 12px;
+  padding: 8px 10px;
 }
 
 .classification-space-row .title-button {
@@ -376,7 +394,10 @@ label {
 .document-row {
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(180px, 1.4fr) 100px 120px minmax(140px, 1fr) 90px 140px minmax(180px, auto);
+  grid-template-columns: minmax(180px, 1.4fr) 100px 120px minmax(140px, 1fr) 90px 140px minmax(
+      180px,
+      auto
+    );
   padding: 12px;
 }
 

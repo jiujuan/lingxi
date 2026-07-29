@@ -38,9 +38,26 @@ class KnowledgeCategoryService:
         self.departments = DepartmentRepository(session)
 
     def list_spaces(self, context: AccessContext) -> list[dict]:
-        return [self._space_to_dict(space) for space in self.spaces.list_for_tenant(
-            context.tenant_id
-        )]
+        return [
+            self._space_to_dict(space)
+            for space in self.spaces.list_for_tenant(context.tenant_id)
+        ]
+
+    def list_space_stats(self, context: AccessContext) -> dict:
+        stats_by_space = self.spaces.get_space_stats(context.tenant_id)
+        data = []
+        for space in self.spaces.list_for_tenant(context.tenant_id):
+            data.append(
+                {
+                    "space_id": space.id,
+                    **_zero_stats(),
+                    **stats_by_space.get(space.id, {}),
+                }
+            )
+        return {
+            "data": data,
+            "summary": self.categories.get_unclassified_stats(context.tenant_id),
+        }
 
     def create_space(self, context: AccessContext, payload: Any) -> dict:
         data = self._payload_dict(payload)
@@ -126,6 +143,39 @@ class KnowledgeCategoryService:
                 department_id=department_id,
             )
         ]
+
+    def list_category_stats(
+        self,
+        context: AccessContext,
+        space_id: str | None = None,
+        department_id: str | None = None,
+    ) -> dict:
+        if space_id:
+            self._require_space(context, space_id)
+        if department_id:
+            self._require_department(context, department_id)
+        stats_by_category = self.categories.get_category_stats(
+            context.tenant_id, space_id=space_id, department_id=department_id
+        )
+        data = []
+        for category in self.categories.list_for_tenant(
+            context.tenant_id, space_id=space_id, department_id=department_id
+        ):
+            data.append(
+                {
+                    "category_id": category.id,
+                    "space_id": category.space_id,
+                    "department_id": category.department_id,
+                    **_zero_stats(),
+                    **stats_by_category.get(category.id, {}),
+                }
+            )
+        return {
+            "data": data,
+            "unclassified": self.categories.get_unclassified_stats(
+                context.tenant_id, space_id=space_id, department_id=department_id
+            ),
+        }
 
     def create_category(self, context: AccessContext, payload: Any) -> dict:
         data = self._payload_dict(payload)
@@ -472,3 +522,12 @@ class KnowledgeCategoryService:
         if node is None:
             return None
         return {"id": node.id, "name": node.name, "code": node.code}
+
+def _zero_stats() -> dict:
+    return {
+        "total_count": 0,
+        "processing_count": 0,
+        "ready_count": 0,
+        "failed_count": 0,
+        "unclassified_count": 0,
+    }

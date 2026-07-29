@@ -7,10 +7,12 @@ from server.app.schemas.common import OkResponse
 from server.app.schemas.knowledge_category import (
     KnowledgeCategoryCreateRequest,
     KnowledgeCategoryListResponse,
+    KnowledgeCategoryStatsListResponse,
     KnowledgeCategoryResponse,
     KnowledgeCategoryUpdateRequest,
     KnowledgeSpaceCreateRequest,
     KnowledgeSpaceListResponse,
+    KnowledgeSpaceStatsListResponse,
     KnowledgeSpaceResponse,
     KnowledgeSpaceUpdateRequest,
 )
@@ -25,6 +27,14 @@ def list_knowledge_spaces(
     db: Session = Depends(get_db),
 ) -> dict:
     return {"data": KnowledgeCategoryService(db).list_spaces(context)}
+
+
+@router.get("/knowledge-spaces/stats", response_model=KnowledgeSpaceStatsListResponse)
+def list_knowledge_space_stats(
+    context: AccessContext = Depends(require_permission("DOCUMENT_READ")),
+    db: Session = Depends(get_db),
+) -> dict:
+    return KnowledgeCategoryService(db).list_space_stats(context)
 
 
 @router.post(
@@ -77,6 +87,23 @@ def list_knowledge_categories(
             department_id=department_id,
         )
     }
+
+
+@router.get(
+    "/knowledge-categories/stats",
+    response_model=KnowledgeCategoryStatsListResponse,
+)
+def list_knowledge_category_stats(
+    space_id: str | None = Query(default=None, alias="spaceId"),
+    department_id: str | None = Query(default=None, alias="departmentId"),
+    context: AccessContext = Depends(require_permission("DOCUMENT_READ")),
+    db: Session = Depends(get_db),
+) -> dict:
+    return KnowledgeCategoryService(db).list_category_stats(
+        context,
+        space_id=space_id,
+        department_id=department_id,
+    )
 
 
 @router.post(
