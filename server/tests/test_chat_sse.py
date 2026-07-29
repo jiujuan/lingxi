@@ -180,6 +180,84 @@ def test_chat_message_run_passes_retrieval_scope_to_sse_retrieval():
         assert cited_titles == {"Refund SOP"}
 
 
+def test_chat_category_scope_switch_keeps_same_question_inside_selected_category():
+    client, SessionLocal = build_test_client()
+    _seed_chat_data(SessionLocal)
+    headers = login_employee(client)
+    with SessionLocal() as session:
+        from server.app.models.user import Department
+
+        support_department_id = session.scalar(
+            select(Department.id).where(Department.code == "SUPPORT")
+        )
+    session_id = client.post(
+        "/api/v1/chat/sessions", headers=headers, json={"title": "分类切换"}
+    ).json()["id"]
+
+    refund_response = client.post(
+        f"/api/v1/chat/sessions/{session_id}/message-runs",
+        headers=headers,
+        json={
+            "content": "退款需要谁审批？",
+            "retrievalScope": {
+                "spaceId": "space-support",
+                "classificationDepartmentId": support_department_id,
+                "categoryId": "cat-refund",
+            },
+        },
+    )
+    assert refund_response.status_code == 200
+    assert "Refund SOP" in refund_response.text
+
+    from server.app.models.chat import QueryCitation, QueryRun
+    from server.app.models.document import Document
+
+    with SessionLocal() as session:
+        refund_run = session.scalar(
+            select(QueryRun).order_by(QueryRun.created_at.desc())
+        )
+        assert refund_run is not None
+        first_run_id = refund_run.id
+
+    invoice_response = client.post(
+        f"/api/v1/chat/sessions/{session_id}/message-runs",
+        headers=headers,
+        json={
+            "content": "退款需要谁审批？",
+            "retrievalScope": {
+                "spaceId": "space-support",
+                "classificationDepartmentId": support_department_id,
+                "categoryId": "cat-invoice",
+            },
+        },
+    )
+
+    assert invoice_response.status_code == 200
+    assert "event: done" in invoice_response.text
+    assert "Refund SOP" not in invoice_response.text
+
+    with SessionLocal() as session:
+        invoice_run = session.scalar(
+            select(QueryRun)
+            .where(QueryRun.id != first_run_id)
+            .order_by(QueryRun.created_at.desc())
+        )
+        assert invoice_run is not None
+        assert (
+            invoice_run.retrieval_snapshot["filters"]["scopeCategoryId"]
+            == "cat-invoice"
+        )
+
+        citations = session.scalars(
+            select(QueryCitation).where(QueryCitation.run_id == invoice_run.id)
+        ).all()
+        cited_titles = {
+            session.get(Document, citation.document_id).title for citation in citations
+        }
+        assert "Refund SOP" not in cited_titles
+        assert cited_titles <= {"Invoice SOP"}
+
+
 def test_chat_low_confidence_refuses_without_citation():
     client, SessionLocal = build_test_client()
     _seed_chat_data(SessionLocal)
