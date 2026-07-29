@@ -454,6 +454,65 @@
         "title": "Body_upload_import_job_file_api_v1_import_jobs__job_id__file_post",
         "type": "object"
       },
+      "BulkUpdateDocumentClassificationRequest": {
+        "properties": {
+          "classification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentClassificationUpdateRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "documentIds": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Documentids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "documentIds"
+        ],
+        "title": "BulkUpdateDocumentClassificationRequest",
+        "type": "object"
+      },
+      "BulkUpdateDocumentClassificationResponse": {
+        "properties": {
+          "classification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentClassificationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "documentIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Documentids",
+            "type": "array"
+          },
+          "updatedCount": {
+            "title": "Updatedcount",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "updatedCount",
+          "documentIds"
+        ],
+        "title": "BulkUpdateDocumentClassificationResponse",
+        "type": "object"
+      },
       "ChatFeedbackRequest": {
         "properties": {
           "feedback": {
@@ -6072,6 +6131,22 @@
           },
           {
             "in": "query",
+            "name": "isUnclassified",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Isunclassified"
+            }
+          },
+          {
+            "in": "query",
             "name": "updatedAfter",
             "required": false,
             "schema": {
@@ -6156,6 +6231,52 @@
           }
         ],
         "summary": "List Documents",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/api/v1/documents/bulk-classification": {
+      "patch": {
+        "operationId": "bulk_update_document_classification_api_v1_documents_bulk_classification_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkUpdateDocumentClassificationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkUpdateDocumentClassificationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Bulk Update Document Classification",
         "tags": [
           "documents"
         ]

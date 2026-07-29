@@ -160,7 +160,7 @@ class KnowledgeApiMock:
         self.spaces = deepcopy(INITIAL_SPACES)
         self.categories = deepcopy(INITIAL_CATEGORIES)
         self.departments = deepcopy(DEPARTMENTS)
-        self.document_category_id = "cat-refund"
+        self.document_categories = {"doc-ready": "cat-refund", "doc-unclassified": None}
         self.requests: list[dict] = []
 
     def handle(self, route: Route) -> None:
@@ -266,13 +266,31 @@ class KnowledgeApiMock:
             return
 
         if method == "GET" and path == "/api/v1/documents":
-            documents = [self._document()]
-            if query.get("spaceId") and query["spaceId"] != "space-001":
-                documents = []
-            if query.get("classificationDepartmentId") and query["classificationDepartmentId"] != "dept-after-sales":
-                documents = []
-            if query.get("categoryId") and query["categoryId"] != self.document_category_id:
-                documents = []
+            documents = [self._document("doc-ready"), self._document("doc-unclassified")]
+            if query.get("isUnclassified") == "true":
+                documents = [document for document in documents if document["classification"] is None]
+            if query.get("spaceId"):
+                documents = [
+                    document
+                    for document in documents
+                    if document["classification"]
+                    and document["classification"]["knowledgeSpaceId"] == query["spaceId"]
+                ]
+            if query.get("classificationDepartmentId"):
+                documents = [
+                    document
+                    for document in documents
+                    if document["classification"]
+                    and document["classification"]["categoryDepartmentId"]
+                    == query["classificationDepartmentId"]
+                ]
+            if query.get("categoryId"):
+                documents = [
+                    document
+                    for document in documents
+                    if document["classification"]
+                    and document["classification"]["knowledgeCategoryId"] == query["categoryId"]
+                ]
             fulfill_json(
                 route,
                 {
@@ -288,7 +306,7 @@ class KnowledgeApiMock:
             return
 
         if method == "GET" and path == "/api/v1/documents/doc-ready":
-            fulfill_json(route, self._document())
+            fulfill_json(route, self._document("doc-ready"))
             return
 
         if method == "GET" and path == "/api/v1/documents/doc-ready/chunks":
@@ -337,8 +355,25 @@ class KnowledgeApiMock:
 
         if method == "PATCH" and path == "/api/v1/documents/doc-ready/classification":
             payload = body or {}
-            self.document_category_id = payload.get("categoryId") or "cat-refund"
-            fulfill_json(route, self._classification(self.document_category_id))
+            self.document_categories["doc-ready"] = payload.get("categoryId")
+            category_id = self.document_categories["doc-ready"]
+            fulfill_json(route, self._classification(category_id) if category_id else None)
+            return
+
+        if method == "PATCH" and path == "/api/v1/documents/bulk-classification":
+            payload = body or {}
+            classification = payload.get("classification")
+            category_id = classification.get("categoryId") if classification else None
+            for document_id in payload.get("documentIds", []):
+                self.document_categories[document_id] = category_id
+            fulfill_json(
+                route,
+                {
+                    "updatedCount": len(payload.get("documentIds", [])),
+                    "documentIds": payload.get("documentIds", []),
+                    "classification": self._classification(category_id) if category_id else None,
+                },
+            )
             return
 
         if method == "POST" and path == "/api/v1/import-jobs":
@@ -513,9 +548,22 @@ class KnowledgeApiMock:
             "knowledgeCategory": category,
         }
 
-    def _document(self) -> dict:
+    def _document(self, document_id: str = "doc-ready") -> dict:
         document = deepcopy(BASE_DOCUMENT)
-        document["classification"] = self._classification(self.document_category_id)
+        if document_id == "doc-unclassified":
+            document.update(
+                {
+                    "id": "doc-unclassified",
+                    "title": "Unclassified FAQ",
+                    "fileName": "unclassified.md",
+                    "objectKey": "uploads/unclassified.md",
+                    "checksum": "sha256:unclassified",
+                    "qaPairCount": 0,
+                    "chunkCount": 0,
+                }
+            )
+        category_id = self.document_categories.get(document_id)
+        document["classification"] = self._classification(category_id) if category_id else None
         return document
 
 
@@ -736,8 +784,38 @@ def verify_document_filter_detail_edit_flow(page: Page, api: KnowledgeApiMock) -
     page.goto(f"{APP_ORIGIN}/#documents", wait_until="networkidle")
     expect(page.get_by_role("heading", name="文档列表").first).to_be_visible()
     expect(page.get_by_text("Refund SOP").first).to_be_visible()
+    expect(page.get_by_text("Unclassified FAQ").first).to_be_visible()
     expect(page.get_by_text("客服知识库 / 售后部 / 退款专题").first).to_be_visible()
     expect(page.get_by_text("退款需要主管审批。").first).to_be_visible()
+
+    page.get_by_label("仅看未分类").check()
+    expect(page.locator(".document-row", has_text="Unclassified FAQ")).to_be_visible()
+    expect(page.locator(".document-row", has_text="Refund SOP")).to_have_count(0)
+    api.find_request("GET", "/api/v1/documents", isUnclassified="true")
+
+    page.get_by_label("选择文档 Unclassified FAQ").check()
+    page.get_by_role("button", name="批量归类（1）").click()
+    bulk_modal = page.get_by_role("dialog")
+    expect(bulk_modal.get_by_role("heading", name="批量归类")).to_be_visible()
+    bulk_modal.locator("#bulk-document-classification-space").select_option("space-001")
+    expect(bulk_modal.locator("#bulk-document-classification-department")).to_be_enabled()
+    bulk_modal.locator("#bulk-document-classification-department").select_option("dept-after-sales")
+    expect(bulk_modal.locator("#bulk-document-classification-category")).to_be_enabled()
+    bulk_modal.locator("#bulk-document-classification-category").select_option("cat-refund")
+    bulk_modal.get_by_role("button", name="确认批量归类").click()
+    expect(page.locator(".document-row", has_text="Unclassified FAQ")).to_have_count(0)
+    bulk_request = api.find_request("PATCH", "/api/v1/documents/bulk-classification")
+    assert bulk_request["body"] == {
+        "documentIds": ["doc-unclassified"],
+        "classification": {
+            "spaceId": "space-001",
+            "departmentId": "dept-after-sales",
+            "categoryId": "cat-refund",
+        },
+    }
+
+    page.get_by_label("仅看未分类").uncheck()
+    expect(page.locator(".document-row", has_text="Refund SOP")).to_be_visible()
 
     page.locator("#document-list-classification-space").select_option("space-001")
     expect(page.locator("#document-list-classification-department")).to_be_enabled()
@@ -817,6 +895,7 @@ def assert_phase_two_contracts(api: KnowledgeApiMock) -> None:
     api.find_request("POST", "/api/v1/import-jobs")
     api.find_request("POST", "/api/v1/import-jobs/job-upload/file")
     api.find_request("PATCH", "/api/v1/documents/doc-ready/classification")
+    api.find_request("PATCH", "/api/v1/documents/bulk-classification")
     api.find_request("POST", "/api/v1/knowledge-spaces")
     api.find_request("PUT", "/api/v1/knowledge-spaces/space-created")
     api.find_request("DELETE", "/api/v1/knowledge-spaces/space-created")

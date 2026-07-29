@@ -394,7 +394,7 @@ label {
 .document-row {
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(180px, 1.4fr) 100px 120px minmax(140px, 1fr) 90px 140px minmax(
+  grid-template-columns: 36px minmax(180px, 1.4fr) 100px 120px minmax(140px, 1fr) 90px 140px minmax(
       180px,
       auto
     );
@@ -1124,4 +1124,54 @@ a code {
   .pagination-row {
     justify-content: flex-start;
   }
+}
+
+.checkbox-inline {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.checkbox-inline input,
+.checkbox-cell input {
+  width: auto;
+}
+
+.checkbox-cell {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.bulk-selection-bar {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #edf1f7;
+  border-radius: 8px;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+
+.bulk-document-list {
+  border: 1px solid #edf1f7;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px;
+}
+
+.bulk-document-list p {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.bulk-document-list span {
+  color: #64748b;
+  font-size: 13px;
 }

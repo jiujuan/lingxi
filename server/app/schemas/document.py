@@ -38,6 +38,23 @@ class DocumentPermissionResponse(BaseModel):
     users: list[NamedSubjectResponse]
 
 
+class BulkUpdateDocumentClassificationRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    document_ids: list[str] = Field(
+        alias="documentIds", min_length=1, max_length=100
+    )
+    classification: DocumentClassificationUpdateRequest | None = None
+
+
+class BulkUpdateDocumentClassificationResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    updated_count: int = Field(alias="updatedCount")
+    document_ids: list[str] = Field(alias="documentIds")
+    classification: DocumentClassificationResponse | None = None
+
+
 class DocumentJobSummaryResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

@@ -12,6 +12,8 @@ from server.app.models.qa_pair import QaPair
 from server.app.repositories.document_repo import DocumentRepository
 from server.app.repositories.qa_pair_repo import QaPairRepository
 from server.app.schemas.document import (
+    BulkUpdateDocumentClassificationRequest,
+    BulkUpdateDocumentClassificationResponse,
     DocumentChunkListResponse,
     DocumentClassificationUpdateRequest,
     DocumentDeleteResponse,
@@ -40,6 +42,7 @@ def list_documents(
         default=None, alias="classificationDepartmentId"
     ),
     category_id: str | None = Query(default=None, alias="categoryId"),
+    is_unclassified: bool | None = Query(default=None, alias="isUnclassified"),
     updated_after: datetime | None = Query(default=None, alias="updatedAfter"),
     updated_before: datetime | None = Query(default=None, alias="updatedBefore"),
     page: int = Query(default=1, ge=1),
@@ -57,11 +60,24 @@ def list_documents(
         space_id=space_id,
         classification_department_id=classification_department_id,
         category_id=category_id,
+        is_unclassified=is_unclassified,
         updated_after=updated_after,
         updated_before=updated_before,
         page=page,
         page_size=page_size,
     )
+
+
+@router.patch(
+    "/bulk-classification",
+    response_model=BulkUpdateDocumentClassificationResponse,
+)
+def bulk_update_document_classification(
+    payload: BulkUpdateDocumentClassificationRequest,
+    context: AccessContext = Depends(require_permission("DOCUMENT_WRITE")),
+    db: Session = Depends(get_db),
+) -> dict:
+    return DocumentCenterService(db).bulk_update_classification(context, payload)
 
 
 @router.get("/{document_id}/chunks", response_model=DocumentChunkListResponse)

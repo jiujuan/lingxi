@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
@@ -32,6 +32,7 @@ class DocumentRepository:
         space_id: str | None = None,
         classification_department_id: str | None = None,
         category_id: str | None = None,
+        is_unclassified: bool | None = None,
         updated_after: datetime | None = None,
         updated_before: datetime | None = None,
         page: int = 1,
@@ -47,6 +48,7 @@ class DocumentRepository:
             space_id=space_id,
             classification_department_id=classification_department_id,
             category_id=category_id,
+            is_unclassified=is_unclassified,
             updated_after=updated_after,
             updated_before=updated_before,
         )
@@ -78,6 +80,37 @@ class DocumentRepository:
         ):
             return document
         return None
+
+    def list_authorized_documents_by_ids(
+        self, context: AccessContext, document_ids: list[str]
+    ) -> list[Document]:
+        if not document_ids:
+            return []
+        filters = [
+            Document.tenant_id == context.tenant_id,
+            Document.id.in_(document_ids),
+            Document.deleted_at.is_(None),
+            Document.status != DocumentStatus.DELETED,
+        ]
+        if not self._is_system_admin(context):
+            filters.append(self._access_exists(context))
+        return list(self.session.scalars(select(Document).where(*filters)).all())
+
+    def bulk_update_classification(
+        self,
+        documents: list[Document],
+        *,
+        knowledge_space_id: str | None,
+        category_department_id: str | None,
+        knowledge_category_id: str | None,
+    ) -> int:
+        updated_at = datetime.now(UTC)
+        for document in documents:
+            document.knowledge_space_id = knowledge_space_id
+            document.category_department_id = category_department_id
+            document.knowledge_category_id = knowledge_category_id
+            document.updated_at = updated_at
+        return len(documents)
 
     def list_chunks_page(
         self, tenant_id: str, document_id: str, page: int, page_size: int
@@ -185,6 +218,7 @@ class DocumentRepository:
         space_id: str | None,
         classification_department_id: str | None,
         category_id: str | None,
+        is_unclassified: bool | None,
         updated_after: datetime | None,
         updated_before: datetime | None,
     ) -> list:
@@ -222,6 +256,8 @@ class DocumentRepository:
             )
         if category_id:
             filters.append(Document.knowledge_category_id == category_id)
+        if is_unclassified:
+            filters.append(Document.knowledge_category_id.is_(None))
         if updated_after:
             filters.append(Document.updated_at >= updated_after)
         if updated_before:

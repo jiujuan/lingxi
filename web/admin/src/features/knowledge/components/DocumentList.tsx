@@ -20,6 +20,9 @@ type Props = {
   onEditPermissions: (document: KnowledgeDocument) => void;
   onDelete: (document: KnowledgeDocument) => void;
   onRetry: (document: KnowledgeDocument) => void;
+  selectedDocumentIds: string[];
+  onSelectedDocumentIdsChange: (documentIds: string[]) => void;
+  onOpenBulkClassification: () => void;
 };
 
 const STATUS_OPTIONS = ['', 'UPLOADED', 'PARSING', 'QA_SPLITTING', 'EMBEDDING', 'READY', 'FAILED'];
@@ -38,6 +41,9 @@ export function DocumentList({
   onEditPermissions,
   onDelete,
   onRetry,
+  selectedDocumentIds,
+  onSelectedDocumentIdsChange,
+  onOpenBulkClassification,
 }: Props) {
   const classificationFilterValue: KnowledgeClassificationValue = {
     spaceId: filters.spaceId || null,
@@ -55,9 +61,43 @@ export function DocumentList({
       spaceId: value.spaceId ?? '',
       classificationDepartmentId: value.departmentId ?? '',
       categoryId: value.categoryId ?? '',
+      isUnclassified: false,
       page: 1,
     });
   }
+
+  function changeUnclassifiedFilter(checked: boolean) {
+    onFiltersChange({
+      ...filters,
+      isUnclassified: checked,
+      spaceId: checked ? '' : filters.spaceId,
+      classificationDepartmentId: checked ? '' : filters.classificationDepartmentId,
+      categoryId: checked ? '' : filters.categoryId,
+      page: 1,
+    });
+  }
+
+  function toggleDocument(documentId: string, checked: boolean) {
+    if (checked) {
+      onSelectedDocumentIdsChange([...selectedDocumentIds, documentId]);
+      return;
+    }
+    onSelectedDocumentIdsChange(selectedDocumentIds.filter((id) => id !== documentId));
+  }
+
+  function toggleCurrentPage(checked: boolean) {
+    const pageIds = documents.map((document) => document.id);
+    if (checked) {
+      onSelectedDocumentIdsChange(Array.from(new Set([...selectedDocumentIds, ...pageIds])));
+      return;
+    }
+    onSelectedDocumentIdsChange(selectedDocumentIds.filter((id) => !pageIds.includes(id)));
+  }
+
+  const selectedDocumentIdSet = new Set(selectedDocumentIds);
+  const currentPageIds = documents.map((document) => document.id);
+  const allCurrentPageSelected =
+    currentPageIds.length > 0 && currentPageIds.every((id) => selectedDocumentIdSet.has(id));
 
   function changePage(offset: number) {
     onFiltersChange({
@@ -73,9 +113,20 @@ export function DocumentList({
           <h3>文档列表</h3>
           <p className="muted">按状态、类型、分类和权限范围筛选已入库文档。</p>
         </div>
-        <button onClick={onRefresh} type="button">
-          刷新
-        </button>
+        <div className="button-row">
+          <PermissionGate permission="DOCUMENT_WRITE">
+            <button
+              disabled={!selectedDocumentIds.length}
+              onClick={onOpenBulkClassification}
+              type="button"
+            >
+              批量归类{selectedDocumentIds.length ? `（${selectedDocumentIds.length}）` : ''}
+            </button>
+          </PermissionGate>
+          <button onClick={onRefresh} type="button">
+            刷新
+          </button>
+        </div>
       </div>
 
       <div className="filter-grid">
@@ -129,17 +180,41 @@ export function DocumentList({
             value={filters.roleId}
           />
         </label>
+        <label className="checkbox-filter">
+          <span>分类状态</span>
+          <label className="checkbox-inline">
+            <input
+              checked={filters.isUnclassified}
+              onChange={(event) => changeUnclassifiedFilter(event.target.checked)}
+              type="checkbox"
+            />
+            仅看未分类
+          </label>
+        </label>
       </div>
 
       <KnowledgeClassificationSelect
         allowUnclassified
         className="document-classification-filter"
-        disabled={loading}
+        disabled={loading || filters.isUnclassified}
         idPrefix="document-list-classification"
         legend="分类筛选"
         onChange={changeClassificationFilter}
         value={classificationFilterValue}
       />
+
+      {selectedDocumentIds.length ? (
+        <div className="bulk-selection-bar">
+          <span>已选择 {selectedDocumentIds.length} 篇文档</span>
+          <button
+            className="secondary-button"
+            onClick={() => onSelectedDocumentIdsChange([])}
+            type="button"
+          >
+            清空选择
+          </button>
+        </div>
+      ) : null}
 
       {error ? <p className="error">{error}</p> : null}
       {loading ? <p className="muted">正在加载文档列表...</p> : null}
@@ -153,6 +228,14 @@ export function DocumentList({
       {documents.length ? (
         <div className="document-table" role="table" aria-label="文档列表">
           <div className="document-table-head" role="row">
+            <span className="checkbox-cell">
+              <input
+                aria-label="选择当前页全部文档"
+                checked={allCurrentPageSelected}
+                onChange={(event) => toggleCurrentPage(event.target.checked)}
+                type="checkbox"
+              />
+            </span>
             <span>文档</span>
             <span>状态</span>
             <span>权限</span>
@@ -167,6 +250,14 @@ export function DocumentList({
               key={document.id}
               role="row"
             >
+              <span className="checkbox-cell">
+                <input
+                  aria-label={`选择文档 ${document.title}`}
+                  checked={selectedDocumentIdSet.has(document.id)}
+                  onChange={(event) => toggleDocument(document.id, event.target.checked)}
+                  type="checkbox"
+                />
+              </span>
               <button
                 className="link-button title-button"
                 onClick={() => onSelect(document.id)}

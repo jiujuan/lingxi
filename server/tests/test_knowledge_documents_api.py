@@ -329,6 +329,117 @@ def test_document_list_supports_classification_filters_without_permission_leakag
     assert mixed_department_filters.json()["data"] == []
 
 
+def test_document_list_supports_unclassified_filter():
+    client, SessionLocal = build_test_client()
+    admin_headers = login_admin(client)
+    employee_headers = login_employee(client)
+    ids = seed_document_center_data(SessionLocal)
+
+    admin_result = client.get(
+        "/api/v1/documents?isUnclassified=true&pageSize=20",
+        headers=admin_headers,
+    )
+    assert admin_result.status_code == 200
+    assert {item["title"] for item in admin_result.json()["data"]} == {
+        "Broken Manual"
+    }
+    assert admin_result.json()["data"][0]["classification"] is None
+
+    employee_result = client.get(
+        "/api/v1/documents?isUnclassified=true&pageSize=20",
+        headers=employee_headers,
+    )
+    assert employee_result.status_code == 200
+    assert {item["id"] for item in employee_result.json()["data"]} == {
+        ids["failed_document_id"]
+    }
+
+
+def test_bulk_document_classification_updates_and_clears_atomically():
+    client, SessionLocal = build_test_client()
+    admin_headers = login_admin(client)
+    ids = seed_document_center_data(SessionLocal)
+
+    updated = client.patch(
+        "/api/v1/documents/bulk-classification",
+        headers=admin_headers,
+        json={
+            "documentIds": [ids["ready_document_id"], ids["failed_document_id"]],
+            "classification": {
+                "spaceId": ids["private_space_id"],
+                "departmentId": ids["private_department_id"],
+                "categoryId": ids["private_category_id"],
+            },
+        },
+    )
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["updatedCount"] == 2
+    assert body["documentIds"] == [
+        ids["ready_document_id"],
+        ids["failed_document_id"],
+    ]
+    assert body["classification"]["knowledgeCategoryId"] == ids["private_category_id"]
+
+    by_category = client.get(
+        f"/api/v1/documents?categoryId={ids['private_category_id']}&pageSize=20",
+        headers=admin_headers,
+    )
+    assert by_category.status_code == 200
+    assert {item["title"] for item in by_category.json()["data"]} == {
+        "Refund SOP",
+        "Private Playbook",
+        "Broken Manual",
+    }
+
+    cleared = client.patch(
+        "/api/v1/documents/bulk-classification",
+        headers=admin_headers,
+        json={
+            "documentIds": [ids["ready_document_id"], ids["failed_document_id"]],
+            "classification": None,
+        },
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["updatedCount"] == 2
+    assert cleared.json()["classification"] is None
+
+    unclassified = client.get(
+        "/api/v1/documents?isUnclassified=true&pageSize=20",
+        headers=admin_headers,
+    )
+    assert unclassified.status_code == 200
+    assert {item["id"] for item in unclassified.json()["data"]} == {
+        ids["ready_document_id"],
+        ids["failed_document_id"],
+    }
+
+
+def test_bulk_document_classification_rejects_inaccessible_document_without_partial_update():
+    client, SessionLocal = build_test_client()
+    employee_headers = login_employee(client)
+    ids = seed_document_center_data(SessionLocal)
+
+    response = client.patch(
+        "/api/v1/documents/bulk-classification",
+        headers=employee_headers,
+        json={
+            "documentIds": [ids["ready_document_id"], ids["private_document_id"]],
+            "classification": None,
+        },
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+
+    from server.app.models.document import Document
+
+    with SessionLocal() as session:
+        ready = session.get(Document, ids["ready_document_id"])
+        private = session.get(Document, ids["private_document_id"])
+        assert ready.knowledge_category_id == ids["refund_category_id"]
+        assert private.knowledge_category_id == ids["private_category_id"]
+
+
 def test_document_classification_update_validates_path_and_writes_audit():
     client, SessionLocal = build_test_client()
     admin_headers = login_admin(client)

@@ -12,7 +12,9 @@ import {
   type KnowledgeDocumentDetail,
   type Pagination,
 } from '../api/documentApi';
+import { listKnowledgeCategoryStats, listKnowledgeSpaceStats } from '../api/classificationApi';
 import { getImportJob, retryImportJob, type ImportJob } from '../api/importJobApi';
+import { BulkDocumentClassificationModal } from '../components/BulkDocumentClassificationModal';
 import { DocumentClassificationModal } from '../components/DocumentClassificationModal';
 import { DocumentDetailPanel } from '../components/DocumentDetailPanel';
 import { DocumentList } from '../components/DocumentList';
@@ -27,6 +29,7 @@ const DEFAULT_FILTERS: DocumentFilters = {
   categoryId: '',
   departmentId: '',
   roleId: '',
+  isUnclassified: false,
   page: 1,
   pageSize: 20,
 };
@@ -54,6 +57,8 @@ export function DocumentListPage() {
   const [classificationTarget, setClassificationTarget] = useState<
     KnowledgeDocument | KnowledgeDocumentDetail | null
   >(null);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
+  const [bulkClassificationOpen, setBulkClassificationOpen] = useState(false);
 
   useEffect(() => {
     void loadDocuments(filters);
@@ -97,6 +102,9 @@ export function DocumentListPage() {
       const result = await listDocuments(nextFilters);
       setDocuments(result.data);
       setPagination(result.pagination);
+      setSelectedDocumentIds((current) =>
+        current.filter((id) => result.data.some((document) => document.id === id)),
+      );
       if (!selectedId && result.data.length) {
         setSelectedId(result.data[0].id);
       }
@@ -180,6 +188,23 @@ export function DocumentListPage() {
     }
   }
 
+  async function handleBulkClassificationSaved() {
+    setBulkClassificationOpen(false);
+    setSelectedDocumentIds([]);
+    await Promise.all([
+      loadDocuments(filters),
+      listKnowledgeSpaceStats(),
+      listKnowledgeCategoryStats(),
+    ]);
+    if (selectedId) {
+      await loadDetail(selectedId);
+    }
+  }
+
+  const selectedDocuments = documents.filter((document) =>
+    selectedDocumentIds.includes(document.id),
+  );
+
   return (
     <div className="page-stack">
       <section className="toolbar-row">
@@ -201,10 +226,13 @@ export function DocumentListPage() {
           onDelete={(document) => void handleDelete(document)}
           onEditPermissions={setPermissionTarget}
           onFiltersChange={setFilters}
+          onOpenBulkClassification={() => setBulkClassificationOpen(true)}
           onRefresh={() => void loadDocuments(filters)}
           onRetry={(document) => void handleRetry(document)}
           onSelect={setSelectedId}
+          onSelectedDocumentIdsChange={setSelectedDocumentIds}
           pagination={pagination}
+          selectedDocumentIds={selectedDocumentIds}
           selectedId={selectedId}
         />
         <DocumentDetailPanel
@@ -231,6 +259,13 @@ export function DocumentListPage() {
         onClose={() => setClassificationTarget(null)}
         onSaved={() => void handleClassificationUpdated()}
       />
+      {bulkClassificationOpen ? (
+        <BulkDocumentClassificationModal
+          documents={selectedDocuments}
+          onClose={() => setBulkClassificationOpen(false)}
+          onSaved={() => void handleBulkClassificationSaved()}
+        />
+      ) : null}
     </div>
   );
 }

@@ -329,3 +329,225 @@ def test_document_list_classification_filters_keep_access_department_semantics()
     assert {item.title for item in mixed_results} == {
         "Private Classified Support Grant"
     }
+
+
+def test_document_list_unclassified_filter_keeps_authorization_boundary():
+    from server.app.core.permissions import AccessContext
+    from server.app.models.document import (
+        Document,
+        DocumentAccessRule,
+        DocumentAccessSubjectType,
+        DocumentStatus,
+    )
+    from server.app.models.knowledge_category import KnowledgeCategory, KnowledgeSpace
+    from server.app.repositories.document_repo import DocumentRepository
+
+    session, identity = build_session()
+    tenant_id = identity["tenant"].id
+    employee = identity["users"]["employee"]
+    employee_role = identity["roles"]["employee"]
+    support_department = identity["departments"]["support"]
+    private_department = identity["departments"]["private"]
+
+    support_space = KnowledgeSpace(
+        tenant_id=tenant_id,
+        name="Support Space",
+        code="support-space-unclassified",
+    )
+    session.add(support_space)
+    session.flush()
+    support_category = KnowledgeCategory(
+        tenant_id=tenant_id,
+        space_id=support_space.id,
+        department_id=support_department.id,
+        name="Support Topic",
+        code="support-topic-unclassified",
+    )
+    session.add(support_category)
+    session.flush()
+
+    authorized_unclassified = Document(
+        tenant_id=tenant_id,
+        title="Authorized Unclassified",
+        file_name="authorized.pdf",
+        file_type="PDF",
+        mime_type="application/pdf",
+        file_size=100,
+        object_key="documents/authorized.pdf",
+        checksum="authorized-unclassified",
+        status=DocumentStatus.READY,
+    )
+    unauthorized_unclassified = Document(
+        tenant_id=tenant_id,
+        title="Unauthorized Unclassified",
+        file_name="unauthorized.pdf",
+        file_type="PDF",
+        mime_type="application/pdf",
+        file_size=100,
+        object_key="documents/unauthorized.pdf",
+        checksum="unauthorized-unclassified",
+        status=DocumentStatus.READY,
+    )
+    classified = Document(
+        tenant_id=tenant_id,
+        title="Authorized Classified",
+        file_name="classified.pdf",
+        file_type="PDF",
+        mime_type="application/pdf",
+        file_size=100,
+        object_key="documents/classified.pdf",
+        checksum="classified",
+        status=DocumentStatus.READY,
+        knowledge_space_id=support_space.id,
+        category_department_id=support_department.id,
+        knowledge_category_id=support_category.id,
+    )
+    session.add_all([authorized_unclassified, unauthorized_unclassified, classified])
+    session.flush()
+    session.add_all(
+        [
+            DocumentAccessRule(
+                tenant_id=tenant_id,
+                document_id=authorized_unclassified.id,
+                subject_type=DocumentAccessSubjectType.DEPARTMENT,
+                subject_id=support_department.id,
+            ),
+            DocumentAccessRule(
+                tenant_id=tenant_id,
+                document_id=unauthorized_unclassified.id,
+                subject_type=DocumentAccessSubjectType.DEPARTMENT,
+                subject_id=private_department.id,
+            ),
+            DocumentAccessRule(
+                tenant_id=tenant_id,
+                document_id=classified.id,
+                subject_type=DocumentAccessSubjectType.DEPARTMENT,
+                subject_id=support_department.id,
+            ),
+        ]
+    )
+    session.commit()
+
+    context = AccessContext(
+        tenant_id=tenant_id,
+        user_id=employee.id,
+        department_id=support_department.id,
+        role_ids=[employee_role.id],
+        permissions={"DOCUMENT_READ"},
+    )
+
+    results, total = DocumentRepository(session).list_documents(
+        context, is_unclassified=True
+    )
+
+    assert total == 1
+    assert [item.title for item in results] == ["Authorized Unclassified"]
+
+
+def test_bulk_classification_rejects_inaccessible_document_without_partial_update():
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from server.app.core.permissions import AccessContext
+    from server.app.models.document import (
+        Document,
+        DocumentAccessRule,
+        DocumentAccessSubjectType,
+        DocumentStatus,
+    )
+    from server.app.models.knowledge_category import KnowledgeCategory, KnowledgeSpace
+    from server.app.services.document_center_service import DocumentCenterService
+
+    session, identity = build_session()
+    tenant_id = identity["tenant"].id
+    employee = identity["users"]["employee"]
+    employee_role = identity["roles"]["employee"]
+    support_department = identity["departments"]["support"]
+    private_department = identity["departments"]["private"]
+
+    space = KnowledgeSpace(tenant_id=tenant_id, name="Bulk Space", code="bulk-space")
+    session.add(space)
+    session.flush()
+    category = KnowledgeCategory(
+        tenant_id=tenant_id,
+        space_id=space.id,
+        department_id=support_department.id,
+        name="Bulk Topic",
+        code="bulk-topic",
+    )
+    session.add(category)
+    session.flush()
+
+    authorized = Document(
+        tenant_id=tenant_id,
+        title="Authorized Bulk",
+        file_name="authorized.pdf",
+        file_type="PDF",
+        mime_type="application/pdf",
+        file_size=100,
+        object_key="documents/authorized-bulk.pdf",
+        checksum="authorized-bulk",
+        status=DocumentStatus.READY,
+        knowledge_space_id=space.id,
+        category_department_id=support_department.id,
+        knowledge_category_id=category.id,
+    )
+    inaccessible = Document(
+        tenant_id=tenant_id,
+        title="Inaccessible Bulk",
+        file_name="inaccessible.pdf",
+        file_type="PDF",
+        mime_type="application/pdf",
+        file_size=100,
+        object_key="documents/inaccessible-bulk.pdf",
+        checksum="inaccessible-bulk",
+        status=DocumentStatus.READY,
+        knowledge_space_id=space.id,
+        category_department_id=support_department.id,
+        knowledge_category_id=category.id,
+    )
+    session.add_all([authorized, inaccessible])
+    session.flush()
+    session.add_all(
+        [
+            DocumentAccessRule(
+                tenant_id=tenant_id,
+                document_id=authorized.id,
+                subject_type=DocumentAccessSubjectType.DEPARTMENT,
+                subject_id=support_department.id,
+            ),
+            DocumentAccessRule(
+                tenant_id=tenant_id,
+                document_id=inaccessible.id,
+                subject_type=DocumentAccessSubjectType.DEPARTMENT,
+                subject_id=private_department.id,
+            ),
+        ]
+    )
+    session.commit()
+
+    context = AccessContext(
+        tenant_id=tenant_id,
+        user_id=employee.id,
+        department_id=support_department.id,
+        role_ids=[employee_role.id],
+        role_codes={"EMPLOYEE"},
+        permissions={"DOCUMENT_READ", "DOCUMENT_WRITE"},
+    )
+    payload = SimpleNamespace(
+        document_ids=[authorized.id, inaccessible.id],
+        classification=None,
+    )
+
+    try:
+        DocumentCenterService(session).bulk_update_classification(context, payload)
+    except HTTPException as exc:
+        assert exc.status_code == 403
+    else:
+        raise AssertionError("批量归类应拒绝不可访问文档")
+
+    session.refresh(authorized)
+    session.refresh(inaccessible)
+    assert authorized.knowledge_category_id == category.id
+    assert inaccessible.knowledge_category_id == category.id

@@ -50,6 +50,16 @@ export type KnowledgeDocumentDetail = Omit<Schemas['DocumentDetailResponse'], 'c
   classification?: KnowledgeClassificationPath | null;
 };
 
+export type BulkUpdateDocumentClassificationPayload =
+  Schemas['BulkUpdateDocumentClassificationRequest'];
+
+export type BulkUpdateDocumentClassificationResult = Omit<
+  Schemas['BulkUpdateDocumentClassificationResponse'],
+  'classification'
+> & {
+  classification?: KnowledgeClassificationPath | null;
+};
+
 export type DocumentChunk = {
   id: string;
   documentId: string;
@@ -71,6 +81,7 @@ export type DocumentFilters = {
   /** Classification department filter, distinct from permission departmentId below. */
   classificationDepartmentId: string;
   categoryId: string;
+  isUnclassified: boolean;
   departmentId: string;
   roleId: string;
   page: number;
@@ -85,6 +96,7 @@ export async function listDocuments(filters: DocumentFilters) {
     spaceId: filters.spaceId,
     classificationDepartmentId: filters.classificationDepartmentId,
     categoryId: filters.categoryId,
+    isUnclassified: filters.isUnclassified ? 'true' : '',
     departmentId: filters.departmentId,
     roleId: filters.roleId,
     page: String(filters.page),
@@ -135,6 +147,22 @@ export async function updateDocumentClassification(
     },
   );
   return mapClassification(result);
+}
+
+export async function bulkUpdateDocumentClassification(
+  payload: BulkUpdateDocumentClassificationPayload,
+): Promise<BulkUpdateDocumentClassificationResult> {
+  const result = await apiRequest<Schemas['BulkUpdateDocumentClassificationResponse']>(
+    '/api/v1/documents/bulk-classification',
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+  );
+  return {
+    ...result,
+    classification: mapClassification(result.classification),
+  };
 }
 
 export function deleteDocument(documentId: string) {

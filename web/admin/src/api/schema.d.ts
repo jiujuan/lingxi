@@ -382,6 +382,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/bulk-classification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Bulk Update Document Classification */
+        patch: operations["bulk_update_document_classification_api_v1_documents_bulk_classification_patch"];
+        trace?: never;
+    };
     "/api/v1/documents/{document_id}": {
         parameters: {
             query?: never;
@@ -1250,6 +1267,20 @@ export interface components {
             file: string;
             /** Object Key */
             object_key: string;
+        };
+        /** BulkUpdateDocumentClassificationRequest */
+        BulkUpdateDocumentClassificationRequest: {
+            classification?: components["schemas"]["DocumentClassificationUpdateRequest"] | null;
+            /** Documentids */
+            documentIds: string[];
+        };
+        /** BulkUpdateDocumentClassificationResponse */
+        BulkUpdateDocumentClassificationResponse: {
+            classification?: components["schemas"]["DocumentClassificationResponse"] | null;
+            /** Documentids */
+            documentIds: string[];
+            /** Updatedcount */
+            updatedCount: number;
         };
         /** ChatFeedbackRequest */
         ChatFeedbackRequest: {
@@ -3359,6 +3390,7 @@ export interface operations {
                 spaceId?: string | null;
                 classificationDepartmentId?: string | null;
                 categoryId?: string | null;
+                isUnclassified?: boolean | null;
                 updatedAfter?: string | null;
                 updatedBefore?: string | null;
                 page?: number;
@@ -3377,6 +3409,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_update_document_classification_api_v1_documents_bulk_classification_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkUpdateDocumentClassificationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkUpdateDocumentClassificationResponse"];
                 };
             };
             /** @description Validation Error */

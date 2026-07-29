@@ -4,7 +4,7 @@ from math import ceil
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from server.app.core.errors import not_found
+from server.app.core.errors import bad_request, forbidden, not_found
 from server.app.core.ids import current_request_id
 from server.app.core.permissions import AccessContext
 from server.app.models.document import (
@@ -39,6 +39,7 @@ class DocumentCenterService:
         space_id: str | None,
         classification_department_id: str | None,
         category_id: str | None,
+        is_unclassified: bool | None,
         updated_after: datetime | None,
         updated_before: datetime | None,
         page: int,
@@ -54,6 +55,7 @@ class DocumentCenterService:
             space_id=space_id,
             classification_department_id=classification_department_id,
             category_id=category_id,
+            is_unclassified=is_unclassified,
             updated_after=updated_after,
             updated_before=updated_before,
             page=page,
@@ -154,6 +156,68 @@ class DocumentCenterService:
         )
         self.session.commit()
         return after_snapshot
+
+    def bulk_update_classification(
+        self, context: AccessContext, payload: object
+    ) -> dict:
+        document_ids = self._unique_document_ids(getattr(payload, "document_ids", []))
+        classification = getattr(payload, "classification", None)
+
+        documents = self.documents.list_authorized_documents_by_ids(
+            context, document_ids
+        )
+        documents_by_id = {document.id: document for document in documents}
+        if len(documents_by_id) != len(document_ids):
+            raise forbidden("部分文档不存在或无权限，批量归类已取消")
+
+        ordered_documents = [documents_by_id[document_id] for document_id in document_ids]
+        classification_service = KnowledgeCategoryService(self.session)
+        validated = classification_service.validate_classification(
+            context, classification or {}
+        )
+
+        before_snapshots = {
+            document.id: self.classification_to_dict(context.tenant_id, document)
+            for document in ordered_documents
+        }
+        knowledge_space_id = (
+            validated.knowledge_space.id if validated.knowledge_space else None
+        )
+        category_department_id = (
+            validated.category_department.id
+            if validated.category_department
+            else None
+        )
+        knowledge_category_id = (
+            validated.knowledge_category.id if validated.knowledge_category else None
+        )
+
+        updated_count = self.documents.bulk_update_classification(
+            ordered_documents,
+            knowledge_space_id=knowledge_space_id,
+            category_department_id=category_department_id,
+            knowledge_category_id=knowledge_category_id,
+        )
+        response_classification = (
+            self.classification_to_dict(context.tenant_id, ordered_documents[0])
+            if ordered_documents
+            else None
+        )
+
+        for document in ordered_documents:
+            self._add_audit(
+                context,
+                action="DOCUMENT_BULK_CLASSIFICATION_UPDATED",
+                resource_id=document.id,
+                before_snapshot=before_snapshots[document.id],
+                after_snapshot=response_classification,
+            )
+        self.session.commit()
+        return {
+            "updated_count": updated_count,
+            "document_ids": document_ids,
+            "classification": response_classification,
+        }
 
     def delete_document(self, context: AccessContext, document_id: str) -> dict:
         document = self._get_document(context, document_id)
@@ -291,6 +355,16 @@ class DocumentCenterService:
         if document is None:
             raise not_found("文档不存在")
         return document
+
+
+    @staticmethod
+    def _unique_document_ids(document_ids: list[str]) -> list[str]:
+        cleaned = [document_id.strip() for document_id in document_ids if document_id.strip()]
+        if len(cleaned) != len(document_ids):
+            raise bad_request("INVALID_DOCUMENT_IDS", "documentIds 不能为空")
+        if len(set(cleaned)) != len(cleaned):
+            raise bad_request("DUPLICATE_DOCUMENT_IDS", "documentIds 不能重复")
+        return cleaned
 
     def _named_departments(self, tenant_id: str, ids: list[str]) -> list[dict]:
         if not ids:
