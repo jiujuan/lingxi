@@ -510,6 +510,181 @@ def test_delete_space_or_category_rejects_used_documents():
         raise AssertionError("used space should not be deleted")
 
 
+
+def test_category_document_migration_returns_count_and_allows_delete():
+    from fastapi import HTTPException
+    from server.app.models.document import Document, DocumentStatus
+    from server.app.schemas.knowledge_category import (
+        KnowledgeCategoryCreateRequest,
+        KnowledgeSpaceCreateRequest,
+        MigrateCategoryDocumentsRequest,
+    )
+
+    session, service, context, support, _private = _seed_classification_service()
+    space = service.create_space(
+        context, KnowledgeSpaceCreateRequest(name="客服知识库", code="support-kb")
+    )
+    source = service.create_category(
+        context,
+        KnowledgeCategoryCreateRequest(
+            spaceId=space["id"], departmentId=support.id, name="退款专题", code="refund"
+        ),
+    )
+    target = service.create_category(
+        context,
+        KnowledgeCategoryCreateRequest(
+            spaceId=space["id"], departmentId=support.id, name="安装专题", code="install"
+        ),
+    )
+    document = Document(
+        tenant_id=context.tenant_id,
+        title="退款流程",
+        file_name="refund.pdf",
+        file_type="PDF",
+        mime_type="application/pdf",
+        file_size=200,
+        object_key="documents/refund.pdf",
+        checksum="refund",
+        status=DocumentStatus.READY,
+        knowledge_space_id=space["id"],
+        category_department_id=support.id,
+        knowledge_category_id=source["id"],
+    )
+    session.add(document)
+    session.commit()
+
+    try:
+        service.delete_category(context, source["id"])
+    except HTTPException as exc:
+        assert exc.status_code == 409
+        assert exc.detail["error"]["code"] == "KNOWLEDGE_CATEGORY_HAS_DOCUMENTS"
+        assert exc.detail["error"]["details"]["documentCount"] == 1
+    else:
+        raise AssertionError("used category should not be deleted")
+
+    migrated = service.migrate_category_documents(
+        context,
+        source["id"],
+        MigrateCategoryDocumentsRequest(
+            targetSpaceId=space["id"],
+            targetDepartmentId=support.id,
+            targetCategoryId=target["id"],
+        ),
+    )
+    assert migrated["migrated_count"] == 1
+    assert migrated["target_classification"]["knowledge_category_id"] == target["id"]
+
+    session.refresh(document)
+    assert document.knowledge_space_id == space["id"]
+    assert document.category_department_id == support.id
+    assert document.knowledge_category_id == target["id"]
+
+    service.delete_category(context, source["id"])
+    assert service.categories.get_for_tenant(context.tenant_id, source["id"]) is None
+
+
+def test_space_document_migration_requires_same_tenant_target_and_allows_delete():
+    from fastapi import HTTPException
+    from server.app.core.permissions import AccessContext
+    from server.app.models.document import Document, DocumentStatus
+    from server.app.models.user import Department, Tenant
+    from server.app.schemas.knowledge_category import (
+        KnowledgeCategoryCreateRequest,
+        KnowledgeSpaceCreateRequest,
+        MigrateCategoryDocumentsRequest,
+    )
+    from server.app.services.knowledge_category_service import KnowledgeCategoryService
+
+    session, service, context, support, _private = _seed_classification_service()
+    source_space = service.create_space(
+        context, KnowledgeSpaceCreateRequest(name="待迁移空间", code="source-kb")
+    )
+    target_space = service.create_space(
+        context, KnowledgeSpaceCreateRequest(name="目标空间", code="target-kb")
+    )
+    target_category = service.create_category(
+        context,
+        KnowledgeCategoryCreateRequest(
+            spaceId=target_space["id"],
+            departmentId=support.id,
+            name="目标专题",
+            code="target-topic",
+        ),
+    )
+    document = Document(
+        tenant_id=context.tenant_id,
+        title="待迁移文档",
+        file_name="source.pdf",
+        file_type="PDF",
+        mime_type="application/pdf",
+        file_size=200,
+        object_key="documents/source.pdf",
+        checksum="source",
+        status=DocumentStatus.READY,
+        knowledge_space_id=source_space["id"],
+        category_department_id=support.id,
+    )
+    session.add(document)
+
+    other_tenant = Tenant(name="其他租户")
+    session.add(other_tenant)
+    session.flush()
+    other_department = Department(tenant_id=other_tenant.id, name="Other", code="OTHER")
+    session.add(other_department)
+    session.commit()
+    other_context = AccessContext(
+        tenant_id=other_tenant.id,
+        user_id="other-admin",
+        department_id=other_department.id,
+        role_ids=[],
+        permissions={"DOCUMENT_READ", "DOCUMENT_WRITE"},
+    )
+    other_service = KnowledgeCategoryService(session)
+    other_space = other_service.create_space(
+        other_context, KnowledgeSpaceCreateRequest(name="其他空间", code="other-kb")
+    )
+    other_category = other_service.create_category(
+        other_context,
+        KnowledgeCategoryCreateRequest(
+            spaceId=other_space["id"],
+            departmentId=other_department.id,
+            name="其他专题",
+            code="other-topic",
+        ),
+    )
+
+    try:
+        service.migrate_space_documents(
+            context,
+            source_space["id"],
+            MigrateCategoryDocumentsRequest(
+                targetSpaceId=other_space["id"],
+                targetDepartmentId=other_department.id,
+                targetCategoryId=other_category["id"],
+            ),
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 404
+    else:
+        raise AssertionError("cross-tenant target should not be accepted")
+
+    migrated = service.migrate_space_documents(
+        context,
+        source_space["id"],
+        MigrateCategoryDocumentsRequest(
+            targetSpaceId=target_space["id"],
+            targetDepartmentId=support.id,
+            targetCategoryId=target_category["id"],
+        ),
+    )
+    assert migrated["migrated_count"] == 1
+    session.refresh(document)
+    assert document.knowledge_space_id == target_space["id"]
+    assert document.knowledge_category_id == target_category["id"]
+
+    service.delete_space(context, source_space["id"])
+    assert service.spaces.get_for_tenant(context.tenant_id, source_space["id"]) is None
+
 def test_classification_to_dict_returns_named_nodes():
     from server.app.models.document import Document, DocumentStatus
     from server.app.schemas.knowledge_category import (
@@ -587,8 +762,10 @@ def test_knowledge_classification_openapi_contains_management_paths():
     assert "/api/v1/knowledge-spaces" in schema["paths"]
     assert "/api/v1/knowledge-spaces/stats" in schema["paths"]
     assert "/api/v1/knowledge-spaces/{space_id}" in schema["paths"]
+    assert "/api/v1/knowledge-spaces/{space_id}/migrate-documents" in schema["paths"]
     assert "/api/v1/knowledge-categories" in schema["paths"]
     assert "/api/v1/knowledge-categories/stats" in schema["paths"]
+    assert "/api/v1/knowledge-categories/{category_id}/migrate-documents" in schema["paths"]
     assert "/api/v1/knowledge-categories/{category_id}" in schema["paths"]
 
 
@@ -898,6 +1075,93 @@ def test_classification_stats_service_counts_documents_by_status_and_scope():
     assert category_stats["unclassified"]["total_count"] == 1
     assert category_stats["unclassified"]["unclassified_count"] == 1
 
+
+
+def test_classification_migration_api_moves_documents_and_unblocks_delete():
+    from server.app.models.document import Document, DocumentStatus
+    from server.tests.test_auth_rbac import build_test_client
+
+    client, SessionLocal = build_test_client()
+    headers = _login_admin_headers(client)
+    support_id = _department_ids(SessionLocal)["SUPPORT"]
+
+    space = client.post(
+        "/api/v1/knowledge-spaces",
+        headers=headers,
+        json={"name": "客服知识库", "code": "support-kb"},
+    ).json()
+    source = client.post(
+        "/api/v1/knowledge-categories",
+        headers=headers,
+        json={
+            "spaceId": space["id"],
+            "departmentId": support_id,
+            "name": "退款专题",
+            "code": "refund",
+        },
+    ).json()
+    target = client.post(
+        "/api/v1/knowledge-categories",
+        headers=headers,
+        json={
+            "spaceId": space["id"],
+            "departmentId": support_id,
+            "name": "安装专题",
+            "code": "install",
+        },
+    ).json()
+    with SessionLocal() as session:
+        tenant_id = session.scalar(select(Document.tenant_id))
+        if tenant_id is None:
+            from server.app.models.user import Tenant
+
+            tenant_id = session.scalar(select(Tenant.id))
+        session.add(
+            Document(
+                tenant_id=tenant_id,
+                title="退款流程",
+                file_name="refund.pdf",
+                file_type="PDF",
+                mime_type="application/pdf",
+                file_size=200,
+                object_key="documents/refund.pdf",
+                checksum="refund",
+                status=DocumentStatus.READY,
+                knowledge_space_id=space["id"],
+                category_department_id=support_id,
+                knowledge_category_id=source["id"],
+            )
+        )
+        session.commit()
+
+    blocked = client.delete(
+        f"/api/v1/knowledge-categories/{source['id']}", headers=headers
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["details"]["documentCount"] == 1
+
+    migrated = client.post(
+        f"/api/v1/knowledge-categories/{source['id']}/migrate-documents",
+        headers=headers,
+        json={
+            "targetSpaceId": space["id"],
+            "targetDepartmentId": support_id,
+            "targetCategoryId": target["id"],
+        },
+    )
+    assert migrated.status_code == 200
+    assert migrated.json()["migratedCount"] == 1
+    assert migrated.json()["targetClassification"]["knowledgeCategoryId"] == target["id"]
+
+    with SessionLocal() as session:
+        stored = session.scalar(select(Document).where(Document.title == "退款流程"))
+        assert stored.knowledge_category_id == target["id"]
+
+    deleted = client.delete(
+        f"/api/v1/knowledge-categories/{source['id']}", headers=headers
+    )
+    assert deleted.status_code == 200
+    assert deleted.json() == {"ok": True}
 
 def test_classification_stats_api_returns_space_category_and_unclassified_counts():
     from server.app.models.document import Document, DocumentStatus

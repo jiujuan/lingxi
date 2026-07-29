@@ -31,6 +31,9 @@ export type CreateKnowledgeCategoryPayload = Schemas['KnowledgeCategoryCreateReq
 export type UpdateKnowledgeCategoryPayload = Schemas['KnowledgeCategoryUpdateRequest'];
 export type UpdateDocumentClassificationPayload = Schemas['DocumentClassificationUpdateRequest'];
 export type ImportClassificationPayload = Schemas['ImportClassificationRequest'];
+export type ClassificationDeleteConflict = Schemas['ClassificationDeleteConflict'];
+export type MigrateCategoryDocumentsPayload = Schemas['MigrateCategoryDocumentsRequest'];
+export type MigrateCategoryDocumentsResult = Schemas['MigrateCategoryDocumentsResponse'];
 
 export type KnowledgeClassificationValue = {
   spaceId: string | null;

@@ -110,8 +110,13 @@ class KnowledgeCategoryService:
 
     def delete_space(self, context: AccessContext, space_id: str) -> None:
         space = self._require_space(context, space_id)
-        if self.spaces.count_documents(context.tenant_id, space.id):
-            raise conflict("KNOWLEDGE_SPACE_HAS_DOCUMENTS", "请先移走空间下的文档")
+        document_count = self.spaces.count_documents_by_space(context.tenant_id, space.id)
+        if document_count:
+            raise conflict(
+                "KNOWLEDGE_SPACE_HAS_DOCUMENTS",
+                f"请先迁移空间下的 {document_count} 篇文档",
+                self._delete_conflict_details("SPACE", space.id, document_count),
+            )
         if self.categories.count_for_space(context.tenant_id, space.id):
             raise conflict("KNOWLEDGE_SPACE_HAS_CATEGORIES", "请先删除空间下的分类")
         before = self._space_public_dict(space)
@@ -270,8 +275,15 @@ class KnowledgeCategoryService:
 
     def delete_category(self, context: AccessContext, category_id: str) -> None:
         category = self._require_category(context, category_id)
-        if self.categories.count_documents(context.tenant_id, category.id):
-            raise conflict("KNOWLEDGE_CATEGORY_HAS_DOCUMENTS", "请先移走分类下的文档")
+        document_count = self.categories.count_documents_by_category(
+            context.tenant_id, category.id
+        )
+        if document_count:
+            raise conflict(
+                "KNOWLEDGE_CATEGORY_HAS_DOCUMENTS",
+                f"请先迁移分类下的 {document_count} 篇文档",
+                self._delete_conflict_details("CATEGORY", category.id, document_count),
+            )
         if self.categories.count_children(context.tenant_id, category.id):
             raise conflict("KNOWLEDGE_CATEGORY_HAS_CHILDREN", "请先删除子分类")
         before = self._category_public_dict(category)
@@ -284,6 +296,62 @@ class KnowledgeCategoryService:
         )
         self.categories.delete(category)
         self.session.commit()
+
+    def migrate_space_documents(
+        self, context: AccessContext, space_id: str, payload: Any
+    ) -> dict:
+        source = self._require_space(context, space_id)
+        target = self._validate_migration_target(context, payload)
+        if target.knowledge_space is None or target.knowledge_space.id == source.id:
+            raise bad_request(
+                "CLASSIFICATION_MIGRATION_TARGET_INVALID",
+                "目标分类必须位于不同知识库空间",
+            )
+        migrated_count = self.spaces.migrate_documents_by_space(
+            context.tenant_id,
+            source.id,
+            target_space_id=target.knowledge_space.id,
+            target_department_id=target.category_department.id,
+            target_category_id=target.knowledge_category.id,
+        )
+        self._add_migration_audit(
+            context,
+            action="KNOWLEDGE_SPACE_DOCUMENTS_MIGRATED",
+            resource_type="KNOWLEDGE_SPACE",
+            resource_id=source.id,
+            migrated_count=migrated_count,
+            target=target,
+        )
+        self.session.commit()
+        return self._migration_response("SPACE", source.id, migrated_count, target)
+
+    def migrate_category_documents(
+        self, context: AccessContext, category_id: str, payload: Any
+    ) -> dict:
+        source = self._require_category(context, category_id)
+        target = self._validate_migration_target(context, payload)
+        if target.knowledge_category is None or target.knowledge_category.id == source.id:
+            raise bad_request(
+                "CLASSIFICATION_MIGRATION_TARGET_INVALID",
+                "目标项目 / 专题必须与源项目 / 专题不同",
+            )
+        migrated_count = self.categories.migrate_documents_by_category(
+            context.tenant_id,
+            source.id,
+            target_space_id=target.knowledge_space.id,
+            target_department_id=target.category_department.id,
+            target_category_id=target.knowledge_category.id,
+        )
+        self._add_migration_audit(
+            context,
+            action="KNOWLEDGE_CATEGORY_DOCUMENTS_MIGRATED",
+            resource_type="KNOWLEDGE_CATEGORY",
+            resource_id=source.id,
+            migrated_count=migrated_count,
+            target=target,
+        )
+        self.session.commit()
+        return self._migration_response("CATEGORY", source.id, migrated_count, target)
 
     def validate_classification(
         self, context: AccessContext, classification: Any
@@ -336,6 +404,89 @@ class KnowledgeCategoryService:
             "knowledge_space": self._node_to_dict(space),
             "category_department": self._node_to_dict(department),
             "knowledge_category": self._node_to_dict(category),
+        }
+
+    def _validate_migration_target(
+        self, context: AccessContext, payload: Any
+    ) -> ValidatedClassification:
+        data = self._payload_dict(payload)
+        target = self.validate_classification(
+            context,
+            {
+                "knowledge_space_id": data.get("target_space_id"),
+                "category_department_id": data.get("target_department_id"),
+                "knowledge_category_id": data.get("target_category_id"),
+            },
+        )
+        if not (
+            target.knowledge_space
+            and target.category_department
+            and target.knowledge_category
+        ):
+            raise bad_request(
+                "CLASSIFICATION_MIGRATION_TARGET_INVALID",
+                "目标分类路径不完整",
+            )
+        return target
+
+    def _migration_response(
+        self,
+        source_type: str,
+        source_id: str,
+        migrated_count: int,
+        target: ValidatedClassification,
+    ) -> dict:
+        return {
+            "source_type": source_type,
+            "source_id": source_id,
+            "migrated_count": migrated_count,
+            "target_classification": self._classification_from_validated(target),
+        }
+
+    def _classification_from_validated(self, target: ValidatedClassification) -> dict:
+        return {
+            "knowledge_space_id": target.knowledge_space.id,
+            "category_department_id": target.category_department.id,
+            "knowledge_category_id": target.knowledge_category.id,
+            "knowledge_space": self._node_to_dict(target.knowledge_space),
+            "category_department": self._node_to_dict(target.category_department),
+            "knowledge_category": self._node_to_dict(target.knowledge_category),
+        }
+
+    def _add_migration_audit(
+        self,
+        context: AccessContext,
+        *,
+        action: str,
+        resource_type: str,
+        resource_id: str,
+        migrated_count: int,
+        target: ValidatedClassification,
+    ) -> None:
+        self.session.add(
+            AuditLog(
+                tenant_id=context.tenant_id,
+                actor_id=context.user_id,
+                action=action,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                before_snapshot=None,
+                after_snapshot={
+                    "migratedCount": migrated_count,
+                    "targetClassification": self._classification_from_validated(target),
+                },
+                request_id=current_request_id(),
+            )
+        )
+
+    @staticmethod
+    def _delete_conflict_details(
+        resource_type: str, resource_id: str, document_count: int
+    ) -> dict:
+        return {
+            "resourceType": resource_type,
+            "resourceId": resource_id,
+            "documentCount": document_count,
         }
 
     def _require_space(self, context: AccessContext, space_id: str) -> KnowledgeSpace:

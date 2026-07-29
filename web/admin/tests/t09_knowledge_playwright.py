@@ -205,12 +205,41 @@ class KnowledgeApiMock:
             fulfill_json(route, space)
             return
 
+        if method == "POST" and path.startswith("/api/v1/knowledge-spaces/") and path.endswith("/migrate-documents"):
+            source_space_id = path.split("/")[-2]
+            payload = body or {}
+            target_category_id = payload.get("targetCategoryId")
+            migrated_count = 0
+            for document_id, category_id in list(self.document_categories.items()):
+                if category_id and self._category(category_id)["spaceId"] == source_space_id:
+                    self.document_categories[document_id] = target_category_id
+                    migrated_count += 1
+            fulfill_json(
+                route,
+                {
+                    "sourceType": "SPACE",
+                    "sourceId": source_space_id,
+                    "migratedCount": migrated_count,
+                    "targetClassification": self._classification(target_category_id),
+                },
+            )
+            return
+
         if method == "DELETE" and path.startswith("/api/v1/knowledge-spaces/"):
             space_id = path.rsplit("/", 1)[-1]
-            if space_id == "space-001":
+            document_count = self._document_count_for_space(space_id)
+            if document_count:
                 fulfill_json(
                     route,
-                    api_error("KNOWLEDGE_SPACE_IN_USE", "存在项目 / 专题或文档引用，无法删除知识库空间。"),
+                    api_error(
+                        "KNOWLEDGE_SPACE_HAS_DOCUMENTS",
+                        f"请先迁移空间下的 {document_count} 篇文档",
+                        {
+                            "resourceType": "SPACE",
+                            "resourceId": space_id,
+                            "documentCount": document_count,
+                        },
+                    ),
                     status=409,
                 )
                 return
@@ -259,8 +288,44 @@ class KnowledgeApiMock:
             fulfill_json(route, category)
             return
 
+        if method == "POST" and path.startswith("/api/v1/knowledge-categories/") and path.endswith("/migrate-documents"):
+            source_category_id = path.split("/")[-2]
+            payload = body or {}
+            target_category_id = payload.get("targetCategoryId")
+            migrated_count = 0
+            for document_id, category_id in list(self.document_categories.items()):
+                if category_id == source_category_id:
+                    self.document_categories[document_id] = target_category_id
+                    migrated_count += 1
+            fulfill_json(
+                route,
+                {
+                    "sourceType": "CATEGORY",
+                    "sourceId": source_category_id,
+                    "migratedCount": migrated_count,
+                    "targetClassification": self._classification(target_category_id),
+                },
+            )
+            return
+
         if method == "DELETE" and path.startswith("/api/v1/knowledge-categories/"):
             category_id = path.rsplit("/", 1)[-1]
+            document_count = self._document_count_for_category(category_id)
+            if document_count:
+                fulfill_json(
+                    route,
+                    api_error(
+                        "KNOWLEDGE_CATEGORY_HAS_DOCUMENTS",
+                        f"请先迁移分类下的 {document_count} 篇文档",
+                        {
+                            "resourceType": "CATEGORY",
+                            "resourceId": category_id,
+                            "documentCount": document_count,
+                        },
+                    ),
+                    status=409,
+                )
+                return
             self.categories = [category for category in self.categories if category["id"] != category_id]
             fulfill_json(route, {"ok": True})
             return
@@ -454,6 +519,16 @@ class KnowledgeApiMock:
                 return department
         raise AssertionError(f"未知部门: {department_id}")
 
+    def _document_count_for_category(self, category_id: str) -> int:
+        return sum(1 for value in self.document_categories.values() if value == category_id)
+
+    def _document_count_for_space(self, space_id: str) -> int:
+        count = 0
+        for category_id in self.document_categories.values():
+            if category_id and self._category(category_id)["spaceId"] == space_id:
+                count += 1
+        return count
+
     def _space_stats_response(self) -> dict:
         data = []
         for space in self.spaces:
@@ -575,9 +650,9 @@ def fulfill_json(route: Route, payload: dict, status: int = 200) -> None:
     )
 
 
-def api_error(code: str, message: str) -> dict:
+def api_error(code: str, message: str, details: dict | None = None) -> dict:
     return {
-        "error": {"code": code, "message": message, "details": {}},
+        "error": {"code": code, "message": message, "details": details or {}},
         "requestId": "req_playwright_mock",
     }
 
@@ -636,7 +711,7 @@ def verify_phase_two_desktop_flow(page: Page) -> tuple[list[str], KnowledgeApiMo
     verify_classification_admin_flow(page, api)
     verify_upload_flow(page, api)
     verify_document_filter_detail_edit_flow(page, api)
-    verify_no_overflow(page)
+    verify_category_migration_flow(page, api)
 
     return errors, api
 
@@ -692,7 +767,10 @@ def verify_classification_admin_flow(page: Page, api: KnowledgeApiMock) -> None:
     page.locator(".classification-space-row", has_text="客服知识库").get_by_role(
         "button", name="删除"
     ).click()
-    expect(page.get_by_text("存在项目 / 专题或文档引用，无法删除知识库空间。")).to_be_visible()
+    expect(page.get_by_text("知识库空间「客服知识库」下仍有 1 篇文档，请先迁移。")).to_be_visible()
+    migration_dialog = page.locator(".classification-migration-modal")
+    expect(migration_dialog.get_by_text("1 篇关联文档")).to_be_visible()
+    migration_dialog.get_by_role("button", name="关闭").click()
 
     page.get_by_role("button", name="新建项目 / 专题").click()
     category_dialog = page.get_by_role("dialog", name="新建项目 / 专题")
@@ -861,6 +939,44 @@ def verify_document_filter_detail_edit_flow(page: Page, api: KnowledgeApiMock) -
     page.screenshot(path=str(SCREENSHOT_DIR / "t09-knowledge-documents-desktop.png"), full_page=True)
 
 
+def verify_category_migration_flow(page: Page, api: KnowledgeApiMock) -> None:
+    page.goto(f"{APP_ORIGIN}/#knowledge-classification", wait_until="networkidle")
+    expect(page.get_by_role("heading", name="知识库分类")).to_be_visible()
+    expect(page.get_by_text("物流专题").first).to_be_visible()
+
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator(".classification-category-row", has_text="物流专题").get_by_role(
+        "button", name="删除"
+    ).click()
+    expect(page.get_by_text("项目 / 专题「物流专题」下仍有 1 篇文档，请先迁移。")).to_be_visible()
+
+    migration_dialog = page.locator(".classification-migration-modal")
+    expect(migration_dialog.get_by_text("物流专题")).to_be_visible()
+    migration_dialog.locator("#classification-document-migration-space").select_option("space-001")
+    migration_dialog.locator("#classification-document-migration-department").select_option(
+        "dept-after-sales"
+    )
+    migration_dialog.locator("#classification-document-migration-category").select_option("cat-refund")
+    migration_dialog.get_by_role("button", name="确认迁移文档").click()
+    expect(page.get_by_text("文档迁移成功，请重新执行删除。")).to_be_visible()
+
+    migrate_request = api.find_request(
+        "POST", "/api/v1/knowledge-categories/cat-logistics/migrate-documents"
+    )
+    assert migrate_request["body"] == {
+        "targetSpaceId": "space-001",
+        "targetDepartmentId": "dept-after-sales",
+        "targetCategoryId": "cat-refund",
+    }
+
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator(".classification-category-row", has_text="物流专题").get_by_role(
+        "button", name="删除"
+    ).click()
+    expect(page.get_by_text("项目 / 专题已删除。")).to_be_visible()
+    api.find_request("DELETE", "/api/v1/knowledge-categories/cat-logistics")
+
+
 def verify_mobile_smoke(page: Page) -> list[str]:
     errors, _api = prepare_page(page)
     page.goto(f"{APP_ORIGIN}/#knowledge", wait_until="networkidle")
@@ -902,6 +1018,8 @@ def assert_phase_two_contracts(api: KnowledgeApiMock) -> None:
     api.find_request("POST", "/api/v1/knowledge-categories")
     api.find_request("PUT", "/api/v1/knowledge-categories/cat-created")
     api.find_request("DELETE", "/api/v1/knowledge-categories/cat-created")
+    api.find_request("POST", "/api/v1/knowledge-categories/cat-logistics/migrate-documents")
+    api.find_request("DELETE", "/api/v1/knowledge-categories/cat-logistics")
     api.find_request("GET", "/api/v1/knowledge-spaces/stats")
     api.find_request(
         "GET",

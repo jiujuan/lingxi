@@ -1,4 +1,6 @@
-from sqlalchemy import case, func, select
+from datetime import UTC, datetime
+
+from sqlalchemy import case, func, select, update
 from sqlalchemy.orm import Session
 
 from server.app.models.document import Document, DocumentStatus
@@ -64,6 +66,9 @@ class KnowledgeSpaceRepository:
         return {row.group_id: _row_to_stats(row) for row in rows}
 
     def count_documents(self, tenant_id: str, space_id: str) -> int:
+        return self.count_documents_by_space(tenant_id, space_id)
+
+    def count_documents_by_space(self, tenant_id: str, space_id: str) -> int:
         return int(
             self.session.scalar(
                 select(func.count(Document.id)).where(
@@ -75,6 +80,32 @@ class KnowledgeSpaceRepository:
             )
             or 0
         )
+
+    def migrate_documents_by_space(
+        self,
+        tenant_id: str,
+        source_space_id: str,
+        *,
+        target_space_id: str,
+        target_department_id: str,
+        target_category_id: str,
+    ) -> int:
+        result = self.session.execute(
+            update(Document)
+            .where(
+                Document.tenant_id == tenant_id,
+                Document.deleted_at.is_(None),
+                Document.status != DocumentStatus.DELETED,
+                Document.knowledge_space_id == source_space_id,
+            )
+            .values(
+                knowledge_space_id=target_space_id,
+                category_department_id=target_department_id,
+                knowledge_category_id=target_category_id,
+                updated_at=datetime.now(UTC),
+            )
+        )
+        return int(result.rowcount or 0)
 
     def delete(self, space: KnowledgeSpace) -> None:
         self.session.delete(space)
@@ -184,6 +215,9 @@ class KnowledgeCategoryRepository:
         return _row_to_stats(row)
 
     def count_documents(self, tenant_id: str, category_id: str) -> int:
+        return self.count_documents_by_category(tenant_id, category_id)
+
+    def count_documents_by_category(self, tenant_id: str, category_id: str) -> int:
         return int(
             self.session.scalar(
                 select(func.count(Document.id)).where(
@@ -195,6 +229,32 @@ class KnowledgeCategoryRepository:
             )
             or 0
         )
+
+    def migrate_documents_by_category(
+        self,
+        tenant_id: str,
+        source_category_id: str,
+        *,
+        target_space_id: str,
+        target_department_id: str,
+        target_category_id: str,
+    ) -> int:
+        result = self.session.execute(
+            update(Document)
+            .where(
+                Document.tenant_id == tenant_id,
+                Document.deleted_at.is_(None),
+                Document.status != DocumentStatus.DELETED,
+                Document.knowledge_category_id == source_category_id,
+            )
+            .values(
+                knowledge_space_id=target_space_id,
+                category_department_id=target_department_id,
+                knowledge_category_id=target_category_id,
+                updated_at=datetime.now(UTC),
+            )
+        )
+        return int(result.rowcount or 0)
 
     def count_for_space(self, tenant_id: str, space_id: str) -> int:
         return int(

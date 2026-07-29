@@ -640,6 +640,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/knowledge-categories/{category_id}/migrate-documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Migrate Knowledge Category Documents */
+        post: operations["migrate_knowledge_category_documents_api_v1_knowledge_categories__category_id__migrate_documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/knowledge-spaces": {
         parameters: {
             query?: never;
@@ -688,6 +705,23 @@ export interface paths {
         post?: never;
         /** Delete Knowledge Space */
         delete: operations["delete_knowledge_space_api_v1_knowledge_spaces__space_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge-spaces/{space_id}/migrate-documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Migrate Knowledge Space Documents */
+        post: operations["migrate_knowledge_space_documents_api_v1_knowledge_spaces__space_id__migrate_documents_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1397,6 +1431,15 @@ export interface components {
             /** Sourcetext */
             sourceText: string;
         };
+        /** ClassificationDeleteConflict */
+        ClassificationDeleteConflict: {
+            /** Documentcount */
+            documentCount: number;
+            /** Resourceid */
+            resourceId: string;
+            /** Resourcetype */
+            resourceType: string;
+        };
         /** ClassificationPathResponse */
         ClassificationPathResponse: {
             /** Categoryid */
@@ -2025,6 +2068,25 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /** MigrateCategoryDocumentsRequest */
+        MigrateCategoryDocumentsRequest: {
+            /** Targetcategoryid */
+            targetCategoryId: string;
+            /** Targetdepartmentid */
+            targetDepartmentId: string;
+            /** Targetspaceid */
+            targetSpaceId: string;
+        };
+        /** MigrateCategoryDocumentsResponse */
+        MigrateCategoryDocumentsResponse: {
+            /** Migratedcount */
+            migratedCount: number;
+            /** Sourceid */
+            sourceId: string;
+            /** Sourcetype */
+            sourceType: string;
+            targetClassification: components["schemas"]["DocumentClassificationResponse"];
         };
         /** ModelCallLogListResponse */
         ModelCallLogListResponse: {
@@ -4003,6 +4065,50 @@ export interface operations {
                     "application/json": components["schemas"]["OkResponse"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassificationDeleteConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    migrate_knowledge_category_documents_api_v1_knowledge_categories__category_id__migrate_documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MigrateCategoryDocumentsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MigrateCategoryDocumentsResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -4140,6 +4246,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassificationDeleteConflict"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    migrate_knowledge_space_documents_api_v1_knowledge_spaces__space_id__migrate_documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                space_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MigrateCategoryDocumentsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MigrateCategoryDocumentsResponse"];
                 };
             };
             /** @description Validation Error */

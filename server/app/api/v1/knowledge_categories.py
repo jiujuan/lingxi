@@ -5,6 +5,7 @@ from server.app.core.permissions import AccessContext, require_permission
 from server.app.db.session import get_db
 from server.app.schemas.common import OkResponse
 from server.app.schemas.knowledge_category import (
+    ClassificationDeleteConflict,
     KnowledgeCategoryCreateRequest,
     KnowledgeCategoryListResponse,
     KnowledgeCategoryStatsListResponse,
@@ -15,6 +16,8 @@ from server.app.schemas.knowledge_category import (
     KnowledgeSpaceStatsListResponse,
     KnowledgeSpaceResponse,
     KnowledgeSpaceUpdateRequest,
+    MigrateCategoryDocumentsRequest,
+    MigrateCategoryDocumentsResponse,
 )
 from server.app.services.knowledge_category_service import KnowledgeCategoryService
 
@@ -60,7 +63,11 @@ def update_knowledge_space(
     return KnowledgeCategoryService(db).update_space(context, space_id, payload)
 
 
-@router.delete("/knowledge-spaces/{space_id}", response_model=OkResponse)
+@router.delete(
+    "/knowledge-spaces/{space_id}",
+    response_model=OkResponse,
+    responses={409: {"model": ClassificationDeleteConflict}},
+)
 def delete_knowledge_space(
     space_id: str,
     context: AccessContext = Depends(require_permission("DOCUMENT_WRITE")),
@@ -68,6 +75,21 @@ def delete_knowledge_space(
 ) -> dict:
     KnowledgeCategoryService(db).delete_space(context, space_id)
     return {"ok": True}
+
+
+@router.post(
+    "/knowledge-spaces/{space_id}/migrate-documents",
+    response_model=MigrateCategoryDocumentsResponse,
+)
+def migrate_knowledge_space_documents(
+    space_id: str,
+    payload: MigrateCategoryDocumentsRequest,
+    context: AccessContext = Depends(require_permission("DOCUMENT_WRITE")),
+    db: Session = Depends(get_db),
+) -> dict:
+    return KnowledgeCategoryService(db).migrate_space_documents(
+        context, space_id, payload
+    )
 
 
 @router.get(
@@ -132,7 +154,11 @@ def update_knowledge_category(
     return KnowledgeCategoryService(db).update_category(context, category_id, payload)
 
 
-@router.delete("/knowledge-categories/{category_id}", response_model=OkResponse)
+@router.delete(
+    "/knowledge-categories/{category_id}",
+    response_model=OkResponse,
+    responses={409: {"model": ClassificationDeleteConflict}},
+)
 def delete_knowledge_category(
     category_id: str,
     context: AccessContext = Depends(require_permission("DOCUMENT_WRITE")),
@@ -140,3 +166,18 @@ def delete_knowledge_category(
 ) -> dict:
     KnowledgeCategoryService(db).delete_category(context, category_id)
     return {"ok": True}
+
+
+@router.post(
+    "/knowledge-categories/{category_id}/migrate-documents",
+    response_model=MigrateCategoryDocumentsResponse,
+)
+def migrate_knowledge_category_documents(
+    category_id: str,
+    payload: MigrateCategoryDocumentsRequest,
+    context: AccessContext = Depends(require_permission("DOCUMENT_WRITE")),
+    db: Session = Depends(get_db),
+) -> dict:
+    return KnowledgeCategoryService(db).migrate_category_documents(
+        context, category_id, payload
+    )

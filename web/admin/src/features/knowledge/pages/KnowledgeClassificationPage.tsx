@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { errorMessage } from '../../../api/client';
+import { ApiError, errorMessage } from '../../../api/client';
 import { hasPermission } from '../../../auth/authStore';
 import { formatDateTime } from '../../../shared/format';
 import { listDepartments } from '../../org/api/orgApi';
@@ -17,6 +17,10 @@ import {
   updateKnowledgeCategory,
   updateKnowledgeSpace,
 } from '../api/classificationApi';
+import {
+  ClassificationMigrationModal,
+  type ClassificationMigrationSource,
+} from '../components/ClassificationMigrationModal';
 import { KnowledgeCategoryModal } from '../components/KnowledgeCategoryModal';
 import { KnowledgeSpaceModal } from '../components/KnowledgeSpaceModal';
 import type {
@@ -59,6 +63,9 @@ export function KnowledgeClassificationPage() {
   const [showSpaceModal, setShowSpaceModal] = useState(false);
   const [editingCategory, setEditingCategory] = useState<KnowledgeCategory | null>(null);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [migrationSource, setMigrationSource] = useState<ClassificationMigrationSource | null>(
+    null,
+  );
 
   const departmentById = useMemo(
     () => new Map(departments.map((department) => [department.id, department])),
@@ -240,6 +247,17 @@ export function KnowledgeClassificationPage() {
         setCategoryUnclassifiedStats(null);
       }
     } catch (caught) {
+      const documentCount = deleteDocumentConflictCount(caught, 'KNOWLEDGE_SPACE_HAS_DOCUMENTS');
+      if (documentCount !== null) {
+        setMigrationSource({
+          type: 'SPACE',
+          id: space.id,
+          name: space.name,
+          documentCount,
+        });
+        setSpacesError(`知识库空间「${space.name}」下仍有 ${documentCount} 篇文档，请先迁移。`);
+        return;
+      }
       setSpacesError(errorMessage(caught, '知识库空间删除失败。'));
     }
   }
@@ -299,8 +317,27 @@ export function KnowledgeClassificationPage() {
       setNotice('项目 / 专题已删除。');
       await Promise.all([loadCategories(), loadCategoryStats(), loadSpaceStats()]);
     } catch (caught) {
+      const documentCount = deleteDocumentConflictCount(caught, 'KNOWLEDGE_CATEGORY_HAS_DOCUMENTS');
+      if (documentCount !== null) {
+        setMigrationSource({
+          type: 'CATEGORY',
+          id: category.id,
+          name: category.name,
+          documentCount,
+        });
+        setCategoriesError(
+          `项目 / 专题「${category.name}」下仍有 ${documentCount} 篇文档，请先迁移。`,
+        );
+        return;
+      }
       setCategoriesError(errorMessage(caught, '项目 / 专题删除失败。'));
     }
+  }
+
+  async function handleMigrationSuccess() {
+    setMigrationSource(null);
+    setNotice('文档迁移成功，请重新执行删除。');
+    await Promise.all([loadSpaces(), loadCategories(), loadSpaceStats(), loadCategoryStats()]);
   }
 
   async function handleSubmitCategory(
@@ -555,8 +592,27 @@ export function KnowledgeClassificationPage() {
           spaces={spaces}
         />
       ) : null}
+      {migrationSource ? (
+        <ClassificationMigrationModal
+          onClose={() => setMigrationSource(null)}
+          onMigrated={() => void handleMigrationSuccess()}
+          source={migrationSource}
+        />
+      ) : null}
     </div>
   );
+}
+
+function deleteDocumentConflictCount(error: unknown, expectedCode: string) {
+  if (!(error instanceof ApiError) || error.status !== 409 || error.code !== expectedCode) {
+    return null;
+  }
+  const details = error.details;
+  if (!details || typeof details !== 'object') {
+    return 0;
+  }
+  const count = (details as { documentCount?: unknown }).documentCount;
+  return typeof count === 'number' && Number.isFinite(count) ? count : 0;
 }
 
 function formatClassificationStats(stats?: KnowledgeClassificationStats | null) {

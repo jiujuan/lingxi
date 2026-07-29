@@ -597,6 +597,27 @@ label {
   width: min(520px, 100%);
 }
 
+.classification-migration-modal {
+  max-width: 640px;
+  width: min(640px, 100%);
+}
+
+.migration-source-summary {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 12px;
+}
+
+.migration-source-summary span {
+  color: #64748b;
+  font-size: 13px;
+}
+
 .qa-row {
   border: 1px solid #edf1f7;
   border-radius: 6px;

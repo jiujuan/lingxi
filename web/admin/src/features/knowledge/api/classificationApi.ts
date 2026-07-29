@@ -8,6 +8,8 @@ import type {
   KnowledgeClassificationStats,
   KnowledgeSpace,
   KnowledgeSpaceStats,
+  MigrateCategoryDocumentsPayload,
+  MigrateCategoryDocumentsResult,
   UpdateKnowledgeCategoryPayload,
   UpdateKnowledgeSpacePayload,
 } from '../types/classification';
@@ -40,6 +42,16 @@ export function deleteKnowledgeSpace(spaceId: string) {
   return apiRequest<{ ok: boolean }>(`/api/v1/knowledge-spaces/${encodeURIComponent(spaceId)}`, {
     method: 'DELETE',
   });
+}
+
+export function migrateSpaceDocuments(spaceId: string, payload: MigrateCategoryDocumentsPayload) {
+  return apiRequest<MigrateCategoryDocumentsResult>(
+    `/api/v1/knowledge-spaces/${encodeURIComponent(spaceId)}/migrate-documents`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export function listKnowledgeCategories(filters: KnowledgeCategoryFilters = {}) {
@@ -86,6 +98,19 @@ export function deleteKnowledgeCategory(categoryId: string) {
   return apiRequest<{ ok: boolean }>(
     `/api/v1/knowledge-categories/${encodeURIComponent(categoryId)}`,
     { method: 'DELETE' },
+  );
+}
+
+export function migrateCategoryDocuments(
+  categoryId: string,
+  payload: MigrateCategoryDocumentsPayload,
+) {
+  return apiRequest<MigrateCategoryDocumentsResult>(
+    `/api/v1/knowledge-categories/${encodeURIComponent(categoryId)}/migrate-documents`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
   );
 }
 

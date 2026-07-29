@@ -916,6 +916,29 @@
         "title": "CitationSourceResponse",
         "type": "object"
       },
+      "ClassificationDeleteConflict": {
+        "properties": {
+          "documentCount": {
+            "title": "Documentcount",
+            "type": "integer"
+          },
+          "resourceId": {
+            "title": "Resourceid",
+            "type": "string"
+          },
+          "resourceType": {
+            "title": "Resourcetype",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resourceType",
+          "resourceId",
+          "documentCount"
+        ],
+        "title": "ClassificationDeleteConflict",
+        "type": "object"
+      },
       "ClassificationPathResponse": {
         "properties": {
           "categoryId": {
@@ -2983,6 +3006,56 @@
           "password"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "MigrateCategoryDocumentsRequest": {
+        "properties": {
+          "targetCategoryId": {
+            "title": "Targetcategoryid",
+            "type": "string"
+          },
+          "targetDepartmentId": {
+            "title": "Targetdepartmentid",
+            "type": "string"
+          },
+          "targetSpaceId": {
+            "title": "Targetspaceid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "targetSpaceId",
+          "targetDepartmentId",
+          "targetCategoryId"
+        ],
+        "title": "MigrateCategoryDocumentsRequest",
+        "type": "object"
+      },
+      "MigrateCategoryDocumentsResponse": {
+        "properties": {
+          "migratedCount": {
+            "title": "Migratedcount",
+            "type": "integer"
+          },
+          "sourceId": {
+            "title": "Sourceid",
+            "type": "string"
+          },
+          "sourceType": {
+            "title": "Sourcetype",
+            "type": "string"
+          },
+          "targetClassification": {
+            "$ref": "#/components/schemas/DocumentClassificationResponse"
+          }
+        },
+        "required": [
+          "sourceType",
+          "sourceId",
+          "migratedCount",
+          "targetClassification"
+        ],
+        "title": "MigrateCategoryDocumentsResponse",
         "type": "object"
       },
       "ModelCallLogListResponse": {
@@ -7138,6 +7211,16 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassificationDeleteConflict"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -7210,6 +7293,63 @@
           }
         ],
         "summary": "Update Knowledge Category",
+        "tags": [
+          "knowledge-classification"
+        ]
+      }
+    },
+    "/api/v1/knowledge-categories/{category_id}/migrate-documents": {
+      "post": {
+        "operationId": "migrate_knowledge_category_documents_api_v1_knowledge_categories__category_id__migrate_documents_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "category_id",
+            "required": true,
+            "schema": {
+              "title": "Category Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MigrateCategoryDocumentsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrateCategoryDocumentsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Migrate Knowledge Category Documents",
         "tags": [
           "knowledge-classification"
         ]
@@ -7336,6 +7476,16 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassificationDeleteConflict"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -7408,6 +7558,63 @@
           }
         ],
         "summary": "Update Knowledge Space",
+        "tags": [
+          "knowledge-classification"
+        ]
+      }
+    },
+    "/api/v1/knowledge-spaces/{space_id}/migrate-documents": {
+      "post": {
+        "operationId": "migrate_knowledge_space_documents_api_v1_knowledge_spaces__space_id__migrate_documents_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "title": "Space Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MigrateCategoryDocumentsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrateCategoryDocumentsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Migrate Knowledge Space Documents",
         "tags": [
           "knowledge-classification"
         ]

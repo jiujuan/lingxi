@@ -131,6 +131,22 @@ class KnowledgeCategoryListResponse(BaseModel):
     data: list[KnowledgeCategoryResponse]
 
 
+class ClassificationDeleteConflict(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    resource_type: str = Field(alias="resourceType")
+    resource_id: str = Field(alias="resourceId")
+    document_count: int = Field(alias="documentCount")
+
+
+class MigrateCategoryDocumentsRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    target_space_id: str = Field(alias="targetSpaceId")
+    target_department_id: str = Field(alias="targetDepartmentId")
+    target_category_id: str = Field(alias="targetCategoryId")
+
+
 class DocumentClassificationRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -157,4 +173,15 @@ class DocumentClassificationResponse(BaseModel):
     )
     knowledge_category: NamedClassificationNodeResponse | None = Field(
         alias="knowledgeCategory"
+    )
+
+
+class MigrateCategoryDocumentsResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    source_type: str = Field(alias="sourceType")
+    source_id: str = Field(alias="sourceId")
+    migrated_count: int = Field(alias="migratedCount")
+    target_classification: DocumentClassificationResponse = Field(
+        alias="targetClassification"
     )
