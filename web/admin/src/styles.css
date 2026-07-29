@@ -347,6 +347,14 @@ label {
   flex-wrap: wrap;
 }
 
+.user-filter-actions button {
+  height: 39px;
+}
+
+.user-filter-actions {
+  align-self: end;
+}
+
 .filter-grid {
   display: grid;
   gap: 12px;
@@ -770,6 +778,7 @@ label {
   color: #169265;
   display: inline-flex;
   font-size: 12px;
+  justify-self: start;
   line-height: 1;
   padding: 4px 6px;
 }
@@ -1630,14 +1639,14 @@ pre {
   color: #8a98af;
   font-size: 13px;
   font-weight: 500;
-  min-height: 48px;
+  min-height: 44px;
 }
 
 .logs-table-row {
   border-bottom: 1px solid #edf1f7;
   color: #55657d;
   font-size: 14px;
-  min-height: 76px;
+  min-height: 64px;
 }
 
 .logs-table-row:last-child {
@@ -1931,6 +1940,10 @@ pre {
     minmax(76px, 0.5fr) minmax(130px, 0.8fr);
 }
 
+.api-call-log-list .status-tag {
+  justify-self: start;
+}
+
 .model-provider-list .management-list-head,
 .model-provider-list .management-list-row {
   grid-template-columns: minmax(210px, 1.3fr) minmax(140px, 0.8fr) minmax(130px, 0.8fr)
@@ -1943,6 +1956,11 @@ pre {
     minmax(88px, 0.55fr) minmax(220px, auto);
 }
 
+.model-provider-list .status-tag,
+.model-config-list .status-tag {
+  justify-self: start;
+}
+
 .department-list .management-list-head,
 .department-list .management-list-row {
   grid-template-columns: minmax(220px, 1.35fr) minmax(100px, 0.6fr) minmax(90px, 0.55fr)
@@ -1953,6 +1971,10 @@ pre {
 .user-management-list .management-list-row {
   grid-template-columns: minmax(190px, 1.2fr) minmax(120px, 0.75fr) minmax(130px, 0.8fr)
     minmax(88px, 0.55fr) minmax(150px, 0.85fr) minmax(270px, auto);
+}
+
+.user-management-list .status-tag {
+  justify-self: start;
 }
 
 .observability-row p,

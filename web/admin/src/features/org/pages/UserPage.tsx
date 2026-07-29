@@ -184,7 +184,7 @@ export function UserPage() {
               <option value="DISABLED">禁用</option>
             </select>
           </label>
-          <div className="button-row">
+          <div className="button-row user-filter-actions">
             <button onClick={applyFilters} type="button">
               查询
             </button>
