@@ -56,6 +56,19 @@ SETTINGS = {
     },
 }
 
+AUTH_USER = {
+    "id": "playwright-admin",
+    "email": "admin@lingxi.ai",
+    "name": "管理员",
+    "roles": ["系统管理员"],
+    "permissions": [
+        "DASHBOARD_READ",
+        "LOG_READ",
+        "TASK_RETRY",
+        "SETTING_READ",
+    ],
+}
+
 
 def mock_api(route: Route) -> None:
     path = api_path(route)
@@ -138,12 +151,76 @@ def mock_api(route: Route) -> None:
         )
         return
 
-    if method == "GET" and path in {
-        "/api/v1/logs/model-calls",
-        "/api/v1/logs/api-calls",
-        "/api/v1/logs/audit",
-    }:
-        fulfill_json(route, {"data": [], "pagination": {"page": 1, "pageSize": 20, "totalItems": 0, "totalPages": 0}})
+    if method == "GET" and path == "/api/v1/logs/model-calls":
+        fulfill_json(
+            route,
+            {
+                "data": [
+                    {
+                        "id": "model-log-1",
+                        "providerId": "provider-1",
+                        "providerName": "OpenAI",
+                        "modelConfigId": "model-1",
+                        "modelName": "gpt-5",
+                        "runId": "run-1",
+                        "capability": "CHAT",
+                        "status": "SUCCESS",
+                        "latencyMs": 680,
+                        "tokenUsage": {"total": 120},
+                        "errorCode": None,
+                        "errorMessage": None,
+                        "requestId": "req_model",
+                        "createdAt": "2026-07-05T10:00:00+08:00",
+                    }
+                ],
+                "pagination": {"page": 1, "pageSize": 20, "totalItems": 2, "totalPages": 2},
+            },
+        )
+        return
+
+    if method == "GET" and path == "/api/v1/logs/api-calls":
+        fulfill_json(
+            route,
+            {
+                "data": [
+                    {
+                        "id": "api-log-1",
+                        "keyPrefix": "lx_live",
+                        "path": "/v1/chat/completions",
+                        "method": "POST",
+                        "statusCode": 200,
+                        "latencyMs": 142,
+                        "errorCode": None,
+                        "requestId": "req_api",
+                        "requestMetadata": {},
+                        "createdAt": "2026-07-05T10:00:00+08:00",
+                    }
+                ],
+                "pagination": {"page": 1, "pageSize": 20, "totalItems": 2, "totalPages": 2},
+            },
+        )
+        return
+
+    if method == "GET" and path == "/api/v1/logs/audit":
+        fulfill_json(
+            route,
+            {
+                "data": [
+                    {
+                        "id": "audit-log-1",
+                        "actorId": "admin@lingxi.ai",
+                        "action": "DOCUMENT_DELETE",
+                        "resourceType": "DOCUMENT",
+                        "resourceId": "doc-1",
+                        "beforeSnapshot": {},
+                        "afterSnapshot": None,
+                        "requestId": "req_audit",
+                        "createdAt": "2026-07-05T10:00:00+08:00",
+                    }
+                ],
+                "pagination": {"page": 1, "pageSize": 20, "totalItems": 2, "totalPages": 2},
+            },
+        )
         return
 
     if method == "POST" and path == "/api/v1/task-runs/task-run-1/retry":
@@ -171,7 +248,12 @@ def prepare_page(page: Page) -> list[str]:
     )
     page.route("**/*/api/v1/**", mock_api)
     page.route("**/api/v1/**", mock_api)
-    page.add_init_script("localStorage.setItem('lingxi_access_token', 'playwright-token')")
+    page.add_init_script(
+        f"""
+        localStorage.setItem('lingxi_access_token', 'playwright-token');
+        localStorage.setItem('lingxi_user', JSON.stringify({json_dumps(AUTH_USER)}));
+        """
+    )
     return console_errors
 
 
@@ -193,11 +275,25 @@ def verify_release_pages(page: Page, suffix: str) -> list[str]:
     page.goto(f"{APP_URL}/#logs?requestId=req_failed", wait_until="networkidle")
     expect(page.get_by_role("heading", name="日志与任务排障")).to_be_visible()
     expect(page.get_by_text("parse_document_task").first).to_be_visible()
+    if suffix == "desktop":
+        expect(page.get_by_role("columnheader", name="任务类型")).to_be_visible()
+    expect(page.get_by_text("共 1 条 · 每页 20 条")).to_be_visible()
     page.get_by_role("button", name="详情").first.click()
     expect(page.get_by_role("dialog")).to_be_visible()
     page.get_by_role("button", name="关闭").click()
     page.once("dialog", lambda dialog: dialog.accept())
     page.get_by_role("button", name="重试").first.click()
+    for tab, row_text, first_column in [
+        ("模型调用", "OpenAI", "模型服务"),
+        ("API 调用", "POST /v1/chat/completions", "请求路径"),
+        ("审计日志", "DOCUMENT_DELETE", "审计操作"),
+    ]:
+        page.get_by_role("button", name=tab).click()
+        if suffix == "desktop":
+            expect(page.get_by_role("columnheader", name=first_column)).to_be_visible()
+        expect(page.get_by_text(row_text).first).to_be_visible()
+        expect(page.get_by_text("共 2 条 · 每页 20 条")).to_be_visible()
+        expect(page.get_by_role("button", name="下一页 ›")).to_be_visible()
     assert_no_overflow(page, "Logs")
     page.screenshot(path=str(SCREENSHOT_DIR / f"t17-logs-{suffix}.png"), full_page=True)
 
@@ -233,4 +329,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
