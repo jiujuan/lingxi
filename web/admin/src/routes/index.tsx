@@ -6,6 +6,8 @@ import { ApiKeyPage } from '../features/api-keys/pages/ApiKeyPage';
 import { ChatPage } from '../features/chat/pages/ChatPage';
 import { DashboardPage } from '../features/dashboard/pages/DashboardPage';
 import { DocumentListPage } from '../features/knowledge/pages/DocumentListPage';
+import { DocumentManagementDetailPage } from '../features/knowledge/pages/DocumentManagementDetailPage';
+import { DocumentManagementPage } from '../features/knowledge/pages/DocumentManagementPage';
 import { ImportPage } from '../features/knowledge/pages/ImportPage';
 import { KnowledgeClassificationPage } from '../features/knowledge/pages/KnowledgeClassificationPage';
 import { LogsPage } from '../features/logs/pages/LogsPage';
@@ -140,6 +142,21 @@ const ROUTES: Route[] = [
     label: '知识库中心',
     permission: 'DOCUMENT_READ',
     render: () => <ImportPage />,
+  },
+  {
+    hash: '#document-management',
+    icon: 'document',
+    label: '文档管理',
+    permission: 'DOCUMENT_READ',
+    render: () => <DocumentManagementPage />,
+  },
+  {
+    hash: '#document-management-detail',
+    icon: 'document',
+    label: '文档详情',
+    permission: 'DOCUMENT_READ',
+    render: () => <DocumentManagementDetailPage />,
+    hidden: true,
   },
   {
     hash: '#documents',

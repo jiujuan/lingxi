@@ -17,6 +17,7 @@ type Props = {
   onDelete: (document: KnowledgeDocumentDetail) => void;
   onRetry: (document: KnowledgeDocumentDetail) => void;
   onJobUpdated: (job: ImportJob) => void;
+  hideToolbar?: boolean;
 };
 
 export function DocumentDetailPanel({
@@ -30,6 +31,7 @@ export function DocumentDetailPanel({
   onDelete,
   onRetry,
   onJobUpdated,
+  hideToolbar = false,
 }: Props) {
   if (!detail && loading) {
     return (
@@ -53,42 +55,44 @@ export function DocumentDetailPanel({
 
   return (
     <section className="panel detail-panel">
-      <div className="toolbar-row compact">
-        <div>
-          <p className="eyebrow">
-            {detail.fileType} · {detail.status}
-          </p>
-          <h3>{detail.title}</h3>
-          <p className="muted">{detail.fileName || detail.objectKey}</p>
-        </div>
-        <div className="button-row">
-          <button onClick={onRefresh} type="button">
-            刷新
-          </button>
-          <PermissionGate permission="DOCUMENT_PERMISSION_WRITE">
-            <button onClick={() => onEditPermissions(detail)} type="button">
-              编辑权限
+      {hideToolbar ? null : (
+        <div className="toolbar-row compact">
+          <div>
+            <p className="eyebrow">
+              {detail.fileType} · {detail.status}
+            </p>
+            <h3>{detail.title}</h3>
+            <p className="muted">{detail.fileName || detail.objectKey}</p>
+          </div>
+          <div className="button-row">
+            <button onClick={onRefresh} type="button">
+              刷新
             </button>
-          </PermissionGate>
-          <PermissionGate permission="DOCUMENT_WRITE">
-            <button onClick={() => onEditClassification(detail)} type="button">
-              编辑分类
-            </button>
-          </PermissionGate>
-          {detail.latestJob?.retryable ? (
-            <PermissionGate permission="TASK_RETRY">
-              <button onClick={() => onRetry(detail)} type="button">
-                重试失败阶段
+            <PermissionGate permission="DOCUMENT_PERMISSION_WRITE">
+              <button onClick={() => onEditPermissions(detail)} type="button">
+                编辑权限
               </button>
             </PermissionGate>
-          ) : null}
-          <PermissionGate permission="DOCUMENT_DELETE">
-            <button className="danger-button" onClick={() => onDelete(detail)} type="button">
-              删除
-            </button>
-          </PermissionGate>
+            <PermissionGate permission="DOCUMENT_WRITE">
+              <button onClick={() => onEditClassification(detail)} type="button">
+                编辑分类
+              </button>
+            </PermissionGate>
+            {detail.latestJob?.retryable ? (
+              <PermissionGate permission="TASK_RETRY">
+                <button onClick={() => onRetry(detail)} type="button">
+                  重试失败阶段
+                </button>
+              </PermissionGate>
+            ) : null}
+            <PermissionGate permission="DOCUMENT_DELETE">
+              <button className="danger-button" onClick={() => onDelete(detail)} type="button">
+                删除
+              </button>
+            </PermissionGate>
+          </div>
         </div>
-      </div>
+      )}
 
       {error ? <p className="error">{error}</p> : null}
 
