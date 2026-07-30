@@ -20,6 +20,7 @@ export function KnowledgeClassificationSelect({
   className = '',
   idPrefix = 'knowledge-classification',
   legend = '知识库分类',
+  showReset = true,
   showValidation = required,
 }: KnowledgeClassificationSelectProps) {
   const selection = useKnowledgeClassificationOptions(value ?? defaultValue, {
@@ -143,7 +144,7 @@ export function KnowledgeClassificationSelect({
         </label>
       </div>
 
-      {!required && allowUnclassified ? (
+      {showReset && !required && allowUnclassified ? (
         <div className="button-row">
           <button disabled={selection.isUnclassified} onClick={handleReset} type="button">
             清空分类

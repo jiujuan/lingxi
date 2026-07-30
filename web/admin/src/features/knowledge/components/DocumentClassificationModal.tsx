@@ -65,7 +65,7 @@ export function DocumentClassificationModal({ document, onClose, onSaved }: Prop
     <div className="modal-backdrop" role="presentation">
       <form
         aria-modal="true"
-        className="modal-panel"
+        className="modal-panel document-classification-modal"
         onSubmit={(event) => void handleSubmit(event)}
         role="dialog"
       >
@@ -87,6 +87,7 @@ export function DocumentClassificationModal({ document, onClose, onSaved }: Prop
           idPrefix="document-classification-edit"
           legend="选择新的分类"
           onChange={setValue}
+          showReset={false}
           showValidation
           value={value}
         />

@@ -54,5 +54,6 @@ export type KnowledgeClassificationSelectProps = {
   className?: string;
   idPrefix?: string;
   legend?: string;
+  showReset?: boolean;
   showValidation?: boolean;
 };

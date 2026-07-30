@@ -1208,6 +1208,25 @@ label {
   width: min(640px, 100%);
 }
 
+.document-classification-modal {
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.document-classification-modal .classification-select {
+  min-width: 0;
+  width: 100%;
+}
+
+.document-classification-modal .filter-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.document-classification-modal .filter-grid label {
+  min-width: 0;
+}
+
 .migration-source-summary {
   align-items: center;
   background: #f8fafc;
