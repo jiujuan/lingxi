@@ -14,6 +14,7 @@ import { LogsPage } from '../features/logs/pages/LogsPage';
 import { ModelConfigPage } from '../features/model-config/pages/ModelConfigPage';
 import { DepartmentPage } from '../features/org/pages/DepartmentPage';
 import { UserPage } from '../features/org/pages/UserPage';
+import { RolePage } from '../features/role/pages/RolePage';
 import { SettingsPage } from '../features/settings/pages/SettingsPage';
 
 type Route = {
@@ -37,6 +38,7 @@ type SidebarIconName =
   | 'model'
   | 'department'
   | 'users'
+  | 'role'
   | 'settings';
 
 function SidebarIcon({ name }: { name: SidebarIconName }) {
@@ -116,6 +118,13 @@ function SidebarIcon({ name }: { name: SidebarIconName }) {
         <svg aria-hidden="true" className="sidebar-icon" viewBox="0 0 24 24">
           <circle {...commonProps} cx="9" cy="8" r="3" />
           <path {...commonProps} d="M3 20a6 6 0 0 1 12 0M16 5a3 3 0 0 1 0 6M17 14a5 5 0 0 1 4 5" />
+        </svg>
+      );
+    case 'role':
+      return (
+        <svg aria-hidden="true" className="sidebar-icon" viewBox="0 0 24 24">
+          <path {...commonProps} d="M12 3 19 6v5c0 4.6-2.9 8-7 10-4.1-2-7-5.4-7-10V6z" />
+          <path {...commonProps} d="m9 12 2 2 4-4" />
         </svg>
       );
     case 'settings':
@@ -216,6 +225,13 @@ const ROUTES: Route[] = [
     render: () => <UserPage />,
   },
   {
+    hash: '#roles',
+    icon: 'role',
+    label: '角色管理',
+    permission: 'ROLE_READ',
+    render: () => <RolePage />,
+  },
+  {
     hash: '#settings',
     icon: 'settings',
     label: '系统设置',
@@ -226,9 +242,7 @@ const ROUTES: Route[] = [
 
 export function AppRoutes() {
   const user = currentUser();
-  const visibleRoutes = ROUTES.filter(
-    (route) => !route.hidden && hasPermission(route.permission),
-  );
+  const visibleRoutes = ROUTES.filter((route) => !route.hidden && hasPermission(route.permission));
   const defaultHash = visibleRoutes[0]?.hash ?? '#dashboard';
 
   const [hash, setHash] = useState(window.location.hash || defaultHash);
@@ -273,7 +287,7 @@ export function AppRoutes() {
           </div>
           <div>
             <strong>{user?.name || '管理员'}</strong>
-            <span>{user?.roles[0] || '系统管理员'}</span>
+            <span>角色：{user?.roles[0] || '系统管理员'}</span>
           </div>
         </div>
       </aside>

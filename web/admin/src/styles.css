@@ -1665,7 +1665,8 @@ pre {
   align-items: center;
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(200px, 1.4fr) minmax(88px, 0.65fr) minmax(96px, 0.7fr)
+  grid-template-columns:
+    minmax(200px, 1.4fr) minmax(88px, 0.65fr) minmax(96px, 0.7fr)
     minmax(120px, 0.9fr) minmax(150px, 1fr) minmax(96px, auto);
   padding: 0 20px;
 }
@@ -1972,7 +1973,8 @@ pre {
 
 .api-call-log-list .management-list-head,
 .api-call-log-list .management-list-row {
-  grid-template-columns: minmax(220px, 1.4fr) minmax(110px, 0.75fr) minmax(90px, 0.55fr)
+  grid-template-columns:
+    minmax(220px, 1.4fr) minmax(110px, 0.75fr) minmax(90px, 0.55fr)
     minmax(76px, 0.5fr) minmax(130px, 0.8fr);
 }
 
@@ -1982,13 +1984,15 @@ pre {
 
 .model-provider-list .management-list-head,
 .model-provider-list .management-list-row {
-  grid-template-columns: minmax(210px, 1.3fr) minmax(140px, 0.8fr) minmax(130px, 0.8fr)
+  grid-template-columns:
+    minmax(210px, 1.3fr) minmax(140px, 0.8fr) minmax(130px, 0.8fr)
     minmax(88px, 0.55fr) minmax(220px, auto);
 }
 
 .model-config-list .management-list-head,
 .model-config-list .management-list-row {
-  grid-template-columns: minmax(210px, 1.3fr) minmax(110px, 0.7fr) minmax(100px, 0.65fr)
+  grid-template-columns:
+    minmax(210px, 1.3fr) minmax(110px, 0.7fr) minmax(100px, 0.65fr)
     minmax(88px, 0.55fr) minmax(220px, auto);
 }
 
@@ -1999,13 +2003,15 @@ pre {
 
 .department-list .management-list-head,
 .department-list .management-list-row {
-  grid-template-columns: minmax(220px, 1.35fr) minmax(100px, 0.6fr) minmax(90px, 0.55fr)
+  grid-template-columns:
+    minmax(220px, 1.35fr) minmax(100px, 0.6fr) minmax(90px, 0.55fr)
     minmax(150px, 0.85fr) minmax(120px, auto);
 }
 
 .user-management-list .management-list-head,
 .user-management-list .management-list-row {
-  grid-template-columns: minmax(190px, 1.2fr) minmax(120px, 0.75fr) minmax(130px, 0.8fr)
+  grid-template-columns:
+    minmax(190px, 1.2fr) minmax(120px, 0.75fr) minmax(130px, 0.8fr)
     minmax(88px, 0.55fr) minmax(150px, 0.85fr) minmax(270px, auto);
 }
 
@@ -2386,7 +2392,6 @@ a code {
   font-size: 13px;
 }
 
-
 /* 文档管理：与产品稿一致的紧凑列表视图 */
 .document-management-header,
 .document-management-detail-header {
@@ -2520,7 +2525,9 @@ a code {
 
 .document-management-table .management-list-head,
 .document-management-table .management-list-row {
-  grid-template-columns: minmax(250px, 1.55fr) minmax(140px, 0.9fr) minmax(150px, 1fr) minmax(160px, 1fr) 76px 92px minmax(230px, auto);
+  grid-template-columns:
+    minmax(250px, 1.55fr) minmax(140px, 0.9fr) minmax(150px, 1fr) minmax(160px, 1fr)
+    76px 92px minmax(230px, auto);
   min-width: 1100px;
 }
 
@@ -2753,5 +2760,68 @@ a code {
     align-items: flex-start;
     flex-direction: column;
     gap: 10px;
+  }
+}
+
+.role-management-list .management-list-head,
+.role-management-list .management-list-row {
+  grid-template-columns:
+    minmax(150px, 1.1fr) minmax(135px, 0.9fr) minmax(90px, 0.65fr)
+    minmax(80px, 0.55fr) minmax(72px, 0.5fr) minmax(150px, 0.85fr) minmax(200px, auto);
+}
+
+.role-management-list .management-list-primary .status-tag {
+  justify-self: start;
+  width: fit-content;
+}
+
+.role-form-todo {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  color: #1d4ed8;
+  font-size: 14px;
+  padding: 10px 12px;
+}
+
+@media (max-width: 1280px) {
+  .role-management-page .filter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .role-management-list .management-list-head {
+    display: none;
+  }
+
+  .role-management-list .management-list-row {
+    align-items: start;
+    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-width: 0;
+    padding: 14px 16px;
+  }
+
+  .role-management-list .management-list-primary {
+    grid-column: 1;
+  }
+
+  .role-management-list .management-list-cell {
+    grid-column: 1 / -1;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .role-management-list .management-list-actions {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    justify-content: flex-start;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 680px) {
+  .role-management-list .management-list-row {
+    gap: 6px;
+    padding: 12px;
   }
 }
