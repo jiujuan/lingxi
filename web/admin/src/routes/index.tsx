@@ -139,7 +139,7 @@ const ROUTES: Route[] = [
   {
     hash: '#knowledge',
     icon: 'knowledge',
-    label: '知识库中心',
+    label: '文档解析中心',
     permission: 'DOCUMENT_READ',
     render: () => <ImportPage />,
   },

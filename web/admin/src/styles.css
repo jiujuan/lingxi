@@ -361,6 +361,16 @@ label {
   grid-template-columns: repeat(5, minmax(120px, 1fr));
 }
 
+.upload-panel .classification-select {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+}
+
+.upload-panel .classification-select .filter-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .drop-zone {
   align-items: center;
   border: 1px dashed #a9b8d0;
@@ -2110,7 +2120,8 @@ a code {
   }
 
   .chat-composer,
-  .chat-composer .classification-select .filter-grid {
+  .chat-composer .classification-select .filter-grid,
+  .upload-panel .classification-select .filter-grid {
     grid-template-columns: 1fr;
   }
 
