@@ -666,8 +666,8 @@ label {
   box-sizing: border-box;
   color: #34425c;
   font-size: 14px;
-  height: 30px;
-  min-height: 30px;
+  height: 48px;
+  min-height: 45px;
   padding: 0 18px;
 }
 
@@ -712,7 +712,7 @@ label {
 
 .classification-entity > span:last-child {
   display: grid;
-  gap: 0;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -726,7 +726,6 @@ label {
 
 .classification-entity strong {
   font-size: 14px;
-  line-height: 1.1;
   font-weight: 600;
 }
 
@@ -735,7 +734,6 @@ label {
 .classification-cell-muted {
   color: #7a879c;
   font-size: 12px;
-  line-height: 1.1;
 }
 
 .classification-entity-icon {
@@ -2266,10 +2264,8 @@ a code {
   .classification-department-row,
   .classification-category-row {
     align-items: start;
-    box-sizing: content-box;
     gap: 8px;
     grid-template-columns: minmax(0, 1fr) auto;
-    height: auto;
     min-height: 0;
     padding: 14px 16px;
   }
