@@ -11,7 +11,14 @@ AUTH_USER = {
     "email": "admin@lingxi.ai",
     "name": "管理员",
     "roles": ["系统管理员"],
-    "permissions": ["API_KEY_READ", "MODEL_CONFIG_READ", "USER_READ", "USER_WRITE"],
+    "permissions": [
+        "API_KEY_READ",
+        "MODEL_CONFIG_READ",
+        "USER_READ",
+        "USER_WRITE",
+        "ROLE_READ",
+        "ROLE_WRITE",
+    ],
 }
 
 
@@ -118,6 +125,140 @@ def mock_api(route: Route) -> None:
             },
         )
         return
+
+    if method == "GET" and path == "/api/v1/roles":
+        fulfill_json(
+            route,
+            {
+                "data": [
+                    {
+                        "id": "role-system-admin",
+                        "name": "系统管理员",
+                        "code": "SYSTEM_ADMIN",
+                        "scope": "TENANT",
+                        "isBuiltin": True,
+                        "userCount": 1,
+                        "permissionCount": 4,
+                        "createdAt": "2026-07-29T09:00:00+08:00",
+                    },
+                    {
+                        "id": "role-content-editor",
+                        "name": "内容编辑",
+                        "code": "CONTENT_EDITOR",
+                        "scope": "TENANT",
+                        "isBuiltin": False,
+                        "userCount": 0,
+                        "permissionCount": 2,
+                        "createdAt": "2026-07-29T09:30:00+08:00",
+                    },
+                ],
+                "pagination": {"page": 1, "pageSize": 20, "totalItems": 2, "totalPages": 1},
+            },
+        )
+        return
+
+    if method == "GET" and path == "/api/v1/roles/options":
+        fulfill_json(
+            route,
+            {
+                "data": [
+                    {"id": "role-system-admin", "code": "SYSTEM_ADMIN", "name": "系统管理员"},
+                    {"id": "role-content-editor", "code": "CONTENT_EDITOR", "name": "内容编辑"},
+                ]
+            },
+        )
+        return
+
+    if method == "GET" and path == "/api/v1/roles/available-permissions":
+        fulfill_json(
+            route,
+            {
+                "data": [
+                    {
+                        "id": "permission-role-read",
+                        "code": "ROLE_READ",
+                        "module": "ROLE",
+                        "action": "READ",
+                        "description": "查看角色",
+                    },
+                    {
+                        "id": "permission-role-write",
+                        "code": "ROLE_WRITE",
+                        "module": "ROLE",
+                        "action": "WRITE",
+                        "description": "管理角色",
+                    },
+                    {
+                        "id": "permission-user-read",
+                        "code": "USER_READ",
+                        "module": "USER",
+                        "action": "READ",
+                        "description": "查看用户",
+                    },
+                ]
+            },
+        )
+        return
+
+    if method == "GET" and path.startswith("/api/v1/roles/"):
+        role_id = path.removeprefix("/api/v1/roles/")
+        role = {
+            "role-system-admin": {
+                "id": "role-system-admin",
+                "name": "系统管理员",
+                "code": "SYSTEM_ADMIN",
+                "scope": "TENANT",
+                "isBuiltin": True,
+                "userCount": 1,
+                "permissionCount": 4,
+                "createdAt": "2026-07-29T09:00:00+08:00",
+                "permissions": [
+                    {
+                        "id": "permission-role-read",
+                        "code": "ROLE_READ",
+                        "module": "ROLE",
+                        "action": "READ",
+                        "description": "查看角色",
+                    },
+                    {
+                        "id": "permission-role-write",
+                        "code": "ROLE_WRITE",
+                        "module": "ROLE",
+                        "action": "WRITE",
+                        "description": "管理角色",
+                    },
+                ],
+            },
+            "role-content-editor": {
+                "id": "role-content-editor",
+                "name": "内容编辑",
+                "code": "CONTENT_EDITOR",
+                "scope": "TENANT",
+                "isBuiltin": False,
+                "userCount": 0,
+                "permissionCount": 2,
+                "createdAt": "2026-07-29T09:30:00+08:00",
+                "permissions": [
+                    {
+                        "id": "permission-role-read",
+                        "code": "ROLE_READ",
+                        "module": "ROLE",
+                        "action": "READ",
+                        "description": "查看角色",
+                    },
+                    {
+                        "id": "permission-user-read",
+                        "code": "USER_READ",
+                        "module": "USER",
+                        "action": "READ",
+                        "description": "查看用户",
+                    },
+                ],
+            },
+        }.get(role_id)
+        if role is not None:
+            fulfill_json(route, role)
+            return
 
     if method == "GET" and path == "/api/v1/users":
         fulfill_json(
@@ -231,6 +372,16 @@ def verify_admin_lists(page: Page, suffix: str) -> list[str]:
         expect(page.get_by_role("columnheader", name="用户")).to_be_visible()
     expect(page.get_by_role("button", name="编辑").first).to_be_visible()
     assert_no_overflow(page, "用户管理")
+
+    page.goto(f"{APP_URL}/#roles", wait_until="networkidle")
+    expect(page.get_by_role("heading", name="角色列表")).to_be_visible()
+    expect(page.get_by_text("系统管理员", exact=True)).to_be_visible()
+    expect(page.get_by_text("内置", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="查看").first).to_be_visible()
+    expect(page.get_by_role("button", name="编辑").first).to_be_visible()
+    if suffix == "desktop":
+        expect(page.get_by_role("columnheader", name="角色")).to_be_visible()
+    assert_no_overflow(page, "角色管理")
 
     return errors
 
