@@ -192,6 +192,7 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
         allowUnclassified
         disabled={busy}
         onChange={handleClassificationChange}
+        showReset={false}
         showValidation
         value={classificationValue}
       />
