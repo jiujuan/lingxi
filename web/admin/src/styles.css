@@ -2592,6 +2592,11 @@ a code {
   color: #55657d;
 }
 
+.document-management-table .status-tag {
+  justify-self: start;
+  width: fit-content;
+}
+
 .document-management-actions {
   gap: 2px;
   justify-content: flex-start;
