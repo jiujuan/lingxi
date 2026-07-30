@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from server.app.db.base import Base, IdMixin, TimestampMixin
@@ -13,6 +13,9 @@ class Role(IdMixin, TimestampMixin, Base):
     code: Mapped[str] = mapped_column(String(80), nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     scope: Mapped[str] = mapped_column(String(32), default="TENANT")
+    is_builtin: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
 
     __table_args__ = (UniqueConstraint("tenant_id", "code"),)
 

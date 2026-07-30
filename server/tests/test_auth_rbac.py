@@ -70,6 +70,54 @@ def test_password_hash_is_not_stored_as_plaintext():
     assert admin.password_hash.startswith("$2b$")
 
 
+def test_existing_seed_role_repair_does_not_commit_caller_work():
+    from server.app.db.base import Base
+    from server.app.models.role import Role
+    from server.app.models.user import Department
+    from server.app.services.seed_service import seed_identity_data
+
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(bind=engine)
+
+    with SessionLocal() as session:
+        identity = seed_identity_data(session)
+        employee_role = identity["roles"]["employee"]
+        employee_role.is_builtin = False
+        session.commit()
+
+    with SessionLocal() as session:
+        tenant = seed_identity_data(session)["tenant"]
+        session.add(
+            Department(tenant_id=tenant.id, name="Pending", code="PENDING")
+        )
+        assert session.scalar(
+            select(Role.is_builtin).where(Role.code == "EMPLOYEE")
+        ) is True
+        session.rollback()
+
+    with SessionLocal() as session:
+        assert session.scalar(
+            select(Role.is_builtin).where(Role.code == "EMPLOYEE")
+        ) is False
+        assert session.scalar(
+            select(Department).where(Department.code == "PENDING")
+        ) is None
+
+    with SessionLocal() as session:
+        seed_identity_data(session)
+        session.commit()
+
+    with SessionLocal() as session:
+        assert session.scalar(
+            select(Role.is_builtin).where(Role.code == "EMPLOYEE")
+        ) is True
+
+
 def test_protected_endpoint_returns_403_when_permission_is_missing():
     client, _ = build_test_client()
 

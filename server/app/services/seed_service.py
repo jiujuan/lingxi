@@ -35,6 +35,9 @@ SYSTEM_PERMISSIONS = [
     "AUDIT_READ",
 ]
 
+BUILTIN_ROLE_CODES = ("SYSTEM_ADMIN", "KNOWLEDGE_ADMIN", "EMPLOYEE")
+
+
 ROLE_PERMISSION_MAP = {
     "SYSTEM_ADMIN": SYSTEM_PERMISSIONS,
     "KNOWLEDGE_ADMIN": [
@@ -55,6 +58,15 @@ ROLE_PERMISSION_MAP = {
 def seed_identity_data(session: Session) -> dict:
     existing = session.scalar(select(Tenant).where(Tenant.name == settings.seed_tenant_name))
     if existing:
+        builtin_roles = session.scalars(
+            select(Role).where(
+                Role.tenant_id == existing.id,
+                Role.code.in_(BUILTIN_ROLE_CODES),
+            )
+        )
+        for role in builtin_roles:
+            role.is_builtin = True
+        session.flush()
         return _identity_snapshot(session, existing)
 
     tenant = Tenant(name=settings.seed_tenant_name)
@@ -76,12 +88,23 @@ def seed_identity_data(session: Session) -> dict:
 
     roles = {
         "system_admin": Role(
-            tenant_id=tenant.id, code="SYSTEM_ADMIN", name="系统管理员"
+            tenant_id=tenant.id,
+            code="SYSTEM_ADMIN",
+            name="系统管理员",
+            is_builtin=True,
         ),
         "knowledge_admin": Role(
-            tenant_id=tenant.id, code="KNOWLEDGE_ADMIN", name="知识库管理员"
+            tenant_id=tenant.id,
+            code="KNOWLEDGE_ADMIN",
+            name="知识库管理员",
+            is_builtin=True,
         ),
-        "employee": Role(tenant_id=tenant.id, code="EMPLOYEE", name="员工"),
+        "employee": Role(
+            tenant_id=tenant.id,
+            code="EMPLOYEE",
+            name="员工",
+            is_builtin=True,
+        ),
     }
     session.add_all(roles.values())
     session.flush()
