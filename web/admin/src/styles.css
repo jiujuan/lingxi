@@ -1218,6 +1218,41 @@ label {
   width: min(640px, 100%);
 }
 
+.role-form-modal {
+  max-height: calc(100vh - 40px);
+  max-width: 680px;
+  overflow-y: auto;
+  width: min(680px, 100%);
+}
+
+.role-permission-groups {
+  display: grid;
+  gap: 10px;
+}
+
+.role-permission-group {
+  border: 1px solid #e4e9f2;
+  border-radius: 6px;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+  padding: 10px 12px 12px;
+}
+
+.role-permission-group legend {
+  color: #526071;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 4px;
+}
+
+.role-permission-group .checkbox-row span {
+  color: #526071;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
 .document-classification-modal {
   box-sizing: border-box;
   max-width: 640px;

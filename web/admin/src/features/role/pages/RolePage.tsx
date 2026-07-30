@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { errorMessage } from '../../../api/client';
 import { queryKeys } from '../../../api/queryClient';
 import { hasPermission } from '../../../auth/authStore';
 import { formatDateTime } from '../../../shared/format';
 import { EditIcon, TrashIcon } from '../../../shared/ManagementListIcons';
+import { RoleFormModal } from '../components/RoleFormModal';
 import { deleteRole, listRoles } from '../api/roleApi';
 import type { Pagination, Role, RoleListFilters } from '../types';
 
@@ -16,6 +17,7 @@ const INITIAL_FILTERS: RoleListFilters = {
 };
 
 type PendingForm = {
+  instanceId: number;
   mode: 'create' | 'edit' | 'view';
   role: Role | null;
 };
@@ -26,6 +28,7 @@ export function RolePage() {
   const [filters, setFilters] = useState<RoleListFilters>(INITIAL_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<RoleListFilters>(INITIAL_FILTERS);
   const [pendingForm, setPendingForm] = useState<PendingForm | null>(null);
+  const nextFormInstanceId = useRef(0);
 
   const rolesQuery = useQuery({
     queryKey: ['roles', appliedFilters],
@@ -59,8 +62,21 @@ export function RolePage() {
   }
 
   function requestForm(mode: PendingForm['mode'], role: Role | null) {
-    // TODO(Task 6): Replace this explicit placeholder with RoleFormModal.
-    setPendingForm({ mode, role });
+    nextFormInstanceId.current += 1;
+    setPendingForm({ instanceId: nextFormInstanceId.current, mode, role });
+  }
+
+  function closeForm(instanceId: number) {
+    setPendingForm((current) =>
+      current?.instanceId === instanceId ? null : current,
+    );
+  }
+
+  async function refreshRoles() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['roles'] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.roleOptions() }),
+    ]);
   }
 
   function remove(role: Role) {
@@ -87,15 +103,6 @@ export function RolePage() {
       ) : null}
       {deleteMutation.error ? (
         <div className="error-box">{errorMessage(deleteMutation.error, '删除角色失败')}</div>
-      ) : null}
-      {pendingForm ? (
-        <div aria-live="polite" className="role-form-todo">
-          {pendingForm.mode === 'create'
-            ? '角色新建表单将在后续任务中实现。'
-            : `${pendingForm.role?.name ?? '该角色'}的${
-                pendingForm.mode === 'view' ? '查看' : '编辑'
-              }表单将在后续任务中实现。`}
-        </div>
       ) : null}
       <section className="panel filter-bar">
         <div className="filter-grid">
@@ -191,6 +198,14 @@ export function RolePage() {
         </div>
         {pagination ? <RolePagination onChange={changePage} pagination={pagination} /> : null}
       </section>
+      {pendingForm ? (
+        <RoleFormModal
+          mode={pendingForm.mode}
+          onClose={() => closeForm(pendingForm.instanceId)}
+          onSaved={refreshRoles}
+          roleId={pendingForm.role?.id}
+        />
+      ) : null}
     </div>
   );
 }
