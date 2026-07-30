@@ -663,10 +663,12 @@ label {
 
 .classification-list-row {
   border-bottom: 1px solid #edf1f7;
+  box-sizing: border-box;
   color: #34425c;
   font-size: 14px;
-  min-height: 70px;
-  padding: 8px 18px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 18px;
 }
 
 .classification-list-row:last-child {
@@ -710,7 +712,7 @@ label {
 
 .classification-entity > span:last-child {
   display: grid;
-  gap: 3px;
+  gap: 0;
   min-width: 0;
 }
 
@@ -724,6 +726,7 @@ label {
 
 .classification-entity strong {
   font-size: 14px;
+  line-height: 1.1;
   font-weight: 600;
 }
 
@@ -732,6 +735,7 @@ label {
 .classification-cell-muted {
   color: #7a879c;
   font-size: 12px;
+  line-height: 1.1;
 }
 
 .classification-entity-icon {
@@ -2262,8 +2266,10 @@ a code {
   .classification-department-row,
   .classification-category-row {
     align-items: start;
+    box-sizing: content-box;
     gap: 8px;
     grid-template-columns: minmax(0, 1fr) auto;
+    height: auto;
     min-height: 0;
     padding: 14px 16px;
   }
