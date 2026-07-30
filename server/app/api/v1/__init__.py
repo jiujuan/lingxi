@@ -13,6 +13,7 @@ from server.app.api.v1 import (
     logs,
     model_config,
     query_runs,
+    roles,
     settings,
     task_runs,
     users,
@@ -23,6 +24,7 @@ api_router.include_router(auth.router)
 api_router.include_router(api_keys.router)
 api_router.include_router(departments.router)
 api_router.include_router(users.router)
+api_router.include_router(roles.router)
 api_router.include_router(model_config.router)
 api_router.include_router(import_jobs.router)
 api_router.include_router(knowledge_categories.router)

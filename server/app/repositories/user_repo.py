@@ -89,28 +89,3 @@ class UserRepository:
         self.session.execute(sa_delete(UserRole).where(UserRole.user_id == user.id))
         self.session.delete(user)
         self.session.flush()
-
-
-class RoleRepository:
-    def __init__(self, session: Session) -> None:
-        self.session = session
-
-    def list_for_tenant(self, tenant_id: str) -> list[Role]:
-        return list(
-            self.session.scalars(
-                select(Role)
-                .where(Role.tenant_id == tenant_id)
-                .order_by(Role.code)
-            ).all()
-        )
-
-    def list_by_ids(self, tenant_id: str, role_ids: list[str]) -> list[Role]:
-        if not role_ids:
-            return []
-        return list(
-            self.session.scalars(
-                select(Role).where(
-                    Role.tenant_id == tenant_id, Role.id.in_(role_ids)
-                )
-            ).all()
-        )

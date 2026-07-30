@@ -34,8 +34,8 @@ export function deleteDepartment(departmentId: string) {
   });
 }
 
-export function listRoles() {
-  return apiRequest<{ data: Role[] }>('/api/v1/roles');
+export function listRoleOptions() {
+  return apiRequest<{ data: Role[] }>('/api/v1/roles/options');
 }
 
 export function listUsers(filters: UserListFilters) {

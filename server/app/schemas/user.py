@@ -45,10 +45,6 @@ class RoleResponse(BaseModel):
     name: str
 
 
-class RoleListResponse(BaseModel):
-    data: list[RoleResponse]
-
-
 class AdminUserResponse(BaseModel):
     """Response for 用户管理 endpoints; named to avoid clashing with auth.UserResponse."""
 

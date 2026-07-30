@@ -6,7 +6,6 @@ from server.app.db.session import get_db
 from server.app.schemas.common import OkResponse
 from server.app.schemas.user import (
     AdminUserResponse,
-    RoleListResponse,
     UserCreateRequest,
     UserListResponse,
     UserResetPasswordRequest,
@@ -35,19 +34,6 @@ def list_users(
         page=page,
         page_size=page_size,
     )
-
-
-@router.get("/roles", response_model=RoleListResponse)
-def list_roles(
-    context: AccessContext = Depends(require_permission("ROLE_READ")),
-    db: Session = Depends(get_db),
-) -> dict:
-    return {
-        "data": [
-            {"id": role.id, "code": role.code, "name": role.name}
-            for role in UserAdminService(db).list_roles(context)
-        ]
-    }
 
 
 @router.post("/users", response_model=AdminUserResponse)

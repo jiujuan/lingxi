@@ -12,7 +12,7 @@ import {
   disableUser,
   enableUser,
   listDepartments,
-  listRoles,
+  listRoleOptions,
   listUsers,
   resetUserPassword,
   updateUser,
@@ -55,8 +55,8 @@ export function UserPage() {
     queryFn: listDepartments,
   });
   const rolesQuery = useQuery({
-    queryKey: queryKeys.roles(),
-    queryFn: listRoles,
+    queryKey: queryKeys.roleOptions(),
+    queryFn: listRoleOptions,
     enabled: canReadRoles,
   });
 

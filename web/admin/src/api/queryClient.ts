@@ -39,6 +39,7 @@ export const queryKeys = {
   departments: () => ['departments'] as const,
   users: (filters: unknown) => ['users', filters] as const,
   roles: () => ['roles'] as const,
+  roleOptions: () => ['role-options'] as const,
   modelProviders: () => ['model-providers'] as const,
   modelConfigs: () => ['model-configs'] as const,
   taskRunLogs: (filters: unknown) => ['logs', 'tasks', filters] as const,

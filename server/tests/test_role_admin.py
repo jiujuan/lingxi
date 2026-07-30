@@ -11,7 +11,9 @@ def test_role_list_detail_and_permission_catalog():
     admin = next(item for item in listed.json()["data"] if item["code"] == "SYSTEM_ADMIN")
     assert admin["isBuiltin"] is True
     assert admin["scope"] == "TENANT"
-    assert admin["userCount"] >= 1
+    # The system admin has one user but many permissions; a join that
+    # multiplies association rows would incorrectly return a larger count.
+    assert admin["userCount"] == 1
     assert admin["permissionCount"] > 0
 
     detail = client.get(f"/api/v1/roles/{admin['id']}", headers=headers)
@@ -139,6 +141,7 @@ def test_role_endpoints_require_role_permissions():
     }
 
     assert client.get("/api/v1/roles", headers=employee_headers).status_code == 403
+    assert client.get("/api/v1/roles/options", headers=employee_headers).status_code == 403
     assert (
         client.post(
             "/api/v1/roles",
@@ -147,3 +150,190 @@ def test_role_endpoints_require_role_permissions():
         ).status_code
         == 403
     )
+
+
+def test_role_rejects_blank_name_and_unknown_permissions():
+    client, _ = build_test_client()
+    headers = login_admin(client)
+
+    blank_name = client.post(
+        "/api/v1/roles",
+        headers=headers,
+        json={"name": "   ", "code": "BLANK_NAME", "permissionIds": []},
+    )
+    assert blank_name.status_code == 422
+
+    trimmed_name = client.post(
+        "/api/v1/roles",
+        headers=headers,
+        json={"name": "  名称已修剪  ", "code": "TRIMMED_NAME", "permissionIds": []},
+    )
+    assert trimmed_name.status_code == 200
+    assert trimmed_name.json()["name"] == "名称已修剪"
+
+    unknown_permission = client.post(
+        "/api/v1/roles",
+        headers=headers,
+        json={
+            "name": "无效权限角色",
+            "code": "UNKNOWN_PERMISSION",
+            "permissionIds": ["missing-permission-id"],
+        },
+    )
+    assert unknown_permission.status_code == 400
+    assert unknown_permission.json()["error"]["code"] == "PERMISSION_NOT_FOUND"
+
+
+def test_role_operations_hide_other_tenant_roles():
+    from server.app.models.role import Role
+    from server.app.models.user import Tenant
+
+    client, SessionLocal = build_test_client()
+    headers = login_admin(client)
+
+    with SessionLocal() as session:
+        other_tenant = Tenant(name="Other Tenant")
+        session.add(other_tenant)
+        session.flush()
+        other_role = Role(
+            tenant_id=other_tenant.id,
+            name="Other Tenant Role",
+            code="OTHER_TENANT_ROLE",
+        )
+        session.add(other_role)
+        session.commit()
+        other_role_id = other_role.id
+
+    assert client.get(f"/api/v1/roles/{other_role_id}", headers=headers).status_code == 404
+    assert (
+        client.put(
+            f"/api/v1/roles/{other_role_id}",
+            headers=headers,
+            json={
+                "name": "Attempted Update",
+                "code": "OTHER_TENANT_ROLE",
+                "permissionIds": [],
+            },
+        ).status_code
+        == 404
+    )
+    assert client.delete(f"/api/v1/roles/{other_role_id}", headers=headers).status_code == 404
+
+
+def test_role_database_integrity_conflicts_are_mapped(monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+
+    from server.app.repositories.role_repo import RoleRepository
+
+    client, _ = build_test_client()
+    headers = login_admin(client)
+
+    monkeypatch.setattr(
+        RoleRepository,
+        "get_by_code",
+        lambda _self, _tenant_id, _code: None,
+    )
+    create_conflict = client.post(
+        "/api/v1/roles",
+        headers=headers,
+        json={
+            "name": "数据库冲突",
+            "code": "SYSTEM_ADMIN",
+            "permissionIds": [],
+        },
+    )
+    assert create_conflict.status_code == 409
+    assert create_conflict.json()["error"]["code"] == "ROLE_CODE_EXISTS"
+    assert create_conflict.json()["error"]["message"] == "该角色编码已存在"
+
+    monkeypatch.undo()
+    custom_role = client.post(
+        "/api/v1/roles",
+        headers=headers,
+        json={"name": "可更新角色", "code": "UPDATABLE", "permissionIds": []},
+    ).json()
+    monkeypatch.setattr(
+        RoleRepository,
+        "get_by_code",
+        lambda _self, _tenant_id, _code: None,
+    )
+    update_conflict = client.put(
+        f"/api/v1/roles/{custom_role['id']}",
+        headers=headers,
+        json={
+            "name": "更新后冲突",
+            "code": "SYSTEM_ADMIN",
+            "permissionIds": [],
+        },
+    )
+    assert update_conflict.status_code == 409
+    assert update_conflict.json()["error"]["code"] == "ROLE_CODE_EXISTS"
+    assert update_conflict.json()["error"]["message"] == "该角色编码已存在"
+
+    monkeypatch.undo()
+    deletable_role = client.post(
+        "/api/v1/roles",
+        headers=headers,
+        json={"name": "删除冲突", "code": "DELETE_CONFLICT", "permissionIds": []},
+    ).json()
+
+    def raise_integrity_error(_self, _role):
+        raise IntegrityError("DELETE FROM roles", {}, RuntimeError("foreign key"))
+
+    monkeypatch.setattr(RoleRepository, "delete_if_unassigned", raise_integrity_error)
+    delete_conflict = client.delete(
+        f"/api/v1/roles/{deletable_role['id']}", headers=headers
+    )
+    assert delete_conflict.status_code == 409
+    assert delete_conflict.json()["error"]["code"] == "ROLE_HAS_USERS"
+    assert delete_conflict.json()["error"]["message"] == "请先解除关联用户后再删除"
+
+
+def test_role_options_are_unpaginated_and_tenant_scoped_for_user_assignment():
+    from server.app.models.role import Role
+    from server.app.models.user import Tenant
+
+    client, SessionLocal = build_test_client()
+    headers = login_admin(client)
+    option_codes = {f"ASSIGNMENT_OPTION_{index:02d}" for index in range(25)}
+
+    with SessionLocal() as session:
+        tenant_id = (
+            session.query(Role.tenant_id)
+            .filter(Role.code == "SYSTEM_ADMIN")
+            .scalar()
+        )
+        session.add_all(
+            [
+                Role(
+                    tenant_id=tenant_id,
+                    name=f"分配选项角色 {index}",
+                    code=code,
+                )
+                for index, code in enumerate(sorted(option_codes))
+            ]
+        )
+        other_tenant = Tenant(name="Role Options Other Tenant")
+        session.add(other_tenant)
+        session.flush()
+        session.add(
+            Role(
+                tenant_id=other_tenant.id,
+                name="跨租户角色",
+                code="OTHER_TENANT_OPTION",
+            )
+        )
+        session.commit()
+
+    options = client.get("/api/v1/roles/options", headers=headers)
+    assert options.status_code == 200
+    option_data = options.json()["data"]
+    assert option_codes <= {item["code"] for item in option_data}
+    assert "OTHER_TENANT_OPTION" not in {item["code"] for item in option_data}
+    assert all(set(item) == {"id", "code", "name"} for item in option_data)
+    assert "pagination" not in options.json()
+
+    paginated = client.get("/api/v1/roles", headers=headers)
+    assert paginated.status_code == 200
+    assert len(paginated.json()["data"]) == 20
+    assert paginated.json()["pagination"]["totalItems"] >= len(option_codes) + 3

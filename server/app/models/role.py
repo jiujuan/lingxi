@@ -27,7 +27,7 @@ class UserRole(Base):
         String(36), ForeignKey("users.id"), primary_key=True
     )
     role_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("roles.id"), primary_key=True
+        String(36), ForeignKey("roles.id"), primary_key=True, index=True
     )
 
 

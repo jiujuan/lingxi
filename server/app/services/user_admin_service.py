@@ -10,7 +10,8 @@ from server.app.models.logs import AuditLog
 from server.app.models.role import Role
 from server.app.models.user import User
 from server.app.repositories.department_repo import DepartmentRepository
-from server.app.repositories.user_repo import RoleRepository, UserRepository
+from server.app.repositories.role_repo import RoleRepository
+from server.app.repositories.user_repo import UserRepository
 
 
 class UserAdminService:
