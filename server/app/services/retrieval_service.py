@@ -28,6 +28,7 @@ from server.app.schemas.retrieval import (
     RetrievalEvidence,
     RetrievalResult,
 )
+from server.app.services.context_hydration_service import ContextHydrationService
 from server.app.services.embedding_service import EmbeddingService
 from server.app.services.rerank_service import RerankService
 
@@ -58,6 +59,8 @@ class RetrievalService:
         *,
         hybrid_chunk_retrieval_enabled: bool = False,
         rrf_channel_weights: Mapping[str, float] | None = None,
+        parent_context_enabled: bool = False,
+        context_hydration_service: ContextHydrationService | None = None,
     ) -> None:
         self.session = session
         self.config = config or get_retrieval_config()
@@ -67,6 +70,11 @@ class RetrievalService:
         self._build_adapter = provider_factory
         self.hybrid_chunk_retrieval_enabled = hybrid_chunk_retrieval_enabled
         self.rrf_channel_weights = self._normalize_channel_weights(rrf_channel_weights)
+        self.parent_context_enabled = parent_context_enabled
+        # Keep legacy/QA-only startup independent from the optional hierarchy
+        # tokenizer.  The hydration service is created only if this feature is
+        # actually enabled (or explicitly injected for tests/DI).
+        self.context_hydration_service = context_hydration_service
 
     def retrieve(
         self,
@@ -112,6 +120,25 @@ class RetrievalService:
             )
 
         reranked = self.reranker.rerank(question, fused)[: self.config.final_top_k]
+        if self.hybrid_chunk_retrieval_enabled and self.parent_context_enabled:
+            try:
+                hydrator = self.context_hydration_service or ContextHydrationService(
+                    self.session
+                )
+                reranked = hydrator.hydrate(context, reranked, access_scope)
+            except Exception:
+                # Hydration only enriches a winning Child.  Its failure must
+                # never change retrieval/citation identity or turn a usable
+                # result into an outage; PromptService will use Child-only.
+                logger.exception(
+                    "context hydration failed; using child-only evidence",
+                    extra={
+                        "tenant_id": context.tenant_id,
+                        "request_id": current_request_id(),
+                    },
+                )
+                for candidate in reranked:
+                    candidate._lingxi_context_segments = ()
         confidence = reranked[0].rerank_score if reranked else 0.0
         has_answer = bool(reranked and confidence >= self.config.low_confidence_threshold)
         snapshot["stages"]["rerank"] = [

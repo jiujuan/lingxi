@@ -332,3 +332,96 @@ def test_citation_source_requires_current_document_permission_but_deleted_snapsh
     assert source.status_code == 200
     assert source.json()["documentDeleted"] is True
     assert source.json()["quote"] == "退款需要主管审批。"
+
+
+def test_prompt_keeps_child_evidence_and_citation_metadata_separate_from_hydrated_parent_context():
+    from dataclasses import dataclass
+
+    from server.app.schemas.retrieval import RetrievalCandidate
+    from server.app.services.context_hydration_service import HydratedContextSegment
+    from server.app.services.prompt_service import PromptService
+
+    @dataclass(frozen=True)
+    class WordCounter:
+        name: str = "word-fixture"
+        version: str = "1.0"
+
+        def count(self, text: str) -> int:
+            return len(text.split())
+
+        def split_by_token_limit(self, text: str, limit: int) -> list[str]:
+            words = text.split()
+            return [" ".join(words[index : index + limit]) for index in range(0, len(words), limit)]
+
+    high = RetrievalCandidate(
+        qa_pair_id=None, document_id="doc", question="高分", answer="高分 Child 证据",
+        quote="高分 Child 精确引用", page_no=1, pair_index=1, evidence_id="high",
+        evidence_type="CHUNK", chunk_id="child-high", parent_chunk_id="parent-high",
+        content="高分 Child 证据", fused_score=0.9,
+    )
+    low = RetrievalCandidate(
+        qa_pair_id=None, document_id="doc", question="低分", answer="低分 Child 证据",
+        quote="低分 Child 精确引用", page_no=2, pair_index=2, evidence_id="low",
+        evidence_type="CHUNK", chunk_id="child-low", parent_chunk_id="parent-low",
+        content="低分 Child 证据", fused_score=0.1,
+    )
+    high._lingxi_context_segments = (
+        HydratedContextSegment("PARENT", "低分 Parent 补充上下文", "parent-high", "child-high"),
+    )
+    low._lingxi_context_segments = ()
+
+    prompt = PromptService(token_counter=WordCounter(), context_max_tokens=200).build_chat_prompt(
+        "退款怎么审批", [low, high]
+    )
+
+    assert "Evidence（用于回答）" in prompt
+    assert "Citation metadata（仅引用 Child）" in prompt
+    assert "Supplemental context（仅补充上下文，不单独引用）" in prompt
+    assert prompt.index("高分 Child 证据") < prompt.index("低分 Child 证据") < prompt.index("低分 Parent 补充上下文")
+    assert "child-high" in prompt
+
+    bounded = PromptService(token_counter=WordCounter(), context_max_tokens=20).build_chat_prompt(
+        "退款怎么审批", [low, high]
+    )
+    bounded_context = bounded.split("<<<REFERENCES\n", 1)[1].split("\nREFERENCES>>>", 1)[0]
+    assert WordCounter().count(bounded_context) <= 20
+    assert "低分 Parent 补充上下文" not in bounded_context
+
+
+
+def test_prompt_counts_reference_separators_and_stops_when_next_high_score_evidence_would_overflow():
+    from dataclasses import dataclass
+
+    from server.app.schemas.retrieval import RetrievalCandidate
+    from server.app.services.prompt_service import PromptService
+
+    @dataclass(frozen=True)
+    class SeparatorAwareCounter:
+        name: str = "separator-aware"
+        version: str = "1.0"
+
+        def count(self, text: str) -> int:
+            return (1 if text else 0) + text.count("\n\n") * 10
+
+        def split_by_token_limit(self, text: str, limit: int) -> list[str]:
+            return [text]
+
+    high = RetrievalCandidate(
+        qa_pair_id=None, document_id="doc", question="高分", answer="高分 evidence",
+        quote="高分引用", page_no=1, pair_index=1, evidence_id="high", evidence_type="CHUNK",
+        chunk_id="high", content="高分 evidence", fused_score=0.9,
+    )
+    low = RetrievalCandidate(
+        qa_pair_id=None, document_id="doc", question="低分", answer="低分 evidence",
+        quote="低分引用", page_no=1, pair_index=2, evidence_id="low", evidence_type="CHUNK",
+        chunk_id="low", content="低分 evidence", fused_score=0.1,
+    )
+
+    prompt = PromptService(
+        token_counter=SeparatorAwareCounter(), context_max_tokens=2
+    ).build_chat_prompt("问题", [low, high])
+    context = prompt.split("<<<REFERENCES\n", 1)[1].split("\nREFERENCES>>>", 1)[0]
+
+    assert "高分 evidence" in context
+    assert "低分 evidence" not in context
+    assert SeparatorAwareCounter().count(context) <= 2
