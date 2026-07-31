@@ -1,3 +1,4 @@
+import pytest
 from sqlalchemy import select
 
 from server.tests.test_auth_rbac import build_test_client
@@ -56,6 +57,97 @@ def test_query_run_citations_source_and_explanation_are_authorized():
     assert body["stages"]["text"]
     assert body["stages"]["rrf"]
     assert body["stages"]["rerank"]
+
+
+def test_chunk_citation_snapshot_resolves_the_exact_chunk_source():
+    from server.app.models.chat import QueryCitation
+    from server.app.models.qa_pair import DocumentChunk
+
+    client, SessionLocal = build_test_client()
+    _seed_chat_data(SessionLocal)
+    employee_headers = login_employee(client)
+    _run_id, citation_id = _create_answer_with_citation(client, employee_headers)
+
+    with SessionLocal() as session:
+        citation = session.get(QueryCitation, citation_id)
+        assert citation is not None
+        chunk = DocumentChunk(
+            tenant_id=citation.tenant_id,
+            document_id=citation.document_id,
+            chunk_index=44,
+            title_path=["退款", "审批"],
+            content="纯 Chunk 引用应当返回这一段原文。",
+            page_start=7,
+            page_end=7,
+            source_locator={"block": "refund-44", "source_rel_start": 10},
+            source_locators=[{"block": "refund-44", "source_rel_start": 10}],
+            status="ACTIVE",
+            chunk_level="CHILD",
+        )
+        session.add(chunk)
+        session.flush()
+        citation.qa_pair_id = None
+        citation.snapshot = {**citation.snapshot, "chunkId": chunk.id, "pageNo": 7}
+        session.commit()
+
+    source = client.get(f"/api/v1/citations/{citation_id}/source", headers=employee_headers)
+
+    assert source.status_code == 200
+    assert source.json()["sourceText"] == "纯 Chunk 引用应当返回这一段原文。"
+    assert source.json()["sourceLocator"] == {"block": "refund-44", "source_rel_start": 10}
+    assert source.json()["pageNo"] == 7
+
+
+@pytest.mark.parametrize("mismatch", ["tenant", "document"])
+def test_chunk_citation_snapshot_rejects_cross_tenant_or_document_source(mismatch):
+    from server.app.models.chat import QueryCitation
+    from server.app.models.document import Document, DocumentStatus
+    from server.app.models.qa_pair import DocumentChunk
+
+    client, SessionLocal = build_test_client()
+    _seed_chat_data(SessionLocal)
+    employee_headers = login_employee(client)
+    _run_id, citation_id = _create_answer_with_citation(client, employee_headers)
+
+    with SessionLocal() as session:
+        citation = session.get(QueryCitation, citation_id)
+        assert citation is not None
+        foreign_document_id = citation.document_id
+        if mismatch == "document":
+            foreign_document = Document(
+                tenant_id=citation.tenant_id,
+                title="Foreign source",
+                file_name="foreign.md",
+                file_type="MARKDOWN",
+                mime_type="text/markdown",
+                file_size=1,
+                object_key="documents/foreign.md",
+                checksum="foreign-source",
+                status=DocumentStatus.READY,
+            )
+            session.add(foreign_document)
+            session.flush()
+            foreign_document_id = foreign_document.id
+        foreign_chunk = DocumentChunk(
+            tenant_id="foreign-tenant" if mismatch == "tenant" else citation.tenant_id,
+            document_id=foreign_document_id,
+            chunk_index=45,
+            title_path=["Foreign"],
+            content="不得泄露的跨范围来源。",
+            source_locator={"block": "foreign"},
+            status="ACTIVE",
+            chunk_level="CHILD",
+        )
+        session.add(foreign_chunk)
+        session.flush()
+        citation.qa_pair_id = None
+        citation.snapshot = {**citation.snapshot, "chunkId": foreign_chunk.id}
+        session.commit()
+
+    source = client.get(f"/api/v1/citations/{citation_id}/source", headers=employee_headers)
+
+    assert source.status_code == 404
+    assert "不得泄露" not in source.text
 
 
 def test_scoped_query_run_explanation_and_citations_include_classification_path():

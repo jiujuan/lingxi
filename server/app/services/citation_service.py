@@ -49,19 +49,43 @@ class CitationService:
         elif not is_admin:
             raise forbidden("当前无权查看原文详情")
 
-        qa_pair = self.session.get(QaPair, citation.qa_pair_id) if citation.qa_pair_id else None
-        chunk = (
-            self.session.get(DocumentChunk, qa_pair.chunk_id)
-            if qa_pair is not None and qa_pair.chunk_id
-            else None
-        )
         snapshot = citation.snapshot or {}
+        snapshot_chunk_id = snapshot.get("chunkId")
+        qa_pair = None
+        if snapshot_chunk_id is not None:
+            # Unified hybrid citations bind directly to the winning Child Chunk.
+            # A snapshot is persisted data, not an authorization boundary: its
+            # identity must still match the citation tenant and document before
+            # any source content can be returned.
+            if not isinstance(snapshot_chunk_id, str) or not snapshot_chunk_id:
+                raise not_found("引用来源不存在")
+            chunk = self.session.get(DocumentChunk, snapshot_chunk_id)
+            if (
+                chunk is None
+                or chunk.tenant_id != citation.tenant_id
+                or chunk.document_id != citation.document_id
+            ):
+                raise not_found("引用来源不存在")
+        else:
+            # Historical QA citations retain their original qa_pair -> chunk
+            # source resolution when no unified Chunk snapshot is present.
+            qa_pair = self.session.get(QaPair, citation.qa_pair_id) if citation.qa_pair_id else None
+            chunk = (
+                self.session.get(DocumentChunk, qa_pair.chunk_id)
+                if qa_pair is not None and qa_pair.chunk_id
+                else None
+            )
+        page_no = snapshot.get("pageNo")
+        if page_no is None:
+            page_no = chunk.page_start if snapshot_chunk_id is not None and chunk is not None else None
+        if page_no is None and qa_pair is not None:
+            page_no = qa_pair.page_no
         return {
             "citation_id": citation.id,
             "document_id": citation.document_id,
             "document_title": document.title if document is not None else snapshot.get("title"),
             "document_deleted": bool(document is None or document.status == DocumentStatus.DELETED),
-            "page_no": snapshot.get("pageNo") or (qa_pair.page_no if qa_pair else None),
+            "page_no": page_no,
             "quote": citation.quote,
             "source_text": chunk.content if chunk is not None else citation.quote,
             "source_locator": chunk.source_locator if chunk is not None else {},
