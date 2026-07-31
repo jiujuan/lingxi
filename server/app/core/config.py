@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import math
 import os
 from pathlib import Path
 from urllib.parse import quote_plus
@@ -123,10 +124,27 @@ _WEAK_SECRET_VALUES = frozenset(
     }
 )
 MIN_SECRET_LENGTH = 32
+SUPPORTED_CHUNK_TOKENIZER_NAME = "local-tiktoken-cl100k_base"
 
 
 class ConfigurationError(RuntimeError):
     """Raised at startup when runtime configuration is unsafe for production."""
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default))
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError(f"{name} 必须是整数") from exc
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name, str(default))
+    try:
+        return float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError(f"{name} 必须是有限浮点数") from exc
 
 
 @dataclass(frozen=True)
@@ -272,8 +290,61 @@ class Settings:
     retrieval_final_top_k: int = field(
         default_factory=lambda: int(os.getenv("RETRIEVAL_FINAL_TOP_K", "5"))
     )
+    # Adaptive hierarchical chunking defaults are Spec §13 values.  Every
+    # value that affects boundaries is folded into ChunkPolicy.config_hash by
+    # the central service factory, so changing it requires a new generation.
+    chunking_mode: str = field(
+        default_factory=lambda: os.getenv("CHUNKING_MODE", "legacy").strip().lower()
+    )
+    chunk_min_tokens: int = field(
+        default_factory=lambda: _env_int("CHUNK_MIN_TOKENS", 100)
+    )
+    chunk_target_tokens: int = field(
+        default_factory=lambda: _env_int("CHUNK_TARGET_TOKENS", 450)
+    )
+    chunk_max_tokens: int = field(
+        default_factory=lambda: _env_int("CHUNK_MAX_TOKENS", 800)
+    )
+    chunk_overlap_tokens: int = field(
+        default_factory=lambda: _env_int("CHUNK_OVERLAP_TOKENS", 64)
+    )
+    chunk_parent_max_tokens: int = field(
+        default_factory=lambda: _env_int("CHUNK_PARENT_MAX_TOKENS", 1800)
+    )
+    chunk_tokenizer_name: str = field(
+        default_factory=lambda: os.getenv(
+            "CHUNK_TOKENIZER_NAME", "local-tiktoken-cl100k_base"
+        ).strip()
+    )
+    chunk_semantic_split_enabled: bool = field(
+        default_factory=lambda: _env_bool("CHUNK_SEMANTIC_SPLIT_ENABLED", False)
+    )
+    qa_strict_provenance_enabled: bool = field(
+        default_factory=lambda: _env_bool("QA_STRICT_PROVENANCE_ENABLED", False)
+    )
+    chunk_indexing_enabled: bool = field(
+        default_factory=lambda: _env_bool("CHUNK_INDEXING_ENABLED", False)
+    )
+    hybrid_chunk_retrieval_enabled: bool = field(
+        default_factory=lambda: _env_bool("HYBRID_CHUNK_RETRIEVAL_ENABLED", False)
+    )
+    parent_context_enabled: bool = field(
+        default_factory=lambda: _env_bool("PARENT_CONTEXT_ENABLED", False)
+    )
     retrieval_rrf_k: int = field(
-        default_factory=lambda: int(os.getenv("RETRIEVAL_RRF_K", "60"))
+        default_factory=lambda: _env_int("RETRIEVAL_RRF_K", 60)
+    )
+    retrieval_chunk_vector_weight: float = field(
+        default_factory=lambda: _env_float("RETRIEVAL_CHUNK_VECTOR_WEIGHT", 1.0)
+    )
+    retrieval_chunk_text_weight: float = field(
+        default_factory=lambda: _env_float("RETRIEVAL_CHUNK_TEXT_WEIGHT", 1.0)
+    )
+    retrieval_qa_vector_weight: float = field(
+        default_factory=lambda: _env_float("RETRIEVAL_QA_VECTOR_WEIGHT", 1.0)
+    )
+    retrieval_qa_text_weight: float = field(
+        default_factory=lambda: _env_float("RETRIEVAL_QA_TEXT_WEIGHT", 1.0)
     )
     retrieval_low_confidence_threshold: float = field(
         default_factory=lambda: float(
@@ -323,11 +394,69 @@ class Settings:
     )
 
     @property
+    def retrieval_rrf_channel_weights(self) -> dict[str, float]:
+        """Return the four explicitly named RRF channel weights for DI."""
+
+        return {
+            "qa_vector": self.retrieval_qa_vector_weight,
+            "qa_text": self.retrieval_qa_text_weight,
+            "chunk_vector": self.retrieval_chunk_vector_weight,
+            "chunk_text": self.retrieval_chunk_text_weight,
+        }
+
+    @property
     def access_token_expires_seconds(self) -> int:
         return self.access_token_minutes * 60
 
 
 settings = Settings()
+
+
+def validate_chunking_config(current: "Settings | None" = None) -> None:
+    """Fail fast for Spec §13 chunking/retrieval configuration relations.
+
+    The process must not silently repair a boundary-changing configuration:
+    doing so would make the persisted ChunkPolicy config hash misleading and
+    could mix incompatible chunk generations.
+    """
+
+    current = current or settings
+    problems: list[str] = []
+    if current.chunking_mode not in {"legacy", "adaptive"}:
+        problems.append("CHUNKING_MODE 只能是 legacy 或 adaptive")
+    if current.chunk_tokenizer_name != SUPPORTED_CHUNK_TOKENIZER_NAME:
+        problems.append(
+            "CHUNK_TOKENIZER_NAME 必须是当前已解析的 "
+            f"{SUPPORTED_CHUNK_TOKENIZER_NAME}"
+        )
+    if not (
+        0 < current.chunk_min_tokens
+        <= current.chunk_target_tokens
+        <= current.chunk_max_tokens
+    ):
+        problems.append(
+            "chunk token 参数必须满足 0 < min_tokens <= target_tokens <= max_tokens"
+        )
+    if not 0 <= current.chunk_overlap_tokens < current.chunk_min_tokens:
+        problems.append("overlap_tokens 必须满足 0 <= overlap_tokens < min_tokens")
+    if current.chunk_parent_max_tokens < current.chunk_max_tokens:
+        problems.append("parent_max_tokens 必须不小于 max_tokens")
+    if current.retrieval_rrf_k <= 0:
+        problems.append("RETRIEVAL_RRF_K 必须为正整数")
+    for name, weight in (
+        ("RETRIEVAL_QA_VECTOR_WEIGHT", current.retrieval_qa_vector_weight),
+        ("RETRIEVAL_QA_TEXT_WEIGHT", current.retrieval_qa_text_weight),
+        ("RETRIEVAL_CHUNK_VECTOR_WEIGHT", current.retrieval_chunk_vector_weight),
+        ("RETRIEVAL_CHUNK_TEXT_WEIGHT", current.retrieval_chunk_text_weight),
+    ):
+        if not math.isfinite(weight) or weight < 0:
+            problems.append(f"{name} 必须是非负有限浮点数")
+    if current.parent_context_enabled and not current.hybrid_chunk_retrieval_enabled:
+        problems.append(
+            "PARENT_CONTEXT_ENABLED=true 要求 HYBRID_CHUNK_RETRIEVAL_ENABLED=true"
+        )
+    if problems:
+        raise ConfigurationError("分块/检索配置不合法，拒绝启动：\n- " + "\n- ".join(problems))
 
 
 def _secret_problems(current: "Settings") -> list[str]:

@@ -9,10 +9,11 @@ from kombu import Queue
 # imports the engine, so workers size their pool independently from the API.
 os.environ.setdefault("DB_ROLE", "worker")
 
-from server.app.core.config import settings, validate_secret_config
+from server.app.core.config import settings, validate_chunking_config, validate_secret_config
 
 # Fail fast if production secrets are misconfigured before workers start.
 validate_secret_config()
+validate_chunking_config()
 
 QUEUE_NAMES = settings.celery_queue_names
 

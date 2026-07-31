@@ -1,5 +1,5 @@
 from server.app.db.session import SessionLocal
-from server.app.services.document_parse_service import DocumentParseService
+from server.app.core.service_factory import build_document_parse_service
 from server.app.services.import_service import enqueue_qa_task
 from server.app.tasks._common import handle_failure, job_result, resolve_task_outcome
 from server.app.tasks.celery_app import celery_app
@@ -13,7 +13,7 @@ from server.app.tasks.celery_app import celery_app
 )
 def parse_document_task(self, job_id: str) -> dict:
     with SessionLocal() as session:
-        job = DocumentParseService(session).parse_import_job(job_id)
+        job = build_document_parse_service(session).parse_import_job(job_id)
         outcome = resolve_task_outcome(session, job, "parse_document_task")
         if outcome.failed:
             handle_failure(self, outcome)  # raises: retry or terminal

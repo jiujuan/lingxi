@@ -1,6 +1,6 @@
 from server.app.db.session import SessionLocal
 from server.app.services.import_service import enqueue_embedding_task
-from server.app.services.qa_split_service import QaSplitService
+from server.app.core.service_factory import build_qa_split_service
 from server.app.tasks._common import handle_failure, job_result, resolve_task_outcome
 from server.app.tasks.celery_app import celery_app
 
@@ -13,7 +13,7 @@ from server.app.tasks.celery_app import celery_app
 )
 def split_document_qa_task(self, job_id: str) -> dict:
     with SessionLocal() as session:
-        job = QaSplitService(session).split_import_job(job_id)
+        job = build_qa_split_service(session).split_import_job(job_id)
         outcome = resolve_task_outcome(session, job, "split_document_qa_task")
         if outcome.failed:
             handle_failure(self, outcome)  # raises: retry or terminal

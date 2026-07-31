@@ -1147,3 +1147,92 @@ def test_postgresql_final_document_lock_blocks_generation_switch_until_embedding
         with admin_engine.begin() as connection:
             connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
         admin_engine.dispose()
+
+
+def _run_embedding_task_payload(monkeypatch, args, *, di_chunk_indexing_enabled: bool):
+    """Run the task wrapper with a factory that represents the DI-resolved flag."""
+    from types import SimpleNamespace
+
+    from server.app.tasks import embedding_tasks
+
+    factory_sessions = []
+    services = []
+
+    class FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+    class FakeEmbeddingService:
+        def __init__(self, chunk_indexing_enabled: bool):
+            self.chunk_indexing_enabled = chunk_indexing_enabled
+
+        def embed_import_job(self, job_id: str):
+            return SimpleNamespace(
+                id=job_id,
+                document_id="document-from-di",
+                status="COMPLETED",
+                stage="COMPLETED",
+                error_code=None,
+            )
+
+    def settings_backed_factory(session):
+        factory_sessions.append(session)
+        service = FakeEmbeddingService(di_chunk_indexing_enabled)
+        services.append(service)
+        return service
+
+    monkeypatch.setattr(embedding_tasks, "SessionLocal", FakeSession)
+    monkeypatch.setattr(embedding_tasks, "build_embedding_service", settings_backed_factory)
+    monkeypatch.setattr(
+        embedding_tasks,
+        "resolve_task_outcome",
+        lambda _session, _job, _task_type: SimpleNamespace(failed=False),
+    )
+
+    result = embedding_tasks.embed_qa_pairs_task.run(*args)
+    return result, factory_sessions, services
+
+
+def test_embed_qa_pairs_task_accepts_new_queue_payload(monkeypatch):
+    result, factory_sessions, services = _run_embedding_task_payload(
+        monkeypatch,
+        ("new-payload-job",),
+        di_chunk_indexing_enabled=False,
+    )
+
+    assert result == {
+        "jobId": "new-payload-job",
+        "documentId": "document-from-di",
+        "status": "COMPLETED",
+        "stage": "COMPLETED",
+        "errorCode": None,
+    }
+    assert len(factory_sessions) == 1
+    assert [service.chunk_indexing_enabled for service in services] == [False]
+
+
+def test_embed_qa_pairs_task_accepts_legacy_queue_payload(monkeypatch):
+    result, factory_sessions, services = _run_embedding_task_payload(
+        monkeypatch,
+        ("legacy-payload-job", True),
+        di_chunk_indexing_enabled=False,
+    )
+
+    assert result["jobId"] == "legacy-payload-job"
+    assert len(factory_sessions) == 1
+    assert [service.chunk_indexing_enabled for service in services] == [False]
+
+
+def test_embed_qa_pairs_task_legacy_flag_cannot_override_settings_di(monkeypatch):
+    result, factory_sessions, services = _run_embedding_task_payload(
+        monkeypatch,
+        ("legacy-false-cannot-disable-di", False),
+        di_chunk_indexing_enabled=True,
+    )
+
+    assert result["jobId"] == "legacy-false-cannot-disable-di"
+    assert len(factory_sessions) == 1
+    assert [service.chunk_indexing_enabled for service in services] == [True]

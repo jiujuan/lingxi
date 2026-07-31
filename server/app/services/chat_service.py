@@ -24,7 +24,8 @@ from server.app.services.classification_path_service import (
 )
 from server.app.services.prompt_service import PromptService
 from server.app.schemas.retrieval import RetrievalAccessScope
-from server.app.services.retrieval_service import RetrievalService, normalize_retrieval_scope
+from server.app.core.service_factory import build_retrieval_service
+from server.app.services.retrieval_service import normalize_retrieval_scope
 from server.app.services.sse_service import SseService
 
 
@@ -106,7 +107,7 @@ class ChatService:
         user_message = self.chat_repo.add_message(
             context.tenant_id, session_id, "USER", content, request_id
         )
-        retrieval = RetrievalService(
+        retrieval = build_retrieval_service(
             self.session, provider_factory=self._build_adapter
         ).retrieve(context, content, access_scope=retrieval_scope)
         classification_paths = ClassificationPathService(self.session)
