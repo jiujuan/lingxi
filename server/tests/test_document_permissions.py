@@ -551,3 +551,151 @@ def test_bulk_classification_rejects_inaccessible_document_without_partial_updat
     session.refresh(inaccessible)
     assert authorized.knowledge_category_id == category.id
     assert inaccessible.knowledge_category_id == category.id
+
+
+def test_retrieval_qa_and_chunk_share_tenant_acl_and_classification_scope():
+    from server.app.core.permissions import AccessContext
+    from server.app.models.document import (
+        Document,
+        DocumentAccessRule,
+        DocumentAccessSubjectType,
+        DocumentStatus,
+    )
+    from server.app.models.qa_pair import DocumentChunk, QaPair
+    from server.app.repositories.retrieval_repo import RetrievalRepository
+    from server.app.schemas.retrieval import RetrievalAccessScope
+
+    session, identity = build_session()
+    tenant_id = identity["tenant"].id
+    context = AccessContext(
+        tenant_id=tenant_id,
+        user_id=identity["users"]["employee"].id,
+        department_id=identity["departments"]["support"].id,
+        role_ids=[identity["roles"]["employee"].id],
+        permissions={"DOCUMENT_READ"},
+    )
+    allowed = Document(
+        tenant_id=tenant_id,
+        title="Allowed",
+        file_name="allowed.pdf",
+        file_type="PDF",
+        mime_type="application/pdf",
+        file_size=1,
+        object_key="documents/allowed.pdf",
+        checksum="allowed",
+        status=DocumentStatus.READY,
+        knowledge_space_id="space-1",
+        category_department_id="dept-1",
+        knowledge_category_id="cat-1",
+    )
+    denied = Document(
+        tenant_id=tenant_id,
+        title="Denied",
+        file_name="denied.pdf",
+        file_type="PDF",
+        mime_type="application/pdf",
+        file_size=1,
+        object_key="documents/denied.pdf",
+        checksum="denied",
+        status=DocumentStatus.READY,
+        knowledge_space_id="space-1",
+        category_department_id="dept-1",
+        knowledge_category_id="cat-1",
+    )
+    session.add_all([allowed, denied])
+    session.flush()
+    session.add(
+        DocumentAccessRule(
+            tenant_id=tenant_id,
+            document_id=allowed.id,
+            subject_type=DocumentAccessSubjectType.DEPARTMENT,
+            subject_id=context.department_id,
+        )
+    )
+    allowed_parent = DocumentChunk(
+        tenant_id=tenant_id,
+        document_id=allowed.id,
+        chunk_index=0,
+        content="allowed parent",
+        chunk_level="PARENT",
+        status="ACTIVE",
+    )
+    denied_parent = DocumentChunk(
+        tenant_id=tenant_id,
+        document_id=denied.id,
+        chunk_index=0,
+        content="denied parent",
+        chunk_level="PARENT",
+        status="ACTIVE",
+    )
+    allowed_child = DocumentChunk(
+        tenant_id=tenant_id,
+        document_id=allowed.id,
+        chunk_index=1,
+        content="allowed chunk",
+        search_text="allowed chunk",
+        chunk_level="CHILD",
+        parent_chunk=allowed_parent,
+        status="ACTIVE",
+        embedding=[1.0, 0.0],
+    )
+    denied_child = DocumentChunk(
+        tenant_id=tenant_id,
+        document_id=denied.id,
+        chunk_index=1,
+        content="denied chunk",
+        search_text="denied chunk",
+        chunk_level="CHILD",
+        parent_chunk=denied_parent,
+        status="ACTIVE",
+        embedding=[1.0, 0.0],
+    )
+    session.add_all(
+        [
+            allowed_parent,
+            denied_parent,
+            allowed_child,
+            denied_child,
+            QaPair(
+                tenant_id=tenant_id,
+                document_id=allowed.id,
+                chunk_id=allowed_child.id,
+                pair_index=0,
+                question="allowed qa",
+                answer="answer",
+                search_text="allowed qa",
+                question_embedding=[1.0, 0.0],
+                status="ACTIVE",
+            ),
+            QaPair(
+                tenant_id=tenant_id,
+                document_id=denied.id,
+                chunk_id=denied_child.id,
+                pair_index=0,
+                question="denied qa",
+                answer="answer",
+                search_text="denied qa",
+                question_embedding=[1.0, 0.0],
+                status="ACTIVE",
+            ),
+        ]
+    )
+    session.commit()
+    scope = RetrievalAccessScope(
+        space_id="space-1",
+        classification_department_id="dept-1",
+        category_id="cat-1",
+    )
+    repo = RetrievalRepository(session)
+
+    qa_ids = [
+        pair.document_id
+        for pair, _score in repo.search_qa_vector(context, [1.0, 0.0], 10, scope)
+    ]
+    chunk_ids = [
+        chunk.document_id
+        for chunk, _score in repo.search_chunk_vector(context, [1.0, 0.0], 10, scope)
+    ]
+
+    assert qa_ids == [allowed.id]
+    assert chunk_ids == [allowed.id]
