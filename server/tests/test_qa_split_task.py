@@ -829,6 +829,30 @@ def test_invalid_json_does_not_persist_raw_model_output_in_failure_messages():
     assert secret_output not in json.dumps(task_run.error, ensure_ascii=False)
 
 
+def test_unexpected_qa_provider_error_does_not_leak_raw_exception_to_logs(caplog):
+    from server.app.services import qa_split_service
+    from server.app.services.qa_split_service import QaSplitService
+
+    secret = "PROVIDER_RAW_SECRET_DO-NOT-LOG"
+    session, identity = build_qa_session()
+    job_id, _document_id, _chunks = create_qa_ready_job(session, identity)
+    add_default_qa_model(session, identity["tenant"].id, {"items": []})
+
+    class _Adapter:
+        @staticmethod
+        def generate_qa_pairs(_prompt):
+            raise RuntimeError(secret)
+
+    caplog.set_level("ERROR", logger=qa_split_service.__name__)
+    result = QaSplitService(
+        session,
+        provider_factory=lambda *_args, **_kwargs: _Adapter(),
+    ).split_import_job(job_id)
+
+    assert result.status == "FAILED"
+    assert secret not in caplog.text
+
+
 def test_later_invalid_batch_leaves_no_qa_pairs_from_earlier_valid_batch(monkeypatch):
     import types
 

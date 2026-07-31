@@ -412,6 +412,11 @@ class QaSplitService:
         )
 
     def split_import_job(self, job_id: str) -> ImportJob:
+        job, _task_run_id = self.split_import_job_for_task(job_id)
+        return job
+
+    def split_import_job_for_task(self, job_id: str) -> tuple[ImportJob, str | None]:
+        """Run QA splitting and return the exact TaskRun created for this invocation."""
         job = self.session.get(ImportJob, job_id)
         if job is None:
             raise ValueError("Import job does not exist")
@@ -421,7 +426,7 @@ class QaSplitService:
 
         # Idempotency: a duplicate delivery of an already-finished job is a no-op.
         if job.status == ImportJobStatus.COMPLETED.value:
-            return job
+            return job, None
 
         task_run = TaskRun(
             tenant_id=job.tenant_id,
@@ -473,14 +478,19 @@ class QaSplitService:
             task_run.status = "SUCCESS"
             task_run.error = None
             self.session.commit()
-            return job
+            return job, task_run.id
         except QaSplitValidationError as exc:
             self._mark_failed(
                 job, document, task_run, exc.code, exc.message, exc.retryable
             )
-            return job
+            return job, task_run.id
         except Exception:
-            logger.exception("Unexpected error splitting QA for job %s", job.id)
+            logger.error(
+                "qa split failed code=%s job_id=%s document_id=%s",
+                "QA_SPLIT_INTERNAL_ERROR",
+                job.id,
+                document.id,
+            )
             self._mark_failed(
                 job,
                 document,
@@ -489,7 +499,34 @@ class QaSplitService:
                 "QA 拆分失败",
                 True,
             )
-            return job
+            return job, task_run.id
+
+    def mark_embedding_enqueue_failed(self, job_id: str, task_run_id: str) -> ImportJob:
+        """Persist a retryable task failure after QA succeeds but broker enqueue fails."""
+        job = self.session.get(ImportJob, job_id)
+        if job is None:
+            raise ValueError("Import job does not exist")
+        document = self.session.get(Document, job.document_id)
+        if document is None:
+            raise ValueError("Import job document does not exist")
+        task_run = self.session.get(TaskRun, task_run_id)
+        if (
+            task_run is None
+            or task_run.tenant_id != job.tenant_id
+            or task_run.task_type != "split_document_qa_task"
+            or task_run.resource_type != "IMPORT_JOB"
+            or task_run.resource_id != job.id
+        ):
+            raise ValueError("QA TaskRun does not match import job")
+        self._mark_failed(
+            job,
+            document,
+            task_run,
+            "EMBEDDING_ENQUEUE_FAILED",
+            "Embedding 任务入队失败",
+            True,
+        )
+        return job
 
     def regenerate_document(self, tenant_id: str, document_id: str) -> ImportJob:
         job = self.session.scalar(

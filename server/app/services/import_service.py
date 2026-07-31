@@ -43,17 +43,21 @@ def enqueue_parse_task(job_id: str) -> None:
     except Exception:
         # Never swallow broker failures: surface them so the caller can react
         # instead of silently leaving the document stuck mid-pipeline.
-        logger.exception("Failed to enqueue parse task for job %s", job_id)
+        logger.error("Failed to enqueue parse task job_id=%s", job_id)
         raise
 
 
-def enqueue_qa_task(job_id: str) -> None:
+def enqueue_qa_task(job_id: str, *, enqueue_embedding: bool = True) -> None:
     try:
         from server.app.tasks.qa_tasks import split_document_qa_task
 
-        split_document_qa_task.apply_async(args=[job_id], queue="qa")
+        split_document_qa_task.apply_async(
+            args=[job_id],
+            kwargs={"enqueue_embedding": enqueue_embedding},
+            queue="qa",
+        )
     except Exception:
-        logger.exception("Failed to enqueue QA split task for job %s", job_id)
+        logger.error("Failed to enqueue QA split task job_id=%s", job_id)
         raise
 
 
@@ -63,7 +67,7 @@ def enqueue_embedding_task(job_id: str) -> None:
 
         embed_qa_pairs_task.apply_async(args=[job_id], queue="embedding")
     except Exception:
-        logger.exception("Failed to enqueue embedding task for job %s", job_id)
+        logger.error("Failed to enqueue embedding task job_id=%s", job_id)
         raise
 
 
@@ -348,7 +352,7 @@ class ImportService:
         try:
             enqueue_fn(job.id)
         except Exception as exc:
-            logger.exception("Enqueue failed for job %s; marking FAILED", job.id)
+            logger.error("Enqueue failed; marking FAILED job_id=%s", job.id)
             job.status = ImportJobStatus.FAILED.value
             job.error_code = "TASK_ENQUEUE_FAILED"
             job.error_message = "任务入队失败，请稍后重试"

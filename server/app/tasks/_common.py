@@ -13,6 +13,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from server.app.models.import_job import ImportJob, ImportJobStatus
+from server.app.models.logs import TaskRun
 from server.app.repositories.task_run_repo import TaskRunRepository
 
 logger = logging.getLogger("server.app.tasks")
@@ -46,7 +47,11 @@ def retry_countdown(retries: int) -> float:
 
 
 def resolve_task_outcome(
-    session: Session, job: ImportJob, task_type: str
+    session: Session,
+    job: ImportJob,
+    task_type: str,
+    *,
+    task_run_id: str | None = None,
 ) -> TaskOutcome:
     """Inspect the persisted job/TaskRun state to classify a service run.
 
@@ -58,9 +63,17 @@ def resolve_task_outcome(
     if job.status != ImportJobStatus.FAILED.value:
         return TaskOutcome(failed=False)
 
-    run = TaskRunRepository(session).latest_for_resource(
-        job.tenant_id, job.id, task_type=task_type
-    )
+    run = session.get(TaskRun, task_run_id) if task_run_id is not None else None
+    if run is not None and (
+        run.tenant_id != job.tenant_id
+        or run.resource_id != job.id
+        or run.task_type != task_type
+    ):
+        run = None
+    if run is None and task_run_id is None:
+        run = TaskRunRepository(session).latest_for_resource(
+            job.tenant_id, job.id, task_type=task_type
+        )
     error = (run.error or {}) if run is not None else {}
     return TaskOutcome(
         failed=True,
