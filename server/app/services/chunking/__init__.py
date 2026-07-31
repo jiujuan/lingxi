@@ -16,6 +16,11 @@ from server.app.services.chunking.merge import (
     group_by_safe_boundary,
     merge_small_blocks,
 )
+from server.app.services.chunking.overlap import (
+    OverlapBlock,
+    OverlapResult,
+    apply_prose_overlap,
+)
 from server.app.services.chunking.policy import ChunkPolicy, ChunkPolicyError
 from server.app.services.chunking.recursive_splitter import (
     ChunkSplitNoProgressError,
@@ -46,12 +51,15 @@ __all__ = [
     "MergedBlock",
     "MergeResult",
     "NormalizedChunk",
+    "OverlapBlock",
+    "OverlapResult",
     "RecursiveSplitResult",
     "SplitBlock",
     "SplitReason",
     "TokenCounter",
     "TokenLimitError",
     "TokenizerUnavailableError",
+    "apply_prose_overlap",
     "group_by_safe_boundary",
     "merge_small_blocks",
     "require_token_counter",
