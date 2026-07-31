@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
 import logging
+import re
+import unicodedata
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -24,6 +26,12 @@ from server.app.services.import_service import enqueue_embedding_task  # re-expo
 from server.app.services.qa_prompt_builder import build_qa_split_prompt
 
 logger = logging.getLogger(__name__)
+
+QA_PROVENANCE_MISSING_CHUNK_INDEX = "QA_PROVENANCE_MISSING_CHUNK_INDEX"
+QA_PROVENANCE_UNKNOWN_CHUNK_INDEX = "QA_PROVENANCE_UNKNOWN_CHUNK_INDEX"
+QA_PROVENANCE_QUOTE_MISMATCH = "QA_PROVENANCE_QUOTE_MISMATCH"
+QA_PROVENANCE_COVERAGE_MISMATCH = "QA_PROVENANCE_COVERAGE_MISMATCH"
+QA_PROVENANCE_CONTRACT_INVALID = "QA_PROVENANCE_CONTRACT_INVALID"
 
 __all__ = [
     "QaSplitService",
@@ -90,46 +98,301 @@ def _extract_json_text(raw_output: str) -> str:
     return text[start : end + 1] if end > start else text
 
 
-def validate_qa_split_output(raw_output: str) -> list[ValidatedQaItem]:
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _provenance_error(
+    code: str,
+    message: str,
+    *,
+    retryable: bool = True,
+) -> QaSplitValidationError:
+    return QaSplitValidationError(message, code=code, retryable=retryable)
+
+
+def _normalized_quote(value: str) -> str:
+    """Normalize only for containment checks; persisted quotes remain unchanged."""
+
+    return _WHITESPACE_RE.sub(" ", unicodedata.normalize("NFC", value)).strip()
+
+
+def _chunk_page_range(chunk: DocumentChunk) -> tuple[int, int]:
+    start = chunk.page_start
+    if start is None:
+        start = chunk.page_no
+    if start is None:
+        start = 1
+    end = chunk.page_end
+    if end is None:
+        end = start
+    if (
+        not isinstance(start, int)
+        or isinstance(start, bool)
+        or not isinstance(end, int)
+        or isinstance(end, bool)
+        or start < 1
+        or end < start
+    ):
+        raise _provenance_error(
+            QA_PROVENANCE_CONTRACT_INVALID,
+            "当前 Chunk 页码范围不合法",
+            retryable=False,
+        )
+    return start, end
+
+
+def _is_valid_chunk_index(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _validate_item_fields(item: object, position: int) -> ValidatedQaItem:
+    if not isinstance(item, dict):
+        raise QaSplitValidationError(f"第 {position + 1} 个 QA 项不是对象")
+    question_value = item.get("question")
+    answer_value = item.get("answer")
+    quote = item.get("quote")
+    if not all(isinstance(value, str) for value in (question_value, answer_value, quote)):
+        raise _provenance_error(
+            QA_PROVENANCE_CONTRACT_INVALID,
+            "QA 项 question、answer 和 quote 必须是 JSON string",
+            retryable=False,
+        )
+    question = question_value.strip()
+    answer = answer_value.strip()
+    page_no = item.get("pageNo", item.get("page_no"))
+    chunk_index = item.get("chunkIndex", item.get("chunk_index"))
+    if not question or not answer or not quote.strip():
+        raise QaSplitValidationError("QA 项缺少 question、answer 或 quote")
+    if not isinstance(page_no, int) or isinstance(page_no, bool) or page_no < 1:
+        raise QaSplitValidationError("QA 项缺少合法 pageNo")
+    if chunk_index is not None and not _is_valid_chunk_index(chunk_index):
+        raise _provenance_error(
+            QA_PROVENANCE_CONTRACT_INVALID,
+            "QA 项 chunkIndex 不合法",
+            retryable=False,
+        )
+    return ValidatedQaItem(
+        question=question,
+        answer=answer,
+        quote=quote,
+        page_no=page_no,
+        chunk_index=chunk_index,
+    )
+
+
+def _resolve_legacy_chunk_index(
+    item: ValidatedQaItem,
+    chunk_by_index: dict[int, DocumentChunk],
+) -> int:
+    normalized_quote = _normalized_quote(item.quote)
+    matches = [
+        chunk_index
+        for chunk_index, chunk in chunk_by_index.items()
+        if _chunk_page_range(chunk)[0] <= item.page_no <= _chunk_page_range(chunk)[1]
+        and normalized_quote in _normalized_quote(chunk.content or "")
+    ]
+    if len(matches) != 1:
+        raise _provenance_error(
+            QA_PROVENANCE_MISSING_CHUNK_INDEX,
+            "缺少 chunkIndex 的旧 QA 输出无法唯一关联到当前批次 Chunk",
+        )
+    return matches[0]
+
+
+def _validate_coverage_partition(
+    parsed: dict,
+    item_indexes: set[int],
+    expected_indexes: set[int],
+) -> None:
+    covered = parsed.get("coveredChunkIndexes")
+    skipped = parsed.get("skippedChunks")
+    if not isinstance(covered, list) or not isinstance(skipped, list):
+        raise _provenance_error(
+            QA_PROVENANCE_COVERAGE_MISMATCH,
+            "QA 拆分输出必须包含 coveredChunkIndexes 和 skippedChunks",
+        )
+    if any(not _is_valid_chunk_index(index) for index in covered):
+        raise _provenance_error(
+            QA_PROVENANCE_COVERAGE_MISMATCH,
+            "coveredChunkIndexes 包含不合法 index",
+        )
+    covered_indexes = set(covered)
+    if len(covered_indexes) != len(covered):
+        raise _provenance_error(
+            QA_PROVENANCE_COVERAGE_MISMATCH,
+            "coveredChunkIndexes 不能包含重复 index",
+        )
+    if not covered_indexes <= expected_indexes:
+        raise _provenance_error(
+            QA_PROVENANCE_COVERAGE_MISMATCH,
+            "coveredChunkIndexes 包含当前 Batch 之外的 index",
+        )
+
+    skipped_indexes: set[int] = set()
+    for skipped_item in skipped:
+        if not isinstance(skipped_item, dict):
+            raise _provenance_error(
+                QA_PROVENANCE_COVERAGE_MISMATCH,
+                "skippedChunks 必须包含对象",
+            )
+        chunk_index = skipped_item.get("chunkIndex", skipped_item.get("chunk_index"))
+        reason = skipped_item.get("reason")
+        if not _is_valid_chunk_index(chunk_index):
+            raise _provenance_error(
+                QA_PROVENANCE_COVERAGE_MISMATCH,
+                "skippedChunks 包含不合法 chunkIndex",
+            )
+        if not isinstance(reason, str) or not reason.strip():
+            raise _provenance_error(
+                QA_PROVENANCE_COVERAGE_MISMATCH,
+                "skippedChunks 的 reason 不能为空",
+            )
+        if chunk_index in skipped_indexes:
+            raise _provenance_error(
+                QA_PROVENANCE_COVERAGE_MISMATCH,
+                "skippedChunks 不能包含重复 index",
+            )
+        skipped_indexes.add(chunk_index)
+    if not skipped_indexes <= expected_indexes:
+        raise _provenance_error(
+            QA_PROVENANCE_COVERAGE_MISMATCH,
+            "skippedChunks 包含当前 Batch 之外的 index",
+        )
+    if covered_indexes & skipped_indexes:
+        raise _provenance_error(
+            QA_PROVENANCE_COVERAGE_MISMATCH,
+            "coveredChunkIndexes 与 skippedChunks 不能重叠",
+        )
+    if covered_indexes | skipped_indexes != expected_indexes:
+        raise _provenance_error(
+            QA_PROVENANCE_COVERAGE_MISMATCH,
+            "covered/skipped 未对当前 Batch 构成完备分区",
+        )
+    if item_indexes != covered_indexes:
+        raise _provenance_error(
+            QA_PROVENANCE_COVERAGE_MISMATCH,
+            "items 的 chunkIndex 必须与 coveredChunkIndexes 一致",
+        )
+
+
+def validate_qa_split_output(
+    raw_output: str,
+    chunks: list[DocumentChunk] | None = None,
+    *,
+    allow_legacy_missing_chunk_index: bool = False,
+) -> list[ValidatedQaItem]:
     try:
         parsed = json.loads(_extract_json_text(raw_output))
     except json.JSONDecodeError as exc:
-        snippet = (raw_output or "").strip().replace("\n", " ")[:200]
-        raise QaSplitValidationError(
-            f"QA 拆分模型输出不是合法 JSON（原始输出片段：{snippet!r}）"
-        ) from exc
+        raise QaSplitValidationError("QA 拆分模型输出不是合法 JSON") from exc
 
-    items = parsed.get("items") if isinstance(parsed, dict) else parsed
-    if not isinstance(items, list) or not items:
-        raise QaSplitValidationError("QA 拆分输出 items 为空")
+    if not isinstance(parsed, dict):
+        raise _provenance_error(
+            QA_PROVENANCE_CONTRACT_INVALID,
+            "QA 拆分输出必须是 JSON object",
+            retryable=False,
+        )
+    items = parsed.get("items")
+    if not isinstance(items, list):
+        raise _provenance_error(
+            QA_PROVENANCE_CONTRACT_INVALID,
+            "QA 拆分输出 items 必须是数组",
+            retryable=False,
+        )
 
-    validated: list[ValidatedQaItem] = []
-    for index, item in enumerate(items):
-        if not isinstance(item, dict):
-            raise QaSplitValidationError(f"第 {index + 1} 个 QA 项不是对象")
-        question = str(item.get("question") or "").strip()
-        answer = str(item.get("answer") or "").strip()
-        quote = str(item.get("quote") or "").strip()
-        page_no = item.get("pageNo", item.get("page_no"))
-        chunk_index = item.get("chunkIndex", item.get("chunk_index"))
-        if not question or not answer or not quote:
-            raise QaSplitValidationError("QA 项缺少 question、answer 或 quote")
-        if not isinstance(page_no, int) or page_no < 1:
-            raise QaSplitValidationError("QA 项缺少合法 pageNo")
-        if chunk_index is not None and (
-            not isinstance(chunk_index, int) or chunk_index < 0
-        ):
-            raise QaSplitValidationError("QA 项 chunkIndex 不合法")
-        validated.append(
+    validated = [_validate_item_fields(item, index) for index, item in enumerate(items)]
+    if chunks is None:
+        if not validated:
+            raise QaSplitValidationError("QA 拆分输出 items 为空")
+        return validated
+
+    chunk_by_index = {chunk.chunk_index: chunk for chunk in chunks}
+    expected_indexes = set(chunk_by_index)
+    if len(chunk_by_index) != len(chunks):
+        raise _provenance_error(
+            QA_PROVENANCE_CONTRACT_INVALID,
+            "当前 Batch 存在重复 chunkIndex",
+            retryable=False,
+        )
+    if not expected_indexes:
+        raise _provenance_error(
+            QA_PROVENANCE_CONTRACT_INVALID,
+            "当前 Batch 没有可验证的 Chunk",
+            retryable=False,
+        )
+
+    if (
+        not allow_legacy_missing_chunk_index
+        and any(item.chunk_index is None for item in validated)
+    ):
+        raise _provenance_error(
+            QA_PROVENANCE_MISSING_CHUNK_INDEX,
+            "QA 项缺少 chunkIndex",
+        )
+
+    strict_coverage = (
+        "coveredChunkIndexes" in parsed or "skippedChunks" in parsed
+    )
+    if not strict_coverage and not allow_legacy_missing_chunk_index:
+        raise _provenance_error(
+            QA_PROVENANCE_COVERAGE_MISMATCH,
+            "QA 拆分输出必须包含 coveredChunkIndexes 和 skippedChunks",
+        )
+
+    resolved: list[ValidatedQaItem] = []
+    compatibility_used = False
+    for item in validated:
+        chunk_index = item.chunk_index
+        if chunk_index is None:
+            if not allow_legacy_missing_chunk_index:
+                raise _provenance_error(
+                    QA_PROVENANCE_MISSING_CHUNK_INDEX,
+                    "QA 项缺少 chunkIndex",
+                )
+            chunk_index = _resolve_legacy_chunk_index(item, chunk_by_index)
+            compatibility_used = True
+        chunk = chunk_by_index.get(chunk_index)
+        if chunk is None:
+            # Explicit unknown indexes are always rejected, including compat mode.
+            raise _provenance_error(
+                QA_PROVENANCE_UNKNOWN_CHUNK_INDEX,
+                "QA 项 chunkIndex 不属于当前 Batch",
+            )
+        page_start, page_end = _chunk_page_range(chunk)
+        if not page_start <= item.page_no <= page_end:
+            raise _provenance_error(
+                QA_PROVENANCE_QUOTE_MISMATCH,
+                "QA 项 pageNo 不在其 Chunk 页码范围内",
+            )
+        if _normalized_quote(item.quote) not in _normalized_quote(chunk.content or ""):
+            raise _provenance_error(
+                QA_PROVENANCE_QUOTE_MISMATCH,
+                "QA 项 quote 不属于其指向 Chunk",
+            )
+        resolved.append(
             ValidatedQaItem(
-                question=question,
-                answer=answer,
-                quote=quote,
-                page_no=page_no,
+                question=item.question,
+                answer=item.answer,
+                quote=item.quote,
+                page_no=item.page_no,
                 chunk_index=chunk_index,
             )
         )
-    return validated
+
+    item_indexes = {item.chunk_index for item in resolved if item.chunk_index is not None}
+    if strict_coverage:
+        _validate_coverage_partition(parsed, item_indexes, expected_indexes)
+    elif item_indexes != expected_indexes:
+        raise _provenance_error(
+            QA_PROVENANCE_COVERAGE_MISMATCH,
+            "旧 QA 输出未覆盖当前 Batch 的全部 Chunk，拒绝不完整关联",
+        )
+    if compatibility_used:
+        logger.info(
+            "qa_provenance_legacy_compatibility_total",
+            extra={"result": "accepted"},
+        )
+    return resolved
 
 
 class QaSplitService:
@@ -137,9 +400,16 @@ class QaSplitService:
         self,
         session: Session,
         provider_factory: ProviderFactory = build_provider_adapter,
+        *,
+        legacy_missing_chunk_index_compatibility: bool = False,
     ) -> None:
         self.session = session
         self._build_adapter = provider_factory
+        # Task 16 owns runtime feature-flag wiring. Keeping this constructor
+        # injected prevents the task path from reading environment variables.
+        self.legacy_missing_chunk_index_compatibility = (
+            legacy_missing_chunk_index_compatibility
+        )
 
     def split_import_job(self, job_id: str) -> ImportJob:
         job = self.session.get(ImportJob, job_id)
@@ -273,6 +543,15 @@ class QaSplitService:
         current_chars = 0
         for chunk in chunks:
             chunk_chars = len(chunk.content or "")
+            if (
+                getattr(chunk, "chunker_name", "legacy_parser") == "adaptive_hierarchical"
+                and chunk_chars > max_chars
+            ):
+                raise _provenance_error(
+                    QA_PROVENANCE_CONTRACT_INVALID,
+                    "Adaptive Chunk 超出 QA batch 字符预算",
+                    retryable=False,
+                )
             if current and current_chars + chunk_chars > max_chars:
                 groups.append(current)
                 current = []
@@ -305,8 +584,16 @@ class QaSplitService:
             groups, generate, settings.qa_split_max_concurrency
         )
         items: list[ValidatedQaItem] = []
-        for raw in raw_outputs:
-            items.extend(validate_qa_split_output(raw))
+        for group, raw in zip(groups, raw_outputs, strict=True):
+            items.extend(
+                validate_qa_split_output(
+                    raw,
+                    group,
+                    allow_legacy_missing_chunk_index=(
+                        self.legacy_missing_chunk_index_compatibility
+                    ),
+                )
+            )
         return items
 
     def _list_chunks(self, document_id: str) -> list[DocumentChunk]:
@@ -345,15 +632,16 @@ class QaSplitService:
         chunks: list[DocumentChunk],
         items: list[ValidatedQaItem],
     ) -> None:
-        self.session.execute(delete(QaPair).where(QaPair.document_id == document.id))
         chunk_by_index = {chunk.chunk_index: chunk for chunk in chunks}
-        fallback_chunk = chunks[0]
+        resolved_chunks: list[tuple[int, ValidatedQaItem, DocumentChunk]] = []
         for index, item in enumerate(items):
-            chunk = (
-                chunk_by_index.get(item.chunk_index)
-                if item.chunk_index is not None
-                else fallback_chunk
-            ) or fallback_chunk
+            chunk = chunk_by_index.get(item.chunk_index)
+            if chunk is None:
+                raise QaSplitValidationError("QA 项未能关联到当前 Document Chunk")
+            resolved_chunks.append((index, item, chunk))
+
+        self.session.execute(delete(QaPair).where(QaPair.document_id == document.id))
+        for index, item, chunk in resolved_chunks:
             self.session.add(
                 QaPair(
                     tenant_id=job.tenant_id,

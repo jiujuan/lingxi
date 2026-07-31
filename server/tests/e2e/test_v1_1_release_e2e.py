@@ -274,7 +274,9 @@ def _add_default_qa_model(session, tenant_id: str) -> None:
                         "pageNo": 1,
                         "chunkIndex": 0,
                     }
-                ]
+                ],
+                "coveredChunkIndexes": [0],
+                "skippedChunks": [],
             }
         },
     )
