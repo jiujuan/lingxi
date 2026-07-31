@@ -17,9 +17,21 @@ from server.app.services.chunking.contracts import (
     _freeze_json_mapping,
     to_json_value,
 )
+from server.app.services.chunking.identity import source_identity
 from server.app.services.chunking.merge import MergedBlock
+from server.app.services.chunking.normalization import (
+    NORMALIZATION_METADATA_KEY,
+    normalize_text,
+    normalized_fragment_provenance,
+    normalized_segment_boundaries,
+    normalized_span_to_original,
+)
 from server.app.services.chunking.policy import ChunkPolicy
-from server.app.services.chunking.recursive_splitter import split_oversized_prose
+from server.app.services.chunking.recursive_splitter import (
+    ChunkSplitNoProgressError,
+    split_oversized_prose,
+)
+from server.app.services.chunking.versions import TYPE_HANDLER_VERSIONS
 from server.app.services.chunking.tokenizer import (
     TokenCounter,
     TokenLimitError,
@@ -29,16 +41,15 @@ from server.app.services.chunking.tokenizer import (
 _TABLE_OVERSIZED_ROW_FALLBACK = "TABLE_OVERSIZED_ROW_FALLBACK"
 _CODE_FALLBACK_SPLIT = "CODE_FALLBACK_SPLIT"
 _IMAGE_WITHOUT_TEXT_SKIPPED = "IMAGE_WITHOUT_TEXT_SKIPPED"
-_HANDLER_VERSION = "1.0"
 
 
 @dataclass(frozen=True)
 class ChunkDraft:
     """Immutable non-prose Child Chunk draft.
 
-    Type handlers never apply generic overlap, so ``unique_content`` is exactly
-    ``content``. Construction requires a TokenCounter and verifies ``token_count``;
-    :func:`handle_typed_block` re-verifies the emitted draft at dispatch.
+    Type handlers never apply generic overlap. ``content`` is the retrieval
+    representation while ``unique_content`` is the non-repeated evidence used by
+    Parent construction. Construction verifies the rendered ``token_count``.
     """
 
     content: str
@@ -77,11 +88,11 @@ class ChunkDraft:
         if self.overlap_prefix_tokens != 0:
             raise ValueError("non-prose ChunkDraft values cannot contain overlap")
 
-        unique_content = self.content if self.unique_content is None else self.unique_content
-        if not isinstance(unique_content, str) or not unique_content:
-            raise ValueError("ChunkDraft unique_content must not be empty")
-        if unique_content != self.content:
-            raise ValueError("non-prose ChunkDraft unique_content must equal content")
+        unique_content = (
+            self.content if self.unique_content is None else self.unique_content
+        )
+        if not isinstance(unique_content, str):
+            raise ValueError("ChunkDraft unique_content must be a string")
 
         if not isinstance(self.title_path, (tuple, list)):
             raise ValueError("ChunkDraft title_path must be a tuple or list")
@@ -260,6 +271,7 @@ class _CodePart:
     source_char_end: int
     lexical_degraded: bool = False
     prefix_degraded: bool = False
+    normalization_fragment: bool = False
 
 
 @dataclass(frozen=True)
@@ -307,6 +319,7 @@ def _draft(
     metadata: Mapping[str, Any],
     *,
     source_blocks: Sequence[AtomicBlock] | None = None,
+    unique_content: str | None = None,
 ) -> ChunkDraft:
     candidates = (block,) if source_blocks is None else tuple(source_blocks)
     if not candidates:
@@ -321,7 +334,7 @@ def _draft(
     pages = [source.page_no for source in ordered_sources if source.page_no is not None]
     return ChunkDraft(
         content=content,
-        unique_content=content,
+        unique_content=content if unique_content is None else unique_content,
         block_type=block.block_type,
         title_path=block.title_path,
         token_count=counter.count(content),
@@ -332,6 +345,16 @@ def _draft(
         token_counter=counter,
         overlap_prefix_tokens=0,
         metadata=metadata,
+    )
+
+
+def _replace_unique_content(
+    draft: ChunkDraft, unique_content: str, counter: TokenCounter
+) -> ChunkDraft:
+    return replace(
+        draft,
+        unique_content=unique_content,
+        token_counter=counter,
     )
 
 
@@ -482,12 +505,12 @@ def _pack_units(
     counter: TokenCounter,
     *,
     separator: str = "\n",
-) -> list[tuple[str, int, int, bool]]:
-    """Pack units and explicitly mark fragments that cannot retain a prefix."""
+) -> list[tuple[str, int, int, bool, str, str]]:
+    """Pack units with fragment-level unique source bodies."""
 
     plan = _prepare_repeated_prefix(prefix, max_tokens, counter, separator=separator)
     active_prefix = plan.repeated
-    packed: list[tuple[str, int, int, bool]] = []
+    packed: list[tuple[str, int, int, bool, str, str]] = []
     buffer: list[str] = []
     start = 0
 
@@ -503,7 +526,16 @@ def _pack_units(
             buffer = candidate
             continue
         if buffer:
-            packed.append((render(buffer), start, index - 1, False))
+            packed.append(
+                (
+                    render(buffer),
+                    start,
+                    index - 1,
+                    False,
+                    separator.join(buffer),
+                    "",
+                )
+            )
             buffer = []
         if counter.count(render([unit])) <= max_tokens:
             start = index
@@ -511,6 +543,7 @@ def _pack_units(
             continue
 
         prefixed_parts: list[str] | None = None
+        prefixed_body_parts: list[str] | None = None
         if active_prefix:
             for body_limit in _bounded_candidate_limits(max_tokens):
                 body_parts = _candidate_token_parts(unit, body_limit, counter)
@@ -521,18 +554,51 @@ def _pack_units(
                 ]
                 if all(counter.count(part) <= max_tokens for part in rendered_parts):
                     prefixed_parts = rendered_parts
+                    prefixed_body_parts = body_parts
                     break
-        if prefixed_parts is not None:
-            packed.extend(
-                (rendered_part, index, index, False)
-                for rendered_part in prefixed_parts
-            )
+        if prefixed_parts is not None and prefixed_body_parts is not None:
+            for fragment_index, (rendered_part, body_part) in enumerate(
+                zip(prefixed_parts, prefixed_body_parts)
+            ):
+                joiner = (
+                    " "
+                    if fragment_index > 0
+                    and (
+                        prefixed_body_parts[fragment_index - 1][-1:].isspace()
+                        or body_part[:1].isspace()
+                    )
+                    else ""
+                )
+                packed.append(
+                    (rendered_part, index, index, False, body_part, joiner)
+                )
             continue
 
-        for part in _safe_token_parts(unit, max_tokens, counter):
-            packed.append((part, index, index, bool(active_prefix)))
+        fallback_parts = _safe_token_parts(unit, max_tokens, counter)
+        for fragment_index, part in enumerate(fallback_parts):
+            joiner = (
+                " "
+                if fragment_index > 0
+                and (
+                    fallback_parts[fragment_index - 1][-1:].isspace()
+                    or part[:1].isspace()
+                )
+                else ""
+            )
+            packed.append(
+                (part, index, index, bool(active_prefix), part, joiner)
+            )
     if buffer:
-        packed.append((render(buffer), start, len(units) - 1, False))
+        packed.append(
+            (
+                render(buffer),
+                start,
+                len(units) - 1,
+                False,
+                separator.join(buffer),
+                "",
+            )
+        )
     return packed
 
 
@@ -640,7 +706,7 @@ def _table_metadata(
         table["partIndex"] = part_index
     if part_count is not None:
         table["partCount"] = part_count
-    return {"handlerVersion": _HANDLER_VERSION, "table": table}
+    return {"handlerVersion": TYPE_HANDLER_VERSIONS["table"], "table": table}
 
 
 def _limited_policy(policy: ChunkPolicy, max_tokens: int) -> ChunkPolicy:
@@ -695,6 +761,106 @@ def _recursive_text_parts(
         counter,
     )
     return [candidate.content for candidate in result.blocks]
+
+
+def _table_unique_drafts(
+    drafts: Sequence[ChunkDraft],
+    *,
+    caption: str,
+    header_text: str,
+    header_cells: Sequence[str] | None,
+    rows: Sequence[str],
+    row_cells: Sequence[Sequence[str] | None],
+    row_start: int,
+    counter: TokenCounter,
+) -> tuple[ChunkDraft, ...]:
+    """Remove handler-introduced context while preserving every table fact once."""
+
+    prefix = "\n".join(value for value in (caption, header_text) if value)
+    prefix_emitted = False
+    caption_emitted = False
+    emitted_header_columns: set[int] = set()
+    output: list[ChunkDraft] = []
+
+    def emit_caption(parts: list[str]) -> None:
+        nonlocal caption_emitted
+        if caption and not caption_emitted:
+            parts.append(caption)
+            caption_emitted = True
+
+    def emit_headers(parts: list[str], start: int, end: int) -> None:
+        if not header_cells:
+            return
+        new_columns = [
+            index
+            for index in range(start, min(end, len(header_cells)))
+            if index not in emitted_header_columns
+        ]
+        if not new_columns:
+            return
+        values = [header_cells[index] for index in new_columns]
+        rendered, _ = _render_table_header(values)
+        if rendered:
+            parts.append(rendered)
+        emitted_header_columns.update(new_columns)
+
+    for draft in drafts:
+        table = draft.metadata["table"]
+        reason = table["splitReason"]
+        unique = draft.content
+        if reason == "row_group":
+            start = max(0, int(table["rowStart"]) - row_start)
+            end = max(start, int(table["rowEnd"]) - row_start + 1)
+            body = "\n".join(rows[start:end])
+            if prefix and not prefix_emitted:
+                unique = "\n".join(value for value in (prefix, body) if value)
+                prefix_emitted = True
+                caption_emitted = bool(caption)
+                if header_cells:
+                    emitted_header_columns.update(range(len(header_cells)))
+            else:
+                unique = body
+        elif reason == "column_group":
+            column_start = max(0, int(table.get("columnStart", 1)) - 1)
+            column_end = max(column_start, int(table.get("columnEnd", 0)))
+            row_index = max(0, int(table["rowStart"]) - row_start)
+            parts: list[str] = []
+            emit_caption(parts)
+            emit_headers(parts, column_start, column_end)
+            cells = row_cells[row_index] if row_index < len(row_cells) else None
+            if cells:
+                rendered_row, _ = _render_table_row(cells[column_start:column_end])
+                if rendered_row:
+                    parts.append(rendered_row)
+            unique = "\n".join(parts)
+            prefix_emitted = True
+        elif reason == "cell_recursive":
+            column_start = max(0, int(table.get("columnStart", 1)) - 1)
+            column_end = max(column_start, int(table.get("columnEnd", 0)))
+            parts = []
+            emit_caption(parts)
+            emit_headers(parts, column_start, column_end)
+            source_text = table.get("cellSourceText")
+            if isinstance(source_text, str) and source_text:
+                parts.append(source_text)
+            unique = "\n".join(parts)
+            prefix_emitted = True
+        elif reason == "context_fallback":
+            # The bounded context pieces jointly contain one caption/header copy.
+            prefix_emitted = True
+            caption_emitted = bool(caption)
+            if header_cells:
+                emitted_header_columns.update(range(len(header_cells)))
+        elif prefix and draft.content.startswith(prefix):
+            if prefix_emitted:
+                unique = draft.content[len(prefix) :].lstrip("\n")
+            else:
+                prefix_emitted = True
+                caption_emitted = bool(caption)
+                if header_cells:
+                    emitted_header_columns.update(range(len(header_cells)))
+        output.append(_replace_unique_content(draft, unique, counter))
+    return tuple(output)
 
 
 def _handle_table(
@@ -948,12 +1114,17 @@ def _handle_table(
                         else cell_part
                     )
                     rendered_parts = (
-                        [rendered]
+                        [(rendered, cell_part)]
                         if counter.count(rendered) <= policy.max_tokens
-                        else _safe_token_parts(cell_part, policy.max_tokens, counter)
+                        else [
+                            (source_part, source_part)
+                            for source_part in _safe_token_parts(
+                                cell_part, policy.max_tokens, counter
+                            )
+                        ]
                     )
-                    for rendered_part in rendered_parts:
-                        if not rendered_part:
+                    for rendered_part, source_part in rendered_parts:
+                        if not rendered_part or not source_part:
                             continue
                         cell_metadata = _table_metadata(
                             row_start=row_start + row_index,
@@ -975,7 +1146,7 @@ def _handle_table(
                                 "sourceHeaderHash": header_hash,
                                 "contextDegraded": True,
                                 "degradation": "cell_recursive",
-                                "cellSourceText": cell_part,
+                                "cellSourceText": source_part,
                                 "prefixDegraded": cell_plan.degraded,
                             }
                         )
@@ -1042,7 +1213,17 @@ def _handle_table(
                 },
             )
         )
-    return TypeHandlerResult(drafts=tuple(drafts), warnings=tuple(warnings))
+    unique_drafts = _table_unique_drafts(
+        drafts,
+        caption=caption,
+        header_text=header_text,
+        header_cells=header_cells,
+        rows=rows,
+        row_cells=row_cells,
+        row_start=row_start,
+        counter=counter,
+    )
+    return TypeHandlerResult(drafts=unique_drafts, warnings=tuple(warnings))
 
 
 def _line_starts(content: str) -> tuple[int, ...]:
@@ -1180,6 +1361,56 @@ def _lexical_units(
         units.extend(_normal_lexical_units(content, normal_start, end))
     return units or [(start, end, False)]
 
+def _block_normalization_boundaries(block: AtomicBlock) -> tuple[int, ...]:
+    normalization = block.metadata.get(NORMALIZATION_METADATA_KEY)
+    if not isinstance(normalization, Mapping):
+        return tuple(range(len(block.content) + 1))
+    try:
+        return normalized_segment_boundaries(normalization)
+    except ValueError as exc:
+        raise ChunkSplitNoProgressError(str(exc), content=block.content) from exc
+
+
+def _bounded_code_ranges(
+    content: str,
+    start: int,
+    end: int,
+    max_tokens: int,
+    counter: TokenCounter,
+    legal_boundaries: Sequence[int],
+) -> list[tuple[int, int, bool]]:
+    boundaries = [
+        boundary for boundary in legal_boundaries if start <= boundary <= end
+    ]
+    if not boundaries or boundaries[0] != start or boundaries[-1] != end:
+        raise ValueError("code source range does not align to normalization segments")
+    ranges: list[tuple[int, int, bool]] = []
+    index = 0
+    while index < len(boundaries) - 1:
+        range_start = boundaries[index]
+        best = index
+        probe = index + 1
+        while probe < len(boundaries):
+            if counter.count(content[range_start : boundaries[probe]]) > max_tokens:
+                break
+            best = probe
+            probe += 1
+        if best > index:
+            ranges.append((range_start, boundaries[best], False))
+            index = best
+            continue
+        segment_end = boundaries[index + 1]
+        source = content[range_start:segment_end]
+        parts = _safe_token_parts(source, max_tokens, counter)
+        cursor = range_start
+        for part in parts:
+            part_end = cursor + len(part)
+            ranges.append((cursor, part_end, True))
+            cursor = part_end
+        index += 1
+    return ranges
+
+
 def _line_fallback_parts(
     content: str,
     max_tokens: int,
@@ -1188,6 +1419,7 @@ def _line_fallback_parts(
     source_start: int = 0,
     source_text: str | None = None,
     default_reason: str = "line",
+    legal_boundaries: Sequence[int] | None = None,
 ) -> list[_CodePart]:
     """Preserve every character while preferring lines and lexical spans."""
 
@@ -1205,6 +1437,7 @@ def _line_fallback_parts(
         reason: str,
         *,
         lexical_degraded: bool = False,
+        normalization_fragment: bool = False,
     ) -> None:
         line_start, line_end = _line_range(starts, part_start, part_end)
         parts.append(
@@ -1216,6 +1449,7 @@ def _line_fallback_parts(
                 part_start,
                 part_end,
                 lexical_degraded=lexical_degraded,
+                normalization_fragment=normalization_fragment,
             )
         )
 
@@ -1237,16 +1471,26 @@ def _line_fallback_parts(
         if counter.count(unit_text) <= max_tokens:
             buffer_start, buffer_end = unit_start, unit_end
             continue
-        cursor = unit_start
-        for exact_part in _safe_token_parts(unit_text, max_tokens, counter):
-            part_end = cursor + len(exact_part)
+        boundaries = (
+            tuple(range(len(original) + 1))
+            if legal_boundaries is None
+            else legal_boundaries
+        )
+        for part_start, part_end, normalization_fragment in _bounded_code_ranges(
+            original,
+            unit_start,
+            unit_end,
+            max_tokens,
+            counter,
+            boundaries,
+        ):
             append_part(
-                cursor,
+                part_start,
                 part_end,
                 "token",
                 lexical_degraded=protected,
+                normalization_fragment=normalization_fragment,
             )
-            cursor = part_end
     flush()
     if "".join(part.content for part in parts) != content:
         raise ValueError("code fallback did not preserve source text")
@@ -1258,20 +1502,66 @@ def _code_metadata(
     part: _CodePart,
     *,
     signature: str | None,
+    block: AtomicBlock,
 ) -> dict[str, Any]:
+    normalized_start = part.source_char_start
+    normalized_end = part.source_char_end
+    source_text = normalize_text(block.content[normalized_start:normalized_end])
+    original_start = normalized_start
+    original_end = normalized_end
+    source_coordinate_space = "original_atomic"
+    normalization_version = "identity-v1"
+    fragment_metadata: dict[str, Any] = {}
+    normalization = block.metadata.get(NORMALIZATION_METADATA_KEY)
+    if isinstance(normalization, Mapping):
+        normalization_version = str(normalization.get("version", "unknown"))
+        try:
+            if part.normalization_fragment:
+                fragment = normalized_fragment_provenance(
+                    normalization, normalized_start, normalized_end
+                )
+                original_start = int(fragment["originalSegmentStart"])
+                original_end = int(fragment["originalSegmentEnd"])
+                source_coordinate_space = str(fragment["coordinateSpace"])
+                fragment_metadata = {
+                    "sourceProvenanceMode": fragment["provenanceMode"],
+                    "sourceSpanSemantics": "containing_normalization_segment",
+                    "originalSegmentCharStart": fragment["originalSegmentStart"],
+                    "originalSegmentCharEnd": fragment["originalSegmentEnd"],
+                    "normalizedSegmentCharStart": fragment["normalizedSegmentStart"],
+                    "normalizedSegmentCharEnd": fragment["normalizedSegmentEnd"],
+                }
+            else:
+                original_start, original_end = normalized_span_to_original(
+                    normalization,
+                    normalized_start,
+                    normalized_end,
+                    expected_normalized=source_text,
+                )
+        except ValueError as exc:
+            raise ChunkSplitNoProgressError(
+                str(exc), content=block.content
+            ) from exc
     code: dict[str, Any] = {
         "language": _non_empty_text(metadata.get("language")) or "unknown",
         "file": _non_empty_text(metadata.get("file")),
         "symbolSignature": signature,
         "lineStart": part.line_start,
         "lineEnd": part.line_end,
-        "sourceCharStart": part.source_char_start,
-        "sourceCharEnd": part.source_char_end,
+        "sourceCharStart": original_start,
+        "sourceCharEnd": original_end,
+        "normalizedSourceCharStart": normalized_start,
+        "normalizedSourceCharEnd": normalized_end,
+        "sourceCoordinateSpace": source_coordinate_space,
+        "normalizedCoordinateSpace": "normalized_atomic",
+        "normalizationVersion": normalization_version,
+        "sourceText": source_text,
         "splitReason": part.reason,
         "lexicalDegraded": part.lexical_degraded,
         "prefixDegraded": part.prefix_degraded,
+        **fragment_metadata,
     }
-    return {"handlerVersion": _HANDLER_VERSION, "code": code}
+    return {"handlerVersion": TYPE_HANDLER_VERSIONS["code"], "code": code}
 
 
 def _validated_symbol_segments(
@@ -1394,6 +1684,8 @@ def _split_fenced_segment(
     segment: _CodeSegment,
     max_tokens: int,
     counter: TokenCounter,
+    *,
+    legal_boundaries: Sequence[int],
 ) -> list[_CodePart]:
     source = content[segment.start:segment.end]
     first_newline = source.find("\n")
@@ -1407,6 +1699,7 @@ def _split_fenced_segment(
             source_start=segment.start,
             source_text=content,
             default_reason="token",
+            legal_boundaries=legal_boundaries,
         )
     opening = source[: first_newline + 1]
     closing_start = closing_match.start()
@@ -1424,6 +1717,7 @@ def _split_fenced_segment(
                 source_start=segment.start,
                 source_text=content,
                 default_reason="token",
+                legal_boundaries=legal_boundaries,
             )
         ]
 
@@ -1434,6 +1728,7 @@ def _split_fenced_segment(
         counter,
         source_start=body_start,
         source_text=content,
+        legal_boundaries=legal_boundaries,
     )
     wrapped: list[_CodePart] = []
     for index, part in enumerate(body_parts):
@@ -1450,10 +1745,15 @@ def _split_fenced_segment(
                     source_start=segment.start,
                     source_text=content,
                     default_reason="token",
+                    legal_boundaries=legal_boundaries,
                 )
             ]
         unique_start = segment.start if index == 0 else part.source_char_start
-        unique_end = segment.end if index == len(body_parts) - 1 else part.source_char_end
+        unique_end = (
+            segment.end
+            if index == len(body_parts) - 1
+            else part.source_char_end
+        )
         starts = _line_starts(content)
         line_start, line_end = _line_range(starts, unique_start, unique_end)
         wrapped.append(
@@ -1475,11 +1775,19 @@ def _parts_for_code_segment(
     segment: _CodeSegment,
     policy: ChunkPolicy,
     counter: TokenCounter,
+    *,
+    legal_boundaries: Sequence[int],
 ) -> list[_CodePart]:
     source = content[segment.start:segment.end]
     starts = _line_starts(content)
     if segment.reason == "fence" and counter.count(source) > policy.max_tokens:
-        return _split_fenced_segment(content, segment, policy.max_tokens, counter)
+        return _split_fenced_segment(
+            content,
+            segment,
+            policy.max_tokens,
+            counter,
+            legal_boundaries=legal_boundaries,
+        )
     if counter.count(source) <= policy.max_tokens:
         line_start, line_end = _line_range(starts, segment.start, segment.end)
         return [
@@ -1499,6 +1807,7 @@ def _parts_for_code_segment(
         source_start=segment.start,
         source_text=content,
         default_reason=("line" if segment.reason != "symbol" else "symbol"),
+        legal_boundaries=legal_boundaries,
     )
 
 
@@ -1529,11 +1838,23 @@ def _handle_code(
             segments = [_CodeSegment(0, len(block.content), "unsplit")]
 
     drafts: list[ChunkDraft] = []
+    legal_boundaries = _block_normalization_boundaries(block)
     used_fallback = bool(invalid_count or malformed_count or gap_count)
     lexical_degraded = False
     prefix_degraded = False
     for segment in segments:
-        parts = _parts_for_code_segment(block.content, segment, policy, counter)
+        try:
+            parts = _parts_for_code_segment(
+                block.content,
+                segment,
+                policy,
+                counter,
+                legal_boundaries=legal_boundaries,
+            )
+        except ValueError as exc:
+            raise ChunkSplitNoProgressError(
+                str(exc), content=block.content
+            ) from exc
         if segment.signature and counter.count(segment.signature) > policy.max_tokens:
             parts = [replace(part, prefix_degraded=True) for part in parts]
         if len(parts) > 1 or any(part.reason in {"line", "token"} for part in parts):
@@ -1546,7 +1867,12 @@ def _handle_code(
                     block,
                     part.content,
                     counter,
-                    _code_metadata(metadata, part, signature=segment.signature),
+                    _code_metadata(
+                        metadata, part, signature=segment.signature, block=block
+                    ),
+                    unique_content=block.content[
+                        part.source_char_start : part.source_char_end
+                    ],
                 )
             )
 
@@ -1555,8 +1881,8 @@ def _handle_code(
     ranges = sorted(
         {
             (
-                int(part.metadata["code"]["sourceCharStart"]),
-                int(part.metadata["code"]["sourceCharEnd"]),
+                int(part.metadata["code"]["normalizedSourceCharStart"]),
+                int(part.metadata["code"]["normalizedSourceCharEnd"]),
             )
             for part in drafts
         }
@@ -1586,30 +1912,22 @@ def _handle_code(
     return TypeHandlerResult(drafts=tuple(drafts), warnings=warnings)
 
 
-def _source_identity(block: AtomicBlock) -> str | None:
-    for key in ("sourceIdentity", "documentId", "sourceId", "document_id", "source_id"):
-        value = block.source_locator.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
 def _validate_context(block: AtomicBlock, context: TypeHandlerContext) -> None:
     if context.previous is None and context.following is None:
         return
-    if _source_identity(block) != context.source_identity:
+    if source_identity(block) != context.source_identity:
         raise ValueError("context source identity does not match the current block")
     if context.current_position is None:
         raise ValueError("context current position is required")
     if context.previous is not None:
         if context.previous_position != context.current_position - 1:
             raise ValueError("previous context sequence position is not adjacent")
-        if _source_identity(context.previous) != context.source_identity:
+        if source_identity(context.previous) != context.source_identity:
             raise ValueError("previous context has a different source identity")
     if context.following is not None:
         if context.following_position != context.current_position + 1:
             raise ValueError("following context sequence position is not adjacent")
-        if _source_identity(context.following) != context.source_identity:
+        if source_identity(context.following) != context.source_identity:
             raise ValueError("following context has a different source identity")
 
 
@@ -1732,6 +2050,7 @@ def _pack_labeled_components(
     metadata_factory: Callable[[Sequence[_LabeledPiece], int, int], Mapping[str, Any]],
     *,
     anchor_blocks: Sequence[AtomicBlock] = (),
+    unique_source_block: AtomicBlock | None = None,
 ) -> tuple[ChunkDraft, ...]:
     pieces = [
         piece
@@ -1771,6 +2090,17 @@ def _pack_labeled_components(
                 counter,
                 metadata_factory(group, index, len(groups)),
                 source_blocks=source_blocks,
+                unique_content=(
+                    "\n".join(
+                        piece.content
+                        for piece in group
+                        if unique_source_block is None
+                        or (
+                            unique_source_block in piece.source_blocks
+                            and piece.label != "Section"
+                        )
+                    )
+                ),
             )
         )
     return tuple(drafts)
@@ -1844,7 +2174,7 @@ def _handle_image(
         group: Sequence[_LabeledPiece], index: int, count: int
     ) -> Mapping[str, Any]:
         return {
-            "handlerVersion": _HANDLER_VERSION,
+            "handlerVersion": TYPE_HANDLER_VERSIONS["image"],
             "image": {
                 "textSourceCount": len(seen),
                 "labels": [piece.label for piece in group],
@@ -1861,6 +2191,7 @@ def _handle_image(
         counter,
         image_metadata,
         anchor_blocks=(block,),
+        unique_source_block=block,
     )
     warnings = ()
     if any(draft.metadata["image"]["componentDegraded"] for draft in drafts):
@@ -2013,7 +2344,7 @@ def _handle_formula(
             if piece.label == "Formula"
         )
         return {
-            "handlerVersion": _HANDLER_VERSION,
+            "handlerVersion": TYPE_HANDLER_VERSIONS["formula"],
             "formula": {
                 "explanationCount": explanation_count,
                 "splitReason": _formula_split_reason(group),
@@ -2027,7 +2358,12 @@ def _handle_formula(
         }
 
     drafts = _pack_labeled_components(
-        block, components, policy, counter, formula_metadata
+        block,
+        components,
+        policy,
+        counter,
+        formula_metadata,
+        unique_source_block=block,
     )
     reconstructed = "".join(
         str(draft.metadata["formula"].get("sourceText") or "")
@@ -2103,7 +2439,7 @@ def _handle_list(
                     part,
                     counter,
                     {
-                        "handlerVersion": _HANDLER_VERSION,
+                        "handlerVersion": TYPE_HANDLER_VERSIONS["list"],
                         "list": {
                             "itemStart": item_start,
                             "itemEnd": item_start - 1,
@@ -2115,6 +2451,7 @@ def _handle_list(
                         },
                     },
                     source_blocks=(intro_source,),
+                    unique_content=part if intro_source is block else "",
                 )
             )
 
@@ -2126,8 +2463,11 @@ def _handle_list(
         counter,
     )
     fragment_prefix_degraded = any(entry[3] for entry in packed)
-    for content, start, end, prefix_degraded in packed:
+    intro_unique_emitted = prefix_plan.degraded or intro_source is not block
+    unique_item_indexes: set[int] = set()
+    for content, start, end, prefix_degraded, unique_body, unique_joiner in packed:
         includes_intro = bool(prefix_plan.repeated) and not prefix_degraded
+        unique_continuation = start == end and start in unique_item_indexes
         source_blocks = (intro_source, block) if includes_intro else (block,)
         drafts.append(
             _draft(
@@ -2135,7 +2475,7 @@ def _handle_list(
                 content,
                 counter,
                 {
-                    "handlerVersion": _HANDLER_VERSION,
+                    "handlerVersion": TYPE_HANDLER_VERSIONS["list"],
                     "list": {
                         "itemStart": item_start + start,
                         "itemEnd": item_start + end,
@@ -2146,11 +2486,27 @@ def _handle_list(
                         ),
                         "introDegraded": prefix_plan.degraded or prefix_degraded,
                         "splitReason": "item_group",
+                        "uniqueContinuation": unique_continuation,
+                        "uniqueJoinerBefore": (
+                            unique_joiner if unique_continuation else None
+                        ),
                     },
                 },
                 source_blocks=source_blocks,
+                unique_content=(
+                    "\n".join(
+                        value
+                        for value in (
+                            intro if intro and not intro_unique_emitted else "",
+                            unique_body,
+                        )
+                        if value
+                    )
+                ),
             )
         )
+        unique_item_indexes.update(range(start, end + 1))
+        intro_unique_emitted = True
     warnings = ()
     if prefix_plan.degraded or fragment_prefix_degraded:
         degradation = (
@@ -2260,6 +2616,7 @@ def get_type_handler(block_type: BlockType) -> TypeHandler:
 
 __all__ = [
     "TYPE_HANDLER_REGISTRY",
+    "TYPE_HANDLER_VERSIONS",
     "ChunkDraft",
     "TypeHandler",
     "TypeHandlerContext",

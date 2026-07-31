@@ -15,6 +15,7 @@ from server.app.services.chunking import (
     ChunkPolicy,
     ChunkPolicyError,
     LocalTokenCounter,
+    TYPE_HANDLER_VERSIONS,
     TokenCounter,
     TokenLimitError,
     TokenizerUnavailableError,
@@ -638,3 +639,11 @@ def test_safe_token_counter_preserves_local_behavior_and_parameter_errors() -> N
 
     with pytest.raises(TokenLimitError, match="positive"):
         counter.split_by_token_limit(text, 0)
+
+
+def test_default_policy_uses_actual_exported_handler_versions() -> None:
+    default = ChunkPolicy()
+
+    assert dict(default.type_handler_versions) == dict(TYPE_HANDLER_VERSIONS)
+    with pytest.raises(TypeError):
+        TYPE_HANDLER_VERSIONS["table"] = "changed"  # type: ignore[index]

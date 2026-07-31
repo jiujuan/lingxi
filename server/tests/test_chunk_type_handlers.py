@@ -987,7 +987,6 @@ def _draft_kwargs() -> dict[str, object]:
         ({"overlap_prefix_tokens": 1}, "overlap"),
         ({"overlap_prefix_tokens": 2, "token_count": 1}, "overlap"),
         ({"metadata": {"overlap": {"tokens": 1}}}, "overlap"),
-        ({"unique_content": "different"}, "unique_content"),
     ],
 )
 def test_chunk_draft_rejects_contradictory_public_states(
@@ -1831,3 +1830,122 @@ def test_list_current_intro_provenance_is_deduplicated() -> None:
     assert all(
         draft.source_locators == (current.source_locator,) for draft in result.drafts
     )
+
+
+def test_chunk_draft_allows_distinct_immutable_unique_content() -> None:
+    draft = ChunkDraft(
+        **{**_draft_kwargs(), "unique_content": "unique"}  # type: ignore[arg-type]
+    )
+
+    restored = pickle.loads(pickle.dumps(draft))
+
+    assert draft.content == "content"
+    assert draft.unique_content == "unique"
+    assert restored == draft
+    with pytest.raises(FrozenInstanceError):
+        draft.unique_content = "changed"  # type: ignore[misc]
+
+
+def test_typed_handlers_emit_parent_unique_content_without_repeated_context() -> None:
+    counter = WhitespaceTokenCounter()
+    list_result = handle_typed_block(
+        atomic(
+            BlockType.LIST,
+            "- a",
+            metadata={"intro": "Steps now", "items": ["a", "b", "c", "d"]},
+        ),
+        policy(4),
+        counter,
+    )
+    table_result = handle_typed_block(
+        atomic(
+            BlockType.TABLE,
+            "table",
+            metadata={
+                "caption": "Quarterly",
+                "header": "Name Value",
+                "rows": [f"row{index} value{index} extra" for index in range(8)],
+            },
+        ),
+        policy(12),
+        counter,
+    )
+
+    assert "\n\n".join(draft.unique_content for draft in list_result.drafts).count(
+        "Steps now"
+    ) == 1
+    table_unique = "\n\n".join(
+        draft.unique_content for draft in table_result.drafts
+    )
+    assert table_unique.count("Quarterly") == 1
+    assert table_unique.count("Name Value") == 1
+    all_drafts = (*list_result.drafts, *table_result.drafts)
+    assert all(
+        draft.token_count == counter.count(draft.content)
+        for draft in all_drafts
+    )
+
+
+
+def test_table_column_group_unique_content_deduplicates_caption_and_headers() -> None:
+    block = atomic(
+        BlockType.TABLE,
+        "wide row",
+        metadata={
+            "caption": "Service matrix",
+            "header": [
+                "service-header",
+                "owner-header",
+                "region-header",
+                "tier-header",
+            ],
+            "rows": [["payments-api", "platform-team", "north-america", "tier-one"]],
+            "rowStart": 11,
+        },
+    )
+
+    result = handle_typed_block(block, policy(20), WhitespaceTokenCounter())
+    unique_parent = "\n\n".join(draft.unique_content for draft in result.drafts)
+
+    assert {draft.metadata["table"]["splitReason"] for draft in result.drafts} == {
+        "column_group"
+    }
+    assert unique_parent.count("Service matrix") == 1
+    for header in (
+        "service-header",
+        "owner-header",
+        "region-header",
+        "tier-header",
+    ):
+        assert unique_parent.count(header) == 1
+    for value in ("payments-api", "platform-team", "north-america", "tier-one"):
+        assert unique_parent.count(value) == 1
+
+
+def test_table_cell_recursive_unique_content_deduplicates_context_without_data_loss() -> None:
+    cell_tokens = [f"cell-{index:03d}" for index in range(50)]
+    long_cell = " ".join(cell_tokens)
+    block = atomic(
+        BlockType.TABLE,
+        "single oversized cell",
+        metadata={
+            "caption": "Incident details",
+            "header": ["description"],
+            "rows": [[long_cell]],
+            "rowStart": 13,
+        },
+    )
+
+    result = handle_typed_block(block, policy(12), WhitespaceTokenCounter())
+    unique_parent = "\n\n".join(draft.unique_content for draft in result.drafts)
+
+    assert len(result.drafts) > 1
+    assert {draft.metadata["table"]["splitReason"] for draft in result.drafts} == {
+        "cell_recursive"
+    }
+    assert unique_parent.count("Incident details") == 1
+    assert unique_parent.count("description") == 1
+    parent_tokens = unique_parent.split()
+    for token in cell_tokens:
+        assert parent_tokens.count(token) == 1
+    assert all(draft.unique_content for draft in result.drafts)

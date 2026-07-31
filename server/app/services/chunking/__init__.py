@@ -29,6 +29,10 @@ from server.app.services.chunking.recursive_splitter import (
     SplitReason,
     split_oversized_prose,
 )
+from server.app.services.chunking.service import (
+    ChunkingFeatureUnsupportedError,
+    ChunkingService,
+)
 from server.app.services.chunking.tokenizer import (
     LocalTokenCounter,
     TokenCounter,
@@ -36,6 +40,7 @@ from server.app.services.chunking.tokenizer import (
     TokenizerUnavailableError,
     require_token_counter,
 )
+from server.app.services.chunking.versions import TYPE_HANDLER_VERSIONS
 from server.app.services.chunking.type_handlers import (
     TYPE_HANDLER_REGISTRY,
     ChunkDraft,
@@ -53,7 +58,9 @@ __all__ = [
     "ChunkPolicy",
     "ChunkPolicyError",
     "ChunkSplitNoProgressError",
+    "ChunkingFeatureUnsupportedError",
     "ChunkingResult",
+    "ChunkingService",
     "ChunkingStats",
     "ChunkingWarning",
     "ChunkLevel",
@@ -67,6 +74,7 @@ __all__ = [
     "SplitBlock",
     "SplitReason",
     "TYPE_HANDLER_REGISTRY",
+    "TYPE_HANDLER_VERSIONS",
     "TokenCounter",
     "TokenLimitError",
     "TokenizerUnavailableError",

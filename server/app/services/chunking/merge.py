@@ -12,6 +12,7 @@ from server.app.services.chunking.contracts import (
     ChunkingWarning,
     _freeze_json_mapping,
 )
+from server.app.services.chunking.identity import source_identity
 from server.app.services.chunking.policy import ChunkPolicy
 from server.app.services.chunking.tokenizer import TokenCounter, require_token_counter
 
@@ -74,6 +75,12 @@ class MergedBlock:
         if any(block.title_path != title_path for block in atomic_blocks):
             raise ValueError(
                 "MergedBlock provenance title paths must match the merged block"
+            )
+
+        identities = {source_identity(block) for block in atomic_blocks}
+        if len(identities) != 1:
+            raise ValueError(
+                "MergedBlock provenance must belong to one source identity"
             )
 
         pages = [
@@ -141,6 +148,8 @@ def _can_share_safe_window(
     if previous.title_path != current.title_path:
         return False
     if previous.parent_structural_id != current.parent_structural_id:
+        return False
+    if source_identity(previous) != source_identity(current):
         return False
     if (
         not policy.allow_cross_page_merge

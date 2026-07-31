@@ -7,6 +7,8 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from server.app.services.chunking.versions import TYPE_HANDLER_VERSIONS
+
 _POLICY_ERROR = "CHUNK_POLICY_INVALID"
 
 
@@ -37,7 +39,7 @@ class ChunkPolicy:
     allow_cross_page_merge: bool = True
     semantic_split_enabled: bool = False
     type_handler_versions: Mapping[str, str] | tuple[tuple[str, str], ...] = field(
-        default_factory=lambda: (("default", "1.0"),)
+        default_factory=lambda: tuple(TYPE_HANDLER_VERSIONS.items())
     )
 
     def __post_init__(self) -> None:

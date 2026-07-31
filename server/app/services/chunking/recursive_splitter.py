@@ -16,6 +16,12 @@ from server.app.services.chunking.contracts import (
     to_json_value,
 )
 from server.app.services.chunking.merge import MergedBlock
+from server.app.services.chunking.normalization import (
+    NORMALIZATION_METADATA_KEY,
+    normalized_fragment_provenance,
+    normalized_segment_boundaries,
+    normalized_span_to_original,
+)
 from server.app.services.chunking.policy import ChunkPolicy
 from server.app.services.chunking.tokenizer import TokenCounter, require_token_counter
 
@@ -135,6 +141,7 @@ class _Span:
     start: int
     end: int
     reason: SplitReason
+    normalization_fragment: bool = False
 
 
 @dataclass(frozen=True)
@@ -286,6 +293,146 @@ def _split_recursively(
         return bounded
 
     return _hard_split_span(text, span, policy, token_counter)
+
+
+def _merged_normalization_boundaries(
+    block: MergedBlock, layouts: Sequence[_AtomicLayout]
+) -> tuple[int, ...]:
+    boundaries = {0, len(block.content)}
+    cursor = 0
+    for layout in layouts:
+        # Merge separators have no atomic provenance and are independently safe.
+        boundaries.update(range(cursor, layout.start + 1))
+        normalization = layout.block.metadata.get(NORMALIZATION_METADATA_KEY)
+        if isinstance(normalization, Mapping):
+            try:
+                boundaries.update(
+                    layout.start + boundary
+                    for boundary in normalized_segment_boundaries(normalization)
+                )
+            except ValueError as exc:
+                raise ChunkSplitNoProgressError(
+                    str(exc), content=layout.block.content
+                ) from exc
+        else:
+            boundaries.update(range(layout.start, layout.end + 1))
+        cursor = layout.end
+    boundaries.update(range(cursor, len(block.content) + 1))
+    return tuple(sorted(boundaries))
+
+
+def _bounded_normalization_spans(
+    text: str,
+    span: _Span,
+    policy: ChunkPolicy,
+    token_counter: TokenCounter,
+    boundaries: Sequence[int],
+) -> list[_Span]:
+    legal = [
+        boundary for boundary in boundaries if span.start <= boundary <= span.end
+    ]
+    if not legal or legal[0] != span.start or legal[-1] != span.end:
+        raise ChunkSplitNoProgressError(
+            "normalization-aligned span has incomplete legal boundaries",
+            content=text[span.start : span.end],
+        )
+
+    pieces: list[_Span] = []
+    boundary_index = 0
+    while boundary_index < len(legal) - 1:
+        start = legal[boundary_index]
+        best_index = boundary_index
+        probe_index = boundary_index + 1
+        while probe_index < len(legal):
+            candidate = text[start : legal[probe_index]]
+            if token_counter.count(candidate) > policy.max_tokens:
+                break
+            best_index = probe_index
+            probe_index += 1
+        if best_index > boundary_index:
+            end = legal[best_index]
+            reason = (
+                span.reason
+                if start == span.start and end == span.end
+                else SplitReason.TOKEN_HARD_CUT
+            )
+            pieces.append(_Span(start, end, reason))
+            boundary_index = best_index
+            continue
+
+        # One canonical normalization segment exceeds max_tokens. Preserve the
+        # containing original segment as explicit provenance while splitting only
+        # in normalized coordinate space; never claim an irreversible raw slice.
+        segment_end = legal[boundary_index + 1]
+        source = text[start:segment_end]
+        parts = token_counter.split_by_token_limit(source, policy.max_tokens)
+        if (
+            not parts
+            or any(not part for part in parts)
+            or "".join(parts) != source
+            or any(token_counter.count(part) > policy.max_tokens for part in parts)
+            or (len(parts) == 1 and token_counter.count(source) > policy.max_tokens)
+        ):
+            raise ChunkSplitNoProgressError(
+                "one normalization segment cannot be safely split by the tokenizer",
+                content=source,
+            )
+        cursor = start
+        for part in parts:
+            end = cursor + len(part)
+            pieces.append(
+                _Span(
+                    cursor,
+                    end,
+                    SplitReason.TOKEN_HARD_CUT,
+                    normalization_fragment=True,
+                )
+            )
+            cursor = end
+        boundary_index += 1
+    return pieces
+
+
+def _align_spans_to_normalization(
+    text: str,
+    spans: Sequence[_Span],
+    policy: ChunkPolicy,
+    token_counter: TokenCounter,
+    boundaries: Sequence[int],
+) -> list[_Span]:
+    boundary_set = set(boundaries)
+    expanded: list[_Span] = []
+    for span in spans:
+        if span.normalization_fragment:
+            expanded.append(span)
+            continue
+        start = span.start
+        end = span.end
+        if start not in boundary_set:
+            start = max(boundary for boundary in boundaries if boundary < start)
+        if end not in boundary_set:
+            end = min(boundary for boundary in boundaries if boundary > end)
+        candidate = _Span(start, end, span.reason)
+        if expanded and candidate.start < expanded[-1].end:
+            previous = expanded.pop()
+            candidate = _Span(
+                previous.start,
+                max(previous.end, candidate.end),
+                _combine_reason((previous, candidate)),
+            )
+        expanded.append(candidate)
+
+    bounded: list[_Span] = []
+    for span in expanded:
+        if token_counter.count(text[span.start : span.end]) <= policy.max_tokens:
+            bounded.append(span)
+        else:
+            bounded.extend(
+                _bounded_normalization_spans(
+                    text, span, policy, token_counter, boundaries
+                )
+            )
+    return bounded
 
 
 def _atomic_layouts(block: MergedBlock) -> tuple[_AtomicLayout, ...]:
@@ -676,13 +823,83 @@ def _annotated_provenance(
                 f"source locator reserves key {_LOCATOR_SPAN_KEY}",
                 content=block.content,
             )
-        source_locator[_LOCATOR_SPAN_KEY] = {
+        normalized_start = overlap_start - layout.start
+        normalized_end = overlap_end - layout.start
+        normalization = layout.block.metadata.get(NORMALIZATION_METADATA_KEY)
+        original_start = normalized_start
+        original_end = normalized_end
+        normalization_version = "identity-v1"
+        normalization_work_units = len(layout.block.content)
+        if isinstance(normalization, Mapping):
+            normalization_version = str(
+                normalization.get("version", "unknown")
+            )
+            raw_work_units = normalization.get("normalizationWorkUnits", 0)
+            if not isinstance(raw_work_units, int) or isinstance(raw_work_units, bool):
+                raise ChunkSplitNoProgressError(
+                    "normalized atomic block has invalid normalization work units",
+                    content=block.content,
+                )
+            normalization_work_units = raw_work_units
+            if not span.normalization_fragment:
+                try:
+                    original_start, original_end = normalized_span_to_original(
+                        normalization,
+                        normalized_start,
+                        normalized_end,
+                        expected_normalized=layout.block.content[
+                            normalized_start:normalized_end
+                        ],
+                    )
+                except ValueError as exc:
+                    raise ChunkSplitNoProgressError(
+                        str(exc),
+                        content=block.content,
+                    ) from exc
+        locator_span: dict[str, Any] = {
             "split_reason": span.reason.value,
+            "coordinate_space": "original_atomic",
+            "normalization_version": normalization_version,
+            "normalization_work_units": normalization_work_units,
+            "merged_coordinate_space": "normalized_merged",
             "merged_char_start": overlap_start,
             "merged_char_end": overlap_end,
-            "atomic_char_start": overlap_start - layout.start,
-            "atomic_char_end": overlap_end - layout.start,
+            "normalized_atomic_char_start": normalized_start,
+            "normalized_atomic_char_end": normalized_end,
         }
+        if span.normalization_fragment and isinstance(normalization, Mapping):
+            try:
+                fragment = normalized_fragment_provenance(
+                    normalization, normalized_start, normalized_end
+                )
+            except ValueError as exc:
+                raise ChunkSplitNoProgressError(
+                    str(exc), content=block.content[span.start : span.end]
+                ) from exc
+            locator_span.update(
+                {
+                    "coordinate_space": fragment["coordinateSpace"],
+                    "provenance_mode": fragment["provenanceMode"],
+                    "original_segment_char_start": fragment[
+                        "originalSegmentStart"
+                    ],
+                    "original_segment_char_end": fragment["originalSegmentEnd"],
+                    "normalization_segment_char_start": fragment[
+                        "normalizedSegmentStart"
+                    ],
+                    "normalization_segment_char_end": fragment[
+                        "normalizedSegmentEnd"
+                    ],
+                }
+            )
+        else:
+            locator_span.update(
+                {
+                    "atomic_char_start": original_start,
+                    "atomic_char_end": original_end,
+                }
+            )
+        source_locator[_LOCATOR_SPAN_KEY] = locator_span
         atomic_blocks.append(layout.block)
         locators.append(source_locator)
 
@@ -773,6 +990,13 @@ def split_oversized_prose(
             ),
         )
 
+    spans = _align_spans_to_normalization(
+        block.content,
+        spans,
+        policy,
+        counter,
+        _merged_normalization_boundaries(block, layouts),
+    )
     split_blocks = tuple(
         _build_split_block(block, layouts, span, counter) for span in spans
     )
