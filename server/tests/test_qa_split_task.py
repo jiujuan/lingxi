@@ -187,6 +187,7 @@ def test_qa_split_service_writes_pairs_and_is_idempotent():
     assert qa_pairs[0].chunk_id == chunks[0].id
     assert qa_pairs[1].page_no == 2
     assert qa_pairs[1].quote == "已开票订单需先红冲发票。"
+    assert job.options["embedding"]["run_config_hash"] == chunks[0].chunker_config_hash
 
 
 def test_qa_split_failure_records_error_and_keeps_chunks():

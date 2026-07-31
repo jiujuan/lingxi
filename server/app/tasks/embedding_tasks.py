@@ -10,9 +10,16 @@ from server.app.tasks.celery_app import celery_app
     max_retries=3,
     name="server.app.tasks.embedding_tasks.embed_qa_pairs_task",
 )
-def embed_qa_pairs_task(self, job_id: str) -> dict:
+def embed_qa_pairs_task(self, job_id: str, chunk_indexing_enabled: bool = False) -> dict:
+    """Embed required QA targets and, when explicitly enabled, Child chunks.
+
+    The flag is task wiring input rather than a service-side environment read;
+    Task 16 will provide the Settings-backed production wiring.
+    """
     with SessionLocal() as session:
-        job = EmbeddingService(session).embed_import_job(job_id)
+        job = EmbeddingService(
+            session, chunk_indexing_enabled=chunk_indexing_enabled
+        ).embed_import_job(job_id)
         outcome = resolve_task_outcome(session, job, "embed_qa_pairs_task")
         if outcome.failed:
             handle_failure(self, outcome)  # raises: retry or terminal

@@ -459,6 +459,7 @@ class QaSplitService:
             prompt_batches = self._group_chunks(chunks)
             items = self._generate_qa_items(adapter, document, prompt_batches)
             self._replace_qa_pairs(job, document, chunks, items)
+            self._bind_embedding_run_config_hash(job, chunks)
 
             document.qa_pair_count = len(items)
             document.status = DocumentStatus.EMBEDDING
@@ -595,6 +596,31 @@ class QaSplitService:
                 )
             )
         return items
+
+    @staticmethod
+    def _bind_embedding_run_config_hash(
+        job: ImportJob, chunks: list[DocumentChunk]
+    ) -> None:
+        """Persist the exact Child generation that produced this QA run."""
+        config_hashes = {
+            chunk.chunker_config_hash.strip()
+            for chunk in chunks
+            if isinstance(chunk.chunker_config_hash, str) and chunk.chunker_config_hash.strip()
+        }
+        if len(config_hashes) != 1:
+            raise QaSplitValidationError(
+                "QA 来源 Chunk generation 无法唯一确定",
+                "QA_SPLIT_RUN_CONFIG_INVALID",
+            )
+        options = dict(job.options) if isinstance(job.options, dict) else {}
+        embedding_options = options.get("embedding")
+        options["embedding"] = {
+            **(embedding_options if isinstance(embedding_options, dict) else {}),
+            "run_config_hash": config_hashes.pop(),
+        }
+        # Reassignment (rather than mutating nested JSON) makes SQLAlchemy
+        # persist this recoverable transition metadata on every backend.
+        job.options = options
 
     def _list_chunks(self, document_id: str) -> list[DocumentChunk]:
         # Hierarchical chunking persists Parent and Child in the same table;
