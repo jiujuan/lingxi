@@ -17,6 +17,13 @@ from server.app.services.chunking.merge import (
     merge_small_blocks,
 )
 from server.app.services.chunking.policy import ChunkPolicy, ChunkPolicyError
+from server.app.services.chunking.recursive_splitter import (
+    ChunkSplitNoProgressError,
+    RecursiveSplitResult,
+    SplitBlock,
+    SplitReason,
+    split_oversized_prose,
+)
 from server.app.services.chunking.tokenizer import (
     LocalTokenCounter,
     TokenCounter,
@@ -30,6 +37,7 @@ __all__ = [
     "BlockType",
     "ChunkPolicy",
     "ChunkPolicyError",
+    "ChunkSplitNoProgressError",
     "ChunkingResult",
     "ChunkingStats",
     "ChunkingWarning",
@@ -38,11 +46,15 @@ __all__ = [
     "MergedBlock",
     "MergeResult",
     "NormalizedChunk",
+    "RecursiveSplitResult",
+    "SplitBlock",
+    "SplitReason",
     "TokenCounter",
     "TokenLimitError",
     "TokenizerUnavailableError",
     "group_by_safe_boundary",
     "merge_small_blocks",
     "require_token_counter",
+    "split_oversized_prose",
     "to_json_value",
 ]
