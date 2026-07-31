@@ -1,4 +1,5 @@
 from server.app.integrations.parsers.base import ParseRequest, ParseSource, ParserError
+from server.app.services.chunking.contracts import BlockType
 from server.app.integrations.parsers.csv_parser import _MAX_BLOCK_CHARS, CsvParser
 
 
@@ -27,6 +28,13 @@ def test_csv_parser_builds_markdown_table_blocks():
     assert block.title_path == ["员工名单"]
     assert block.page_no == 1
     assert block.source_locator == {"rowStart": 2, "rowEnd": 3}
+    assert block.block_type is BlockType.TABLE
+    assert block.metadata == {
+        "header": ["姓名", "部门", "备注"],
+        "rowStart": 2,
+        "rowEnd": 3,
+        "headerRow": 1,
+    }
     assert parsed.markdown.startswith("| 姓名 |")
 
 

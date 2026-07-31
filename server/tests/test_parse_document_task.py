@@ -109,6 +109,100 @@ def test_lightweight_parser_splits_markdown_into_blocks():
     assert parsed.blocks[1].title_path == ["Title", "Step"]
 
 
+def test_lightweight_parser_emits_markdown_structural_block_types():
+    from server.app.integrations.parsers.base import ParseRequest, ParseSource
+    from server.app.integrations.parsers.lightweight import LightweightParser
+    from server.app.services.chunking.contracts import BlockType
+
+    parsed = LightweightParser().parse(
+        ParseRequest(
+            source=ParseSource(
+                file_name="structures.md",
+                mime_type="text/markdown",
+                content=(
+                    "正文。\n\n- first\n- second\n\n> 引用。\n\n"
+                    "```python\nprint('ok')\n```\n\n"
+                    "| a | b |\n| --- | --- |\n| 1 | 2 |"
+                ).encode(),
+            )
+        )
+    )
+
+    assert [block.block_type for block in parsed.blocks] == [
+        BlockType.TEXT,
+        BlockType.LIST,
+        BlockType.QUOTE,
+        BlockType.CODE,
+        BlockType.TABLE,
+    ]
+    assert parsed.blocks[3].metadata == {
+        "language": "python",
+        "sourceLabel": "markdown_fence",
+    }
+    assert parsed.blocks[4].metadata["sourceLabel"] == "markdown_table"
+    assert parsed.blocks[4].source_locator == {"lineStart": 12, "lineEnd": 14}
+
+
+def test_lightweight_parser_classifies_markdown_continuations_without_false_tables():
+    from server.app.integrations.parsers.base import ParseRequest, ParseSource
+    from server.app.integrations.parsers.lightweight import LightweightParser
+    from server.app.services.chunking.contracts import BlockType
+
+    cases = {
+        "list.md": "- first item\n  continuation text\n  - nested item",
+        "quote.md": "> quoted lead\nlazy continuation",
+        "not-a-table.md": "This is not a table\n--- | ---",
+    }
+    expected = [BlockType.LIST, BlockType.QUOTE, BlockType.TEXT]
+
+    actual = []
+    for file_name, markdown in cases.items():
+        parsed = LightweightParser().parse(
+            ParseRequest(
+                source=ParseSource(
+                    file_name=file_name,
+                    mime_type="text/markdown",
+                    content=markdown.encode(),
+                )
+            )
+        )
+        actual.append(parsed.blocks[0].block_type)
+
+    assert actual == expected
+
+
+def test_lightweight_parser_keeps_top_level_blocks_out_of_a_list():
+    from server.app.integrations.parsers.base import ParseRequest, ParseSource
+    from server.app.integrations.parsers.lightweight import LightweightParser
+    from server.app.services.chunking.contracts import BlockType
+
+    def block_types(markdown: str) -> list[BlockType]:
+        parsed = LightweightParser().parse(
+            ParseRequest(
+                source=ParseSource(
+                    file_name="list-boundaries.md",
+                    mime_type="text/markdown",
+                    content=markdown.encode(),
+                )
+            )
+        )
+        return [block.block_type for block in parsed.blocks]
+
+    assert block_types("- item\n```python\nprint('top level')\n```") == [
+        BlockType.LIST,
+        BlockType.CODE,
+    ]
+    assert block_types("- item\n> top-level quote") == [
+        BlockType.LIST,
+        BlockType.QUOTE,
+    ]
+    # An indented fence belongs to the list item, so it is deliberately one
+    # LIST atomic block rather than a sibling top-level CODE block.
+    assert block_types("- item\n  ```python\n  print('nested')\n  ```") == [
+        BlockType.LIST,
+    ]
+
+
 def test_parse_document_service_writes_artifact_and_chunks_idempotently(tmp_path):
     session, identity, storage = build_parse_session(tmp_path)
     job_id, document_id = create_uploaded_job(

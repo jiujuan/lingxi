@@ -9,12 +9,13 @@ change when the deployed MinerU version changes. Errors are always raised as
 :class:`ParserError` so the Celery retry pipeline can act on ``retryable``.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import time
 
 from server.app.core.config import settings
 from server.app.integrations.parsers._http import RetryingHttpClient
+from server.app.services.chunking.contracts import BlockType
 from server.app.integrations.parsers.base import (
     ParsedBlock,
     ParsedDocument,
@@ -29,6 +30,33 @@ from server.app.integrations.parsers.markdown_blocks import (
 
 _TASK_SUCCESS_STATES = {"done", "completed", "success", "succeeded", "finished"}
 _TASK_FAILURE_STATES = {"failed", "error", "cancelled"}
+
+_MINERU_BLOCK_TYPES = {
+    "text": BlockType.TEXT,
+    "list": BlockType.LIST,
+    "list_item": BlockType.LIST,
+    "table": BlockType.TABLE,
+    "image": BlockType.IMAGE,
+    "equation": BlockType.FORMULA,
+    "formula": BlockType.FORMULA,
+    "code": BlockType.CODE,
+    "quote": BlockType.QUOTE,
+    "blockquote": BlockType.QUOTE,
+}
+
+
+def _fallback_blocks(markdown: str, reason: str) -> list[ParsedBlock]:
+    return [
+        replace(
+            block,
+            metadata={
+                **block.metadata,
+                "parserFallback": True,
+                "fallbackReason": reason,
+            },
+        )
+        for block in split_markdown_blocks(markdown)
+    ]
 
 
 @dataclass(frozen=True)
@@ -245,12 +273,12 @@ class MinerUParser(ParserAdapter):
                 # headings/uncaptioned images, or a schema this builder doesn't
                 # recognise) but markdown is present — split that so the
                 # document isn't lost to a downstream "no chunk" error.
-                blocks = split_markdown_blocks(markdown)
+                blocks = _fallback_blocks(markdown, "MINERU_STRUCTURED_CONTENT_EMPTY")
                 page_count = page_count or (1 if markdown else 0)
                 warnings.append("MinerU 结构化内容为空，已按 markdown 回退切分")
         else:
             markdown = result.markdown or ""
-            blocks = split_markdown_blocks(markdown)
+            blocks = _fallback_blocks(markdown, "MINERU_CONTENT_LIST_MISSING")
             page_count = 1 if markdown else 0
             warnings.append("MinerU 未返回 content_list，已按 markdown 回退切分")
 
@@ -313,6 +341,16 @@ class MinerUParser(ParserAdapter):
             if not content:
                 continue
 
+            raw_bbox = item.get("bbox")
+            metadata = {
+                "sourceLabel": item_type,
+                "pageNo": page_no,
+                "blockIndex": item_index,
+            }
+            if raw_bbox is not None:
+                metadata["bbox"] = raw_bbox
+            if item.get("self_ref") is not None:
+                metadata["selfRef"] = item.get("self_ref")
             blocks.append(
                 ParsedBlock(
                     index=len(blocks),
@@ -320,10 +358,19 @@ class MinerUParser(ParserAdapter):
                     page_no=page_no,
                     title_path=list(title_path),
                     source_locator={"pageNo": page_no, "blockIndex": item_index},
+                    block_type=_MINERU_BLOCK_TYPES.get(item_type, BlockType.UNKNOWN),
+                    structural_id=f"mineru:block:{item_index}",
+                    parent_structural_id=(
+                        f"mineru:section:{'/'.join(title_path)}" if title_path else None
+                    ),
+                    metadata=metadata,
                 )
             )
 
         warnings: list[str] = []
         if skipped_images:
-            warnings.append(f"跳过 {skipped_images} 张无描述图片")
+            warnings.append(
+                "IMAGE_WITHOUT_TEXT_SKIPPED: MinerU skipped "
+                f"{skipped_images} image blocks without caption"
+            )
         return blocks, page_count, warnings
