@@ -310,16 +310,32 @@ class QaSplitService:
         return items
 
     def _list_chunks(self, document_id: str) -> list[DocumentChunk]:
-        return list(
+        # Hierarchical chunking persists Parent and Child in the same table;
+        # QA generation may only consume retrievable CHILD rows.  Select one
+        # active config generation so stale/corrupt mixed generations cannot
+        # create duplicate chunkIndex mappings.
+        active_children = list(
             self.session.scalars(
                 select(DocumentChunk)
                 .where(
                     DocumentChunk.document_id == document_id,
                     DocumentChunk.deleted_at.is_(None),
                     DocumentChunk.status == "ACTIVE",
+                    DocumentChunk.chunk_level == "CHILD",
                 )
-                .order_by(DocumentChunk.chunk_index)
+                .order_by(DocumentChunk.created_at.desc(), DocumentChunk.id.desc())
             ).all()
+        )
+        if not active_children:
+            return []
+        config_hash = active_children[0].chunker_config_hash
+        return sorted(
+            (
+                chunk
+                for chunk in active_children
+                if chunk.chunker_config_hash == config_hash
+            ),
+            key=lambda chunk: chunk.chunk_index,
         )
 
     def _replace_qa_pairs(
