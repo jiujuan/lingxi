@@ -36,10 +36,20 @@ from server.app.services.chunking.tokenizer import (
     TokenizerUnavailableError,
     require_token_counter,
 )
+from server.app.services.chunking.type_handlers import (
+    TYPE_HANDLER_REGISTRY,
+    ChunkDraft,
+    TypeHandler,
+    TypeHandlerContext,
+    TypeHandlerResult,
+    get_type_handler,
+    handle_typed_block,
+)
 
 __all__ = [
     "AtomicBlock",
     "BlockType",
+    "ChunkDraft",
     "ChunkPolicy",
     "ChunkPolicyError",
     "ChunkSplitNoProgressError",
@@ -56,11 +66,17 @@ __all__ = [
     "RecursiveSplitResult",
     "SplitBlock",
     "SplitReason",
+    "TYPE_HANDLER_REGISTRY",
     "TokenCounter",
     "TokenLimitError",
     "TokenizerUnavailableError",
+    "TypeHandler",
+    "TypeHandlerContext",
+    "TypeHandlerResult",
     "apply_prose_overlap",
+    "get_type_handler",
     "group_by_safe_boundary",
+    "handle_typed_block",
     "merge_small_blocks",
     "require_token_counter",
     "split_oversized_prose",

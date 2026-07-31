@@ -1,0 +1,19 @@
+{
+  "content": "def add_tax(amount):\n    return amount * 1.2\n\ndef subtract_tax(amount):\n    return amount / 1.2",
+  "language": "python",
+  "file": "billing.py",
+  "symbols": [
+    {
+      "signature": "def add_tax(amount):",
+      "content": "def add_tax(amount):\n    return amount * 1.2",
+      "lineStart": 1,
+      "lineEnd": 2
+    },
+    {
+      "signature": "def subtract_tax(amount):",
+      "content": "def subtract_tax(amount):\n    return amount / 1.2",
+      "lineStart": 4,
+      "lineEnd": 5
+    }
+  ]
+}
