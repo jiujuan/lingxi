@@ -140,7 +140,27 @@ class RetrievalService:
         retrieve_duration = perf_counter() - retrieval_started
 
         rerank_started = perf_counter()
-        reranked = self.reranker.rerank(question, fused)[: self.config.final_top_k]
+        reranker_degraded = False
+        try:
+            reranked = self.reranker.rerank(question, fused)[: self.config.final_top_k]
+        except Exception as exc:
+            # Reranking is an optional quality stage.  Preserve the already
+            # fused RRF order and let callers continue with usable evidence
+            # rather than turning an optional dependency outage into a query
+            # outage.  Do not log question or evidence content.
+            logger.warning(
+                "reranker failed; using fused retrieval order",
+                extra={
+                    "tenant_id": context.tenant_id,
+                    "request_id": current_request_id(),
+                    "error_type": type(exc).__name__,
+                    "reason": "reranker_unavailable",
+                },
+            )
+            reranked = fused[: self.config.final_top_k]
+            for candidate in reranked:
+                candidate.rerank_score = candidate.fused_score
+            reranker_degraded = True
         rerank_duration = perf_counter() - rerank_started
         hydration_duration = 0.0
         if self.hybrid_chunk_retrieval_enabled and self.parent_context_enabled:
@@ -150,15 +170,17 @@ class RetrievalService:
                     self.session
                 )
                 reranked = hydrator.hydrate(context, reranked, access_scope)
-            except Exception:
+            except Exception as exc:
                 # Hydration only enriches a winning Child.  Its failure must
                 # never change retrieval/citation identity or turn a usable
                 # result into an outage; PromptService will use Child-only.
-                logger.exception(
+                logger.warning(
                     "context hydration failed; using child-only evidence",
                     extra={
                         "tenant_id": context.tenant_id,
                         "request_id": current_request_id(),
+                        "error_type": type(exc).__name__,
+                        "reason": "parent_hydration_failed",
                     },
                 )
                 for candidate in reranked:
@@ -170,6 +192,7 @@ class RetrievalService:
         snapshot["stages"]["rerank"] = [
             item.to_snapshot() for item in reranked
         ][: self.config.snapshot_max_items_per_stage]
+        snapshot["rerankerDegraded"] = reranker_degraded
         snapshot = sanitize_retrieval_snapshot(
             snapshot,
             max_items_per_stage=self.config.snapshot_max_items_per_stage,
@@ -196,7 +219,11 @@ class RetrievalService:
                 "hydrate": hydration_duration,
             },
             degraded_reason=(
-                "chunk_channel_unavailable" if chunk_degraded else None
+                "reranker_unavailable"
+                if reranker_degraded
+                else "chunk_channel_unavailable"
+                if chunk_degraded
+                else None
             ),
         )
         logger.info(
@@ -211,6 +238,7 @@ class RetrievalService:
                 "fused_candidate_count": len(fused),
                 "final_candidate_count": len(reranked),
                 "chunk_retrieval_degraded": chunk_degraded,
+                "reranker_degraded": reranker_degraded,
                 "latency_ms": int((perf_counter() - started) * 1000),
             },
         )
@@ -243,18 +271,18 @@ class RetrievalService:
         access_scope: RetrievalAccessScope | None,
     ) -> tuple[list[RetrievalCandidate], dict[str, list], bool]:
         qa_vector = self.repo.search_qa_vector(
-            context, query_vector, self.config.vector_top_k, access_scope
+            context, query_vector, self.config.hybrid_qa_vector_top_k, access_scope
         )
         qa_text = self.repo.search_qa_text(
-            context, query_tokens, question, self.config.text_top_k, access_scope
+            context, query_tokens, question, self.config.hybrid_qa_text_top_k, access_scope
         )
         chunk_degraded = False
         try:
             chunk_vector = self.repo.search_chunk_vector(
-                context, query_vector, self.config.vector_top_k, access_scope
+                context, query_vector, self.config.hybrid_chunk_vector_top_k, access_scope
             )
             chunk_text = self.repo.search_chunk_text(
-                context, query_tokens, question, self.config.text_top_k, access_scope
+                context, query_tokens, question, self.config.hybrid_chunk_text_top_k, access_scope
             )
         except ChunkChannelUnavailableError:
             # A declared Chunk-index availability fault is the only permitted
@@ -811,6 +839,10 @@ class RetrievalService:
             "retrieval": {
                 "vectorTopK": self.config.vector_top_k,
                 "textTopK": self.config.text_top_k,
+                "hybridQaVectorTopK": self.config.hybrid_qa_vector_top_k,
+                "hybridChunkVectorTopK": self.config.hybrid_chunk_vector_top_k,
+                "hybridQaTextTopK": self.config.hybrid_qa_text_top_k,
+                "hybridChunkTextTopK": self.config.hybrid_chunk_text_top_k,
                 "finalTopK": self.config.final_top_k,
                 "rrfK": self.config.rrf_k,
                 "lowConfidenceThreshold": self.config.low_confidence_threshold,

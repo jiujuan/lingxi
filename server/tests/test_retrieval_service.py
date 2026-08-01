@@ -2,6 +2,7 @@ from dataclasses import replace
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 
 from server.tests.test_document_permissions import build_session
 
@@ -268,6 +269,51 @@ def _stub_hybrid_channels(monkeypatch, service, *, qa_vector, qa_text, chunk_vec
     monkeypatch.setattr(service.repo, "search_qa_text", lambda *_args: qa_text)
     monkeypatch.setattr(service.repo, "search_chunk_vector", lambda *_args: chunk_vector)
     monkeypatch.setattr(service.repo, "search_chunk_text", lambda *_args: chunk_text)
+
+
+def test_hybrid_retrieval_uses_bounded_per_channel_candidate_budgets(monkeypatch):
+    from server.app.core.retrieval_config import get_retrieval_config
+    from server.app.services.retrieval_service import RetrievalService
+
+    session, identity = build_session()
+    qa_pairs, chunks = _seed_hybrid_evidence(session, identity)
+    config = replace(
+        get_retrieval_config(),
+        vector_top_k=10,
+        text_top_k=8,
+        hybrid_qa_vector_top_k=4,
+        hybrid_chunk_vector_top_k=6,
+        hybrid_qa_text_top_k=3,
+        hybrid_chunk_text_top_k=5,
+    )
+    service = RetrievalService(
+        session,
+        config=config,
+        hybrid_chunk_retrieval_enabled=True,
+    )
+    call_budgets = {}
+    monkeypatch.setattr(service, "_embed_query", lambda *_args: [1.0, 0.0, 0.0, 0.0])
+    monkeypatch.setattr(service.tokenizer, "tokenize", lambda _question: ["退款"])
+
+    def capture(name, rows):
+        def search(*args):
+            call_budgets[name] = args[-2]
+            return rows
+        return search
+
+    monkeypatch.setattr(service.repo, "search_qa_vector", capture("qa_vector", [(qa_pairs[0], 0.9)]))
+    monkeypatch.setattr(service.repo, "search_qa_text", capture("qa_text", [(qa_pairs[0], 0.8)]))
+    monkeypatch.setattr(service.repo, "search_chunk_vector", capture("chunk_vector", [(chunks[0], 0.7)]))
+    monkeypatch.setattr(service.repo, "search_chunk_text", capture("chunk_text", [(chunks[0], 0.6)]))
+
+    service.retrieve(_employee_context(identity), "退款需要谁审批？")
+
+    assert call_budgets == {
+        "qa_vector": 4,
+        "chunk_vector": 6,
+        "qa_text": 3,
+        "chunk_text": 5,
+    }
 
 
 def test_hybrid_retrieval_fuses_four_channels_into_one_source_chunk_and_snapshots_ranks(monkeypatch):
@@ -730,6 +776,102 @@ def test_hybrid_degrades_to_qa_only_when_chunk_text_channel_is_unavailable(monke
 
     assert result.snapshot["chunkRetrievalDegraded"] is True
     assert [candidate.qa_pair_id for candidate in result.candidates] == [qa_pairs[0].id]
+
+
+def _assert_chunk_postgres_failure_degrades_to_qa_only(
+    monkeypatch,
+    *,
+    query_vector,
+    dbapi_error,
+):
+    from server.app.services import retrieval_service
+
+    session, identity = build_session()
+    qa_pairs, _chunks = _seed_hybrid_evidence(session, identity)
+    service = _hybrid_service(session)
+    context = _employee_context(identity)
+    qa_pair = qa_pairs[0]
+    session.refresh(qa_pair)
+    metric_calls = []
+    original_execute = session.execute
+    original_rollback = session.rollback
+    execute_calls = 0
+    rollback_calls = 0
+
+    monkeypatch.setattr(service, "_embed_query", lambda *_args: query_vector)
+    monkeypatch.setattr(service.tokenizer, "tokenize", lambda _question: ["退款"])
+    monkeypatch.setattr(
+        service.repo, "search_qa_vector", lambda *_args: [(qa_pair, 0.9)]
+    )
+    monkeypatch.setattr(
+        service.repo, "search_qa_text", lambda *_args: [(qa_pair, 0.8)]
+    )
+    monkeypatch.setattr(
+        type(service.repo), "_is_postgres", property(lambda _repo: True)
+    )
+
+    def fail_first_chunk_database_execution(statement, *args, **kwargs):
+        nonlocal execute_calls
+        execute_calls += 1
+        if execute_calls == 1:
+            raise OperationalError(
+                "SELECT chunk candidates",
+                {},
+                dbapi_error,
+            )
+        return original_execute(statement, *args, **kwargs)
+
+    def record_chunk_failure_rollback():
+        nonlocal rollback_calls
+        rollback_calls += 1
+        return original_rollback()
+
+    monkeypatch.setattr(session, "execute", fail_first_chunk_database_execution)
+    monkeypatch.setattr(session, "rollback", record_chunk_failure_rollback)
+    monkeypatch.setattr(
+        retrieval_service.metrics,
+        "observe_retrieval",
+        lambda **kwargs: metric_calls.append(kwargs),
+    )
+
+    result = service.retrieve(context, "退款需要谁审批？")
+
+    assert execute_calls >= 1
+    assert rollback_calls == 1
+    assert [candidate.qa_pair_id for candidate in result.candidates] == [qa_pair.id]
+    assert result.candidates[0].evidence_type == "QA"
+    assert result.snapshot["chunkRetrievalDegraded"] is True
+    assert result.snapshot["stages"]["chunkVector"] == []
+    assert result.snapshot["stages"]["chunkText"] == []
+    assert metric_calls[-1]["degraded_reason"] == "chunk_channel_unavailable"
+
+
+def test_hybrid_degrades_to_qa_only_for_postgres_chunk_vector_statement_timeout(
+    monkeypatch,
+):
+    from psycopg import errors as psycopg_errors
+
+    _assert_chunk_postgres_failure_degrades_to_qa_only(
+        monkeypatch,
+        query_vector=[1.0, 0.0, 0.0, 0.0],
+        dbapi_error=psycopg_errors.QueryCanceled(
+            "canceling statement due to statement timeout"
+        ),
+    )
+
+
+def test_hybrid_degrades_to_qa_only_for_postgres_chunk_text_connection_failure(
+    monkeypatch,
+):
+    from psycopg import errors as psycopg_errors
+
+    _assert_chunk_postgres_failure_degrades_to_qa_only(
+        monkeypatch,
+        query_vector=[],
+        dbapi_error=psycopg_errors.ConnectionFailure(
+            'connection to server at "db" failed: Connection refused'
+        ),
+    )
 
 
 def test_hybrid_disabled_uses_legacy_qa_only_paths(monkeypatch):

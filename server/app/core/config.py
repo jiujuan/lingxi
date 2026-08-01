@@ -287,6 +287,21 @@ class Settings:
     retrieval_text_top_k: int = field(
         default_factory=lambda: int(os.getenv("RETRIEVAL_TEXT_TOP_K", "20"))
     )
+    # Hybrid retrieval must not double the QA-only candidate envelope.  The
+    # four channel budgets are validated against the legacy per-modality cap
+    # at startup, so enabling Child retrieval remains capacity-bounded.
+    retrieval_hybrid_qa_vector_top_k: int = field(
+        default_factory=lambda: _env_int("RETRIEVAL_HYBRID_QA_VECTOR_TOP_K", 10)
+    )
+    retrieval_hybrid_chunk_vector_top_k: int = field(
+        default_factory=lambda: _env_int("RETRIEVAL_HYBRID_CHUNK_VECTOR_TOP_K", 10)
+    )
+    retrieval_hybrid_qa_text_top_k: int = field(
+        default_factory=lambda: _env_int("RETRIEVAL_HYBRID_QA_TEXT_TOP_K", 10)
+    )
+    retrieval_hybrid_chunk_text_top_k: int = field(
+        default_factory=lambda: _env_int("RETRIEVAL_HYBRID_CHUNK_TEXT_TOP_K", 10)
+    )
     retrieval_final_top_k: int = field(
         default_factory=lambda: int(os.getenv("RETRIEVAL_FINAL_TOP_K", "5"))
     )
@@ -443,6 +458,35 @@ def validate_chunking_config(current: "Settings | None" = None) -> None:
         problems.append("parent_max_tokens 必须不小于 max_tokens")
     if current.retrieval_rrf_k <= 0:
         problems.append("RETRIEVAL_RRF_K 必须为正整数")
+    for name, value in (
+        ("RETRIEVAL_VECTOR_TOP_K", current.retrieval_vector_top_k),
+        ("RETRIEVAL_TEXT_TOP_K", current.retrieval_text_top_k),
+        ("RETRIEVAL_FINAL_TOP_K", current.retrieval_final_top_k),
+        ("RETRIEVAL_HYBRID_QA_VECTOR_TOP_K", current.retrieval_hybrid_qa_vector_top_k),
+        ("RETRIEVAL_HYBRID_CHUNK_VECTOR_TOP_K", current.retrieval_hybrid_chunk_vector_top_k),
+        ("RETRIEVAL_HYBRID_QA_TEXT_TOP_K", current.retrieval_hybrid_qa_text_top_k),
+        ("RETRIEVAL_HYBRID_CHUNK_TEXT_TOP_K", current.retrieval_hybrid_chunk_text_top_k),
+    ):
+        if value <= 0:
+            problems.append(f"{name} 必须为正整数")
+    if (
+        current.retrieval_hybrid_qa_vector_top_k
+        + current.retrieval_hybrid_chunk_vector_top_k
+        > current.retrieval_vector_top_k
+    ):
+        problems.append(
+            "RETRIEVAL_HYBRID_QA_VECTOR_TOP_K + "
+            "RETRIEVAL_HYBRID_CHUNK_VECTOR_TOP_K 不得超过 RETRIEVAL_VECTOR_TOP_K"
+        )
+    if (
+        current.retrieval_hybrid_qa_text_top_k
+        + current.retrieval_hybrid_chunk_text_top_k
+        > current.retrieval_text_top_k
+    ):
+        problems.append(
+            "RETRIEVAL_HYBRID_QA_TEXT_TOP_K + "
+            "RETRIEVAL_HYBRID_CHUNK_TEXT_TOP_K 不得超过 RETRIEVAL_TEXT_TOP_K"
+        )
     for name, weight in (
         ("RETRIEVAL_QA_VECTOR_WEIGHT", current.retrieval_qa_vector_weight),
         ("RETRIEVAL_QA_TEXT_WEIGHT", current.retrieval_qa_text_weight),

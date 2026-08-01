@@ -353,6 +353,13 @@ _ADAPTIVE_CHUNK_ENV_NAMES = (
     "CHUNK_INDEXING_ENABLED",
     "HYBRID_CHUNK_RETRIEVAL_ENABLED",
     "PARENT_CONTEXT_ENABLED",
+    "RETRIEVAL_VECTOR_TOP_K",
+    "RETRIEVAL_TEXT_TOP_K",
+    "RETRIEVAL_FINAL_TOP_K",
+    "RETRIEVAL_HYBRID_QA_VECTOR_TOP_K",
+    "RETRIEVAL_HYBRID_CHUNK_VECTOR_TOP_K",
+    "RETRIEVAL_HYBRID_QA_TEXT_TOP_K",
+    "RETRIEVAL_HYBRID_CHUNK_TEXT_TOP_K",
     "RETRIEVAL_RRF_K",
     "RETRIEVAL_CHUNK_VECTOR_WEIGHT",
     "RETRIEVAL_CHUNK_TEXT_WEIGHT",
@@ -382,6 +389,12 @@ def test_adaptive_chunking_settings_defaults_are_spec_values(monkeypatch):
     assert current.hybrid_chunk_retrieval_enabled is False
     assert current.parent_context_enabled is False
     assert current.retrieval_rrf_k == 60
+    assert (
+        current.retrieval_hybrid_qa_vector_top_k,
+        current.retrieval_hybrid_chunk_vector_top_k,
+        current.retrieval_hybrid_qa_text_top_k,
+        current.retrieval_hybrid_chunk_text_top_k,
+    ) == (10, 10, 10, 10)
     assert current.retrieval_rrf_channel_weights == {
         "qa_vector": 1.0,
         "qa_text": 1.0,
@@ -412,6 +425,18 @@ def test_validate_chunking_config_rejects_invalid_values(monkeypatch, environmen
         monkeypatch.setenv(name, value)
 
     with pytest.raises(ConfigurationError, match=expected):
+        validate_chunking_config(Settings())
+
+
+def test_validate_chunking_config_rejects_hybrid_candidate_budgets_above_qa_only_cap(monkeypatch):
+    from server.app.core.config import validate_chunking_config
+
+    _clear_adaptive_chunk_env(monkeypatch)
+    monkeypatch.setenv("RETRIEVAL_VECTOR_TOP_K", "10")
+    monkeypatch.setenv("RETRIEVAL_HYBRID_QA_VECTOR_TOP_K", "6")
+    monkeypatch.setenv("RETRIEVAL_HYBRID_CHUNK_VECTOR_TOP_K", "5")
+
+    with pytest.raises(ConfigurationError, match="RETRIEVAL_HYBRID_QA_VECTOR_TOP_K"):
         validate_chunking_config(Settings())
 
 

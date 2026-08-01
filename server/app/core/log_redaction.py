@@ -41,6 +41,7 @@ _SNAPSHOT_ROOT_FIELDS = {
     "retrievalConfigHash",
     "rrfParameters",
     "chunkRetrievalDegraded",
+    "rerankerDegraded",
     "filters",
     "latencyMs",
     "requestId",
@@ -112,6 +113,8 @@ def sanitize_retrieval_snapshot(
                 else {}
             )
         elif key == "chunkRetrievalDegraded":
+            sanitized = bool(value)
+        elif key == "rerankerDegraded":
             sanitized = bool(value)
         elif key == "latencyMs":
             sanitized = value if isinstance(value, (int, float)) and not isinstance(value, bool) else 0

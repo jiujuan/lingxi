@@ -3,6 +3,7 @@ from math import sqrt
 from typing import Any
 
 from sqlalchemy import bindparam, cast, exists, func, literal_column, or_, select
+from sqlalchemy.exc import DBAPIError, DisconnectionError, TimeoutError
 from sqlalchemy.orm import Session, aliased
 
 from server.app.core.permissions import AccessContext
@@ -147,9 +148,17 @@ class RetrievalRepository:
             return []
         filters = self._chunk_filters(context, access_scope)
         if self._is_postgres:
-            return self._vector_search_pg(
-                DocumentChunk, DocumentChunk.embedding, filters, query_vector, top_k
-            )
+            try:
+                return self._vector_search_pg(
+                    DocumentChunk,
+                    DocumentChunk.embedding,
+                    filters,
+                    query_vector,
+                    top_k,
+                )
+            except (DBAPIError, DisconnectionError, TimeoutError) as exc:
+                self._raise_if_chunk_channel_unavailable(exc)
+                raise
         return self._vector_search_python(
             self.list_authorized_chunk_candidates(context, access_scope),
             "embedding",
@@ -167,7 +176,13 @@ class RetrievalRepository:
     ) -> list[RankedDocumentChunk]:
         filters = self._chunk_filters(context, access_scope)
         if self._is_postgres:
-            return self._text_search_pg(DocumentChunk, filters, query_tokens, top_k)
+            try:
+                return self._text_search_pg(
+                    DocumentChunk, filters, query_tokens, top_k
+                )
+            except (DBAPIError, DisconnectionError, TimeoutError) as exc:
+                self._raise_if_chunk_channel_unavailable(exc)
+                raise
         return self._text_search_python(
             self.list_authorized_chunk_candidates(context, access_scope),
             query_text,
@@ -324,6 +339,69 @@ class RetrievalRepository:
             )
         )
         return or_(DocumentChunk.parent_chunk_id.is_(None), valid_parent)
+
+    def _raise_if_chunk_channel_unavailable(self, exc: Exception) -> None:
+        """Translate only recognized PostgreSQL availability failures.
+
+        The hybrid service may omit optional Child channels, but it must never
+        hide authorization, query-construction, or configuration failures
+        behind QA-only results.
+        """
+        if not RetrievalRepository._is_postgres_chunk_channel_failure(exc):
+            return
+
+        # PostgreSQL statement failures abort the current transaction. Reset
+        # the session before the hybrid service loads QA source evidence.
+        self.session.rollback()
+
+        # ``RetrievalService`` owns the existing fallback contract and imports
+        # this repository, so this import must remain runtime-local to avoid a
+        # module import cycle.
+        from server.app.services.retrieval_service import ChunkChannelUnavailableError
+
+        raise ChunkChannelUnavailableError(
+            "PostgreSQL Chunk retrieval channel is unavailable"
+        ) from exc
+
+    @staticmethod
+    def _is_postgres_chunk_channel_failure(exc: Exception) -> bool:
+        if isinstance(exc, (DisconnectionError, TimeoutError)):
+            return True
+        if not isinstance(exc, DBAPIError):
+            return False
+        if exc.connection_invalidated:
+            return True
+
+        original = exc.orig
+        sqlstate = (
+            getattr(original, "sqlstate", None)
+            or getattr(original, "pgcode", None)
+            or getattr(getattr(original, "diag", None), "sqlstate", None)
+        )
+        if isinstance(sqlstate, str):
+            normalized_state = sqlstate.upper()
+            if normalized_state == "57014" or normalized_state.startswith("08"):
+                return True
+            if normalized_state in {"53300", "57P01", "57P02", "57P03"}:
+                return True
+
+        message = str(original).lower()
+        return any(
+            signal in message
+            for signal in (
+                "statement timeout",
+                "connection refused",
+                "could not connect to server",
+                "connection is closed",
+                "connection not open",
+                "connection reset",
+                "server closed the connection",
+                "terminating connection",
+                "database system is starting up",
+                "too many connections",
+                "remaining connection slots",
+            )
+        )
 
     # -- PostgreSQL: real pgvector / generated tsvector retrieval -------------
 
