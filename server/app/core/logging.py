@@ -6,6 +6,8 @@ import sys
 
 from server.app.core.ids import peek_request_id
 
+_LINGXI_HANDLER_MARKER = "_lingxi_configured_handler"
+
 
 class RequestIdFilter(logging.Filter):
     """Attach the current request id to every log record for correlation."""
@@ -38,6 +40,7 @@ def configure_logging() -> None:
     """
     level = os.getenv("LOG_LEVEL", "INFO").upper()
     handler = logging.StreamHandler(sys.stdout)
+    setattr(handler, _LINGXI_HANDLER_MARKER, True)
     handler.addFilter(RequestIdFilter())
     if os.getenv("LOG_FORMAT", "json").lower() == "text":
         handler.setFormatter(
@@ -49,6 +52,9 @@ def configure_logging() -> None:
         handler.setFormatter(JsonFormatter())
 
     root = logging.getLogger()
-    root.handlers.clear()
+    for existing_handler in tuple(root.handlers):
+        if getattr(existing_handler, _LINGXI_HANDLER_MARKER, False):
+            root.removeHandler(existing_handler)
+            existing_handler.close()
     root.setLevel(level)
     root.addHandler(handler)

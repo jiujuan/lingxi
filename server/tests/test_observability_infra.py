@@ -1,6 +1,32 @@
 from server.tests.test_auth_rbac import build_test_client
 
 
+def test_configure_logging_preserves_external_root_handlers():
+    import logging
+
+    from server.app.core.logging import configure_logging
+
+    root = logging.getLogger()
+    original_handlers = tuple(root.handlers)
+    original_level = root.level
+    sentinel = logging.NullHandler()
+    for handler in original_handlers:
+        root.removeHandler(handler)
+    root.addHandler(sentinel)
+    try:
+        configure_logging()
+
+        assert sentinel in root.handlers
+    finally:
+        for handler in tuple(root.handlers):
+            root.removeHandler(handler)
+            if handler is not sentinel:
+                handler.close()
+        root.setLevel(original_level)
+        for handler in original_handlers:
+            root.addHandler(handler)
+
+
 def test_health_reports_dependency_checks():
     client, _ = build_test_client()
     response = client.get("/health")

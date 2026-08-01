@@ -149,10 +149,15 @@ def test_knowledge_classification_migration_is_idempotent_against_create_all(
 
 
 def test_alembic_upgrade_head_creates_knowledge_classification_schema(tmp_path):
+    import logging
+
     from server.app.core.config import settings
 
     db_path = tmp_path / "knowledge_classification.sqlite3"
     original_database_url = settings.database_url
+    application_logger = logging.getLogger("server.app.services.document_parse_service")
+    original_logger_disabled = application_logger.disabled
+    application_logger.disabled = False
     object.__setattr__(
         settings, "database_url", f"sqlite+pysqlite:///{db_path.as_posix()}"
     )
@@ -162,6 +167,7 @@ def test_alembic_upgrade_head_creates_knowledge_classification_schema(tmp_path):
         command.upgrade(config, "head")
     finally:
         object.__setattr__(settings, "database_url", original_database_url)
+        application_logger.disabled = original_logger_disabled
 
     engine = create_engine(f"sqlite+pysqlite:///{db_path.as_posix()}")
     inspector = inspect(engine)
@@ -173,6 +179,7 @@ def test_alembic_upgrade_head_creates_knowledge_classification_schema(tmp_path):
         "category_department_id",
         "knowledge_category_id",
     }.issubset(document_columns)
+    assert application_logger.disabled is original_logger_disabled
 
 
 
