@@ -460,7 +460,7 @@ Parent 默认按 Section Group 构建：
 新建：
 
 ```text
-server/app/db/migrations/versions/0005_adaptive_hierarchical_chunks.py
+server/app/db/migrations/versions/0007_adaptive_hierarchical_chunks.py
 ```
 
 迁移步骤：
@@ -855,7 +855,7 @@ embeddingTargetType, retrievalChannels, featureFlags
 
 ### 19.3 数据库与迁移测试
 
-- Alembic upgrade `0004 -> 0005`；
+- Alembic upgrade `0006_user_role_role_id_index -> 0007_adaptive_chunking`；
 - 旧数据默认回填；
 - self FK 与索引；
 - downgrade 不丢现有字段数据；
@@ -919,9 +919,23 @@ server/tests/fixtures/chunking_eval/
 - Top-K 重复证据比例低于 10%；
 - P95 查询延迟增幅不超过 30%，若超过必须调整每路 candidate K 或延后 Rerank。
 
-### 20.3 回归基线
+### 20.3 Task 22 最终决策与证据边界
 
-当前以下命令基线为 `39 passed`：
+- 自适应分块迁移的实际 revision 是 `0007_adaptive_chunking`，其父 revision
+  为 `0006_user_role_role_id_index`；计划中遗留的 `0004`/`0005` 名称不再适用。
+- Task 21 的 hermetic 本地基准采用内存 SQLite、确定性本地 embedding/reranker，
+  `nfr004Retrieval` 的通过门槛为 QA-only P95 的 `2.00x`。它用于防止本地请求路径
+  回归，不能替代 NFR-004 的生产验收。
+- NFR-004 的发布门槛仍为真实 staging/production 环境中 Hybrid P95 相对 QA-only
+  增幅 `<=30%`。必须由 Task 19 的冻结评估集、真实 provider、PostgreSQL/pgvector
+  和网络链路测量证明。
+- AC-004 的“tiny ratio 至少下降 50%”、质量指标、生产 RBAC/FTS/vector 行为和
+  tenant 灰度观察均需保存冻结评估报告或生产演练记录；本地单元测试不能替代这些证据。
+
+### 20.4 回归基线
+
+当前以下命令基线为 `58 passed`（Task 22 复跑结果；原 `39 passed`
+计数已随测试覆盖扩展而过期）：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest `
@@ -1018,7 +1032,7 @@ server/tests/fixtures/chunking_eval/
 - `server/app/services/chunking/type_handlers.py`
 - `server/app/services/chunking/service.py`
 - `server/app/services/chunk_backfill_service.py`
-- `server/app/db/migrations/versions/0005_adaptive_hierarchical_chunks.py`
+- `server/app/db/migrations/versions/0007_adaptive_hierarchical_chunks.py`
 - `server/scripts/evaluate_chunking_retrieval.py`
 - 对应单元、集成和 fixture 文件。
 

@@ -264,3 +264,174 @@ configuration:
 Logs and snapshots used for drills may contain only IDs, hashes, counts,
 durations, and reason codes. Never add source content, embeddings, prompt text,
 or credentials to benchmark or degradation evidence.
+
+## Task 22 local acceptance record (2026-08-01)
+
+This section is the repository-local acceptance record for Task 22. It proves
+the checked-in implementation and hermetic evidence below; it does not close
+the staging or production release gates listed in "External release gates"
+below.
+
+The Task 22 executable logger/migration acceptance changes are committed as
+`dc764b9` (`fix(observability): preserve logger state during migrations`).
+The commands below ran in the shared, dirty worktree whose executable Task 22
+files match that commit; unrelated user changes were deliberately left
+unstaged. This record is worktree evidence, not an assertion that a clean
+checkout has completed every external release gate.
+
+### Local regression evidence
+
+| Check | Command or environment | Result |
+|---|---|---|
+| Full backend regression | `.\.venv\Scripts\python.exe -m pytest server/tests -q -rs` | `740 passed, 3 skipped, 3 warnings` in `401.65s` |
+| Chunking specialization | Task 22's 12-file Chunking command | `329 passed, 2 skipped` in `71.61s` |
+| Parser baseline | Task 22 parser baseline command | `58 passed` in `20.19s` |
+| Task 21 performance/degradation tests | `.\.venv\Scripts\python.exe -m pytest server/tests/test_chunking_performance.py -q` | `17 passed` in `62.30s` |
+| Logging and Alembic regressions | `test_observability_infra.py` and `test_knowledge_classification.py` | `28 passed, 3 warnings` in `18.45s` |
+| Static tooling | `pyproject.toml`, repository config search, and `.venv\Scripts` | No Ruff or Mypy configuration or executable is present. This is recorded as an absent project gate, not a passing lint/type check. |
+
+The full-suite skips are environment-specific integration checks, not converted
+test failures:
+
+| Skipped test | Reason |
+|---|---|
+| `test_embedding_task.py:900` | `LINGXI_TEST_POSTGRES_URL` is not configured for the PostgreSQL lock integration. |
+| `test_hybrid_chunk_retrieval_integration.py:424` | `LINGXI_TEST_CELERY_BROKER_URL` is not configured for the local Celery worker integration. |
+| `test_hybrid_chunk_retrieval_integration.py:534` | `LINGXI_TEST_POSTGRES_URL` is not configured for the PostgreSQL integration. |
+
+The warnings were FastAPI's `TestClient` deprecation notice and Alembic's
+`prepend_sys_path` `path_separator` deprecation notice. They do not change the
+pass/fail result and should be addressed independently of this rollout.
+
+### Migration and operator-entry evidence
+
+The migration was exercised only against a unique local SQLite file under the
+ignored `.data` directory:
+
+```powershell
+$env:DATABASE_URL = "sqlite+pysqlite:///<unique-local-path>"
+.\.venv\Scripts\alembic.exe upgrade head
+.\.venv\Scripts\alembic.exe downgrade 0006_user_role_role_id_index
+.\.venv\Scripts\alembic.exe upgrade head
+.\.venv\Scripts\alembic.exe current
+```
+
+The final output was `0007_adaptive_chunking (head)`. Compatibility of legacy
+rows and migration idempotence is also covered by the passing migration tests.
+This SQLite roundtrip is schema evidence only; it does not prove PostgreSQL
+pgvector, FTS, or query-plan behavior.
+
+The backfill entry point is verified as a module command:
+
+```powershell
+.\.venv\Scripts\python.exe -m server.scripts.backfill_adaptive_chunks --help
+```
+
+For a production backfill, record the actual values in the release dossier,
+run a dry run first, and use the explicit confirmation form:
+
+```powershell
+.\.venv\Scripts\python.exe -m server.scripts.backfill_adaptive_chunks `
+  --tenant-id <tenant-id> `
+  --to-chunker-version <chunker-version> `
+  --batch-size <batch-size> `
+  --execution-id <execution-id> `
+  --operator-id <operator-id> `
+  --reason "adaptive chunking rollout" `
+  --rebuild-qa `
+  --rebuild-embedding `
+  --confirm-production
+```
+
+### Task 21 benchmark decision and evidence
+
+The current hermetic report is `.data/chunking-benchmark.json`, schema
+`adaptive-chunking-benchmark/v1`, with report SHA-256
+`5DDEAAE5116D753B5F596CC69462CC3F226B0BF6C233DBBB3FBA89A6A9967F26`
+and corpus SHA-256
+`7dd8742013d20e0e7a770025a0045b62242ee4d5e0414463b6a5a63bcf6192ce`.
+It was regenerated with `--repeat 5` on 2026-08-01 and reports stable Child
+hash sets, 29 Child chunks, and no acceptance failure reasons.
+
+| Measurement | QA-only P50/P95 | Hybrid P50/P95 | Result |
+|---|---:|---:|---|
+| Full local retrieval path | `57.3384 / 65.0697 ms` | `103.5504 / 121.37496 ms` | P50 `1.806x`, P95 `1.865x`; local NFR-004 passes at `<= 2.00x` |
+| Parse/persist CPU | legacy `281.25 / 310.9375 ms` | adaptive `125.0 / 132.8125 ms` | NFR-003 passes |
+
+The Task 21 local NFR-004 threshold is deliberately `2.00x`, rather than the
+production `<=30%` requirement. Its deterministic in-memory SQLite path adds
+four-channel Python/ORM work but excludes PostgreSQL query planning, pgvector,
+remote embedding/reranking, and network latency. The `2.00x` bound therefore
+detects large local request-path regressions without making a production
+latency assertion. The measured local P95 increase is `86.5%`, which is why it
+must never be substituted for the production gate.
+
+### External release gates
+
+The following Task 22 requirements remain release-blocking until real
+environment evidence is frozen and attached to the release record:
+
+| Gate | Required evidence |
+|---|---|
+| Task 19 quality evaluation | Frozen JSON and Markdown from the real provider evaluator, including dataset hash, commit SHA, baseline/candidate config hashes, Recall/MRR/nDCG, citation accuracy, tiny-ratio comparison, duplicate rate, and empty-result rate. |
+| PostgreSQL behavior | Temporary PostgreSQL upgrade/downgrade, pgvector dimension/index checks, FTS checks, and captured `EXPLAIN` plans showing scoped Top-K behavior. |
+| NFR-004 production latency | Real staging or production QA-only versus Hybrid P50/P95; Hybrid P95 increase must be `<=30%`. |
+| Integration environment | The skipped PostgreSQL lock/retrieval and local Celery worker tests must run with their documented environment variables. |
+| Tenant rollout control | The application currently exposes process-global flags only; it has no tenant targeting or percentage allocator. A control-plane cohort mechanism or a per-tenant rollout implementation is required before `5%`/`25%`/`50%`/`100%` promotion can begin. |
+
+### Release dossier, rollout, and rollback
+
+Before promotion, archive the migration revision
+`0007_adaptive_chunking`, deployed commit SHA, chunker name/version/config hash,
+tokenizer identity/version, effective flag values, backfill execution ID,
+dashboard links, benchmark/evaluator artifacts, and the operator who approved
+each stage. The `/metrics` dashboard must at least cover:
+
+```text
+lingxi_chunking_duration_seconds
+lingxi_chunk_tokens
+lingxi_chunk_tiny_total
+lingxi_chunk_oversized_total
+lingxi_chunk_merge_total
+lingxi_chunk_split_total
+lingxi_qa_provenance_validation_failure_total
+lingxi_qa_chunk_coverage_ratio
+lingxi_embedding_targets_total
+lingxi_retrieval_candidates_total
+lingxi_retrieval_channel_hit_ratio
+lingxi_retrieval_dedup_ratio
+lingxi_retrieval_latency_seconds
+lingxi_retrieval_degraded_total
+```
+
+Apply stages in order, retaining the evidence from each completed stage:
+
+1. Upgrade schema with all flags at their default off values:
+   `CHUNKING_MODE=legacy`, `QA_STRICT_PROVENANCE_ENABLED=false`,
+   `CHUNK_INDEXING_ENABLED=false`, `HYBRID_CHUNK_RETRIEVAL_ENABLED=false`, and
+   `PARENT_CONTEXT_ENABLED=false`.
+2. Run adaptive shadow comparison, then adaptive write with QA-only read.
+3. Enable strict provenance, then Chunk indexing, then Hybrid shadow.
+4. Do not enable process-global Hybrid for a percentage rollout. First supply
+   and validate a tenant-scoping control plane or per-tenant feature flag; then
+   promote at `5%`, `25%`, `50%`, and `100%`, observing a full business peak
+   after every promotion.
+5. Enable Parent hydration only after the Hybrid stage is stable.
+
+Stop immediately for any permission leak, provenance validation error,
+quality-regression gate failure, Hybrid P95 increase above `30%`, sustained
+retrieval degradation, unsafe backfill state, or alerting/dashboard gap.
+Roll back by setting the following values, redeploying through the normal
+platform procedure, and preserving rows for Active-version recovery rather
+than deleting data:
+
+```powershell
+$env:PARENT_CONTEXT_ENABLED = "false"
+$env:HYBRID_CHUNK_RETRIEVAL_ENABLED = "false"
+$env:CHUNK_INDEXING_ENABLED = "false"
+$env:QA_STRICT_PROVENANCE_ENABLED = "false"
+$env:CHUNKING_MODE = "legacy"
+```
+
+Do not promote from this local record alone. Attach the external evidence above
+to the release dossier before enabling a later rollout stage.
