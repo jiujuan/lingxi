@@ -109,6 +109,13 @@ class DocumentListResponse(BaseModel):
     pagination: PaginationResponse
 
 
+class DocumentProcessingSummaryResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    synced_document_count: int = Field(alias="syncedDocumentCount")
+    total_chunk_count: int = Field(alias="totalChunkCount")
+
+
 class DocumentDetailResponse(DocumentListItemResponse):
     parser_version: str | None = Field(alias="parserVersion")
     object_key: str = Field(alias="objectKey")

@@ -64,6 +64,30 @@ class DocumentRepository:
         )
         return list(self.session.scalars(statement).all()), int(total or 0)
 
+    def summarize_documents(self, context: AccessContext) -> tuple[int, int]:
+        document_count, total_chunk_count = self.session.execute(
+            select(
+                func.count(Document.id),
+                func.coalesce(func.sum(Document.chunk_count), 0),
+            ).where(
+                *self._document_filters(
+                    context,
+                    keyword=None,
+                    file_type=None,
+                    status=None,
+                    department_id=None,
+                    role_id=None,
+                    space_id=None,
+                    classification_department_id=None,
+                    category_id=None,
+                    is_unclassified=None,
+                    updated_after=None,
+                    updated_before=None,
+                )
+            )
+        ).one()
+        return int(document_count or 0), int(total_chunk_count or 0)
+
     def get_authorized_document(
         self, context: AccessContext, document_id: str
     ) -> Document | None:

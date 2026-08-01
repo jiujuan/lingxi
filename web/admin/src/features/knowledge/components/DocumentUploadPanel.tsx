@@ -20,14 +20,6 @@ type Props = {
 };
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
-function emptyClassification(): KnowledgeClassificationValue {
-  return {
-    spaceId: null,
-    departmentId: null,
-    categoryId: null,
-  };
-}
-
 const ALLOWED_SUFFIXES = [
   '.md',
   '.markdown',
@@ -44,9 +36,11 @@ const ALLOWED_SUFFIXES = [
   '.htm',
 ];
 
+function emptyClassification(): KnowledgeClassificationValue {
+  return { spaceId: null, departmentId: null, categoryId: null };
+}
+
 export function DocumentUploadPanel({ onUploaded }: Props) {
-  const [title, setTitle] = useState('');
-  const [titleEdited, setTitleEdited] = useState(false);
   const [allAuthenticated, setAllAuthenticated] = useState(true);
   const [departmentIds, setDepartmentIds] = useState('');
   const [roleIds, setRoleIds] = useState('');
@@ -60,16 +54,7 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
 
   function applyFile(next: File | null) {
     setFile(next);
-    // 自动把文件名（去扩展名）填入标题；用户手动改过标题则不覆盖
-    if (next && !titleEdited) {
-      setTitle(next.name.replace(/\.[^.]+$/, ''));
-    }
-  }
-
-  function handleTitleChange(value: string) {
-    setTitle(value);
-    // 清空标题视为放弃手动输入，下次选文件时恢复自动填充
-    setTitleEdited(value.trim() !== '');
+    setError(null);
   }
 
   async function submit(event: FormEvent) {
@@ -106,7 +91,7 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
     setError(null);
     try {
       const importPayload: CreateImportJobPayload = {
-        title: title.trim() || file.name,
+        title: file.name.replace(/\.[^.]+$/, '') || file.name,
         permission,
         processingOptions: { enableQaSplit: true, enableEmbedding: true },
       };
@@ -132,13 +117,7 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
     }
   }
 
-  function handleClassificationChange(value: KnowledgeClassificationValue) {
-    setClassificationValue(value);
-  }
-
   function resetForm() {
-    setTitle('');
-    setTitleEdited(false);
     setAllAuthenticated(true);
     setDepartmentIds('');
     setRoleIds('');
@@ -157,22 +136,13 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
   }
 
   return (
-    <form className="panel upload-panel" onSubmit={submit}>
+    <form className="panel upload-panel document-processing-uploader" onSubmit={submit}>
       <div>
-        <h3>上传文档</h3>
-        <p className="muted">
-          支持 Markdown、TXT、CSV，以及 PDF、Word、PPT、Excel、图片、HTML（需服务端配置 MinerU 或
-          Docling 解析服务）。上传后自动进入解析、QA 拆分和向量化链路。
-        </p>
+        <p className="eyebrow">一键构建解析任务</p>
+        <h3>上传源文件</h3>
+        <p className="muted">选择文档后，系统会自动创建任务并按默认策略处理。</p>
       </div>
-      <label>
-        文档标题
-        <input
-          onChange={(event) => handleTitleChange(event.target.value)}
-          placeholder="留空则自动使用上传文件名"
-          value={title}
-        />
-      </label>
+
       <label
         className="drop-zone"
         onDragOver={(event) => event.preventDefault()}
@@ -181,34 +151,48 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
           applyFile(event.dataTransfer.files[0] ?? null);
         }}
       >
-        <span>{file ? file.name : '拖拽文件到这里，或点击选择文件'}</span>
+        <strong>{file ? file.name : '拖拽文件到这里，或点击选择文件'}</strong>
+        <span>支持 Markdown、TXT、CSV、PDF、Word、PPT、Excel、图片和 HTML，单文件最大 10MB。</span>
         <input
           accept={ALLOWED_SUFFIXES.join(',')}
+          aria-label="选择要解析的文档文件"
+          disabled={busy}
           onChange={(event) => applyFile(event.target.files?.[0] ?? null)}
           type="file"
         />
       </label>
+
+      <div className="document-processing-strategy" role="note">
+        <strong>默认智能切分策略</strong>
+        <span>系统根据文档结构自动切分内容，并生成 QA 问答后写入向量知识库。</span>
+      </div>
+
       <KnowledgeClassificationSelect
         allowUnclassified
         disabled={busy}
-        onChange={handleClassificationChange}
+        onChange={setClassificationValue}
         showReset={false}
         showValidation
         value={classificationValue}
       />
+
       <label className="checkbox-row">
         <input
           checked={allAuthenticated}
+          disabled={busy}
+          id="knowledge-all-authenticated"
           onChange={(event) => setAllAuthenticated(event.target.checked)}
           type="checkbox"
         />
         所有登录用户可访问
       </label>
-      <div className="filter-grid">
+
+      <div className="filter-grid document-processing-scope-fields">
         <label>
           部门 ID
           <input
-            disabled={allAuthenticated}
+            disabled={allAuthenticated || busy}
+            id="knowledge-department-ids"
             onChange={(event) => setDepartmentIds(event.target.value)}
             placeholder="多个 ID 用逗号分隔"
             value={departmentIds}
@@ -217,7 +201,8 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
         <label>
           角色 ID
           <input
-            disabled={allAuthenticated}
+            disabled={allAuthenticated || busy}
+            id="knowledge-role-ids"
             onChange={(event) => setRoleIds(event.target.value)}
             placeholder="多个 ID 用逗号分隔"
             value={roleIds}
@@ -226,25 +211,27 @@ export function DocumentUploadPanel({ onUploaded }: Props) {
         <label>
           用户 ID
           <input
-            disabled={allAuthenticated}
+            disabled={allAuthenticated || busy}
+            id="knowledge-user-ids"
             onChange={(event) => setUserIds(event.target.value)}
             placeholder="多个 ID 用逗号分隔"
             value={userIds}
           />
         </label>
       </div>
-      <button disabled={busy} type="submit">
-        {busy ? '提交中' : '创建导入任务'}
+
+      <button className="document-processing-submit" disabled={busy} id="document-processing-submit" type="submit">
+        {busy ? '正在构建解析任务…' : '▷ 一键构建解析任务'}
       </button>
       {busy ? (
-        <div className="upload-progress">
+        <div aria-live="polite" className="upload-progress">
           <div className="progress-bar">
             <i style={{ width: `${progress}%` }} />
           </div>
-          <span className="muted">{progress}%</span>
+          <span className="muted">上传 {progress}%</span>
         </div>
       ) : null}
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <p className="error" role="alert">{error}</p> : null}
     </form>
   );
 }
@@ -270,7 +257,7 @@ function splitIds(value: string) {
 async function checksumFile(file: File) {
   const data = await file.arrayBuffer();
   const digest = await crypto.subtle.digest('SHA-256', data);
-  return `sha256:${Array.from(new Uint8Array(digest))
+  return Array.from(new Uint8Array(digest))
     .map((item) => item.toString(16).padStart(2, '0'))
-    .join('')}`;
+    .join('');
 }

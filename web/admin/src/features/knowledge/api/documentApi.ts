@@ -7,6 +7,7 @@ import type {
 import type { PermissionPayload } from './importJobApi';
 
 export type Pagination = Schemas['PaginationResponse'];
+export type DocumentProcessingSummary = Schemas['DocumentProcessingSummaryResponse'];
 
 export type NamedSubject = {
   id: string;
@@ -110,6 +111,10 @@ export async function listDocuments(filters: DocumentFilters) {
     ...result,
     data: result.data.map(mapKnowledgeDocument),
   };
+}
+
+export function getDocumentProcessingSummary() {
+  return apiRequest<DocumentProcessingSummary>('/api/v1/documents/summary');
 }
 
 export async function getDocument(documentId: string) {

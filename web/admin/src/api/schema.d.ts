@@ -399,6 +399,23 @@ export interface paths {
         patch: operations["bulk_update_document_classification_api_v1_documents_bulk_classification_patch"];
         trace?: never;
     };
+    "/api/v1/documents/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Document Processing Summary */
+        get: operations["get_document_processing_summary_api_v1_documents_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{document_id}": {
         parameters: {
             query?: never;
@@ -979,8 +996,62 @@ export interface paths {
         /** List Roles */
         get: operations["list_roles_api_v1_roles_get"];
         put?: never;
+        /** Create Role */
+        post: operations["create_role_api_v1_roles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/roles/available-permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Available Permissions */
+        get: operations["list_available_permissions_api_v1_roles_available_permissions_get"];
+        put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/roles/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Role Options */
+        get: operations["list_role_options_api_v1_roles_options_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/roles/{role_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Role */
+        get: operations["get_role_api_v1_roles__role_id__get"];
+        /** Update Role */
+        put: operations["update_role_api_v1_roles__role_id__put"];
+        post?: never;
+        /** Delete Role */
+        delete: operations["delete_role_api_v1_roles__role_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1736,6 +1807,13 @@ export interface components {
             /** Users */
             users: components["schemas"]["NamedSubjectResponse"][];
         };
+        /** DocumentProcessingSummaryResponse */
+        DocumentProcessingSummaryResponse: {
+            /** Synceddocumentcount */
+            syncedDocumentCount: number;
+            /** Totalchunkcount */
+            totalChunkCount: number;
+        };
         /** FilePolicy */
         FilePolicy: {
             /** Allowedextensions */
@@ -2325,6 +2403,24 @@ export interface components {
             /** Totalpages */
             totalPages: number;
         };
+        /** PermissionCatalogResponse */
+        PermissionCatalogResponse: {
+            /** Data */
+            data: components["schemas"]["PermissionResponse"][];
+        };
+        /** PermissionResponse */
+        PermissionResponse: {
+            /** Action */
+            action: string;
+            /** Code */
+            code: string;
+            /** Description */
+            description: string | null;
+            /** Id */
+            id: string;
+            /** Module */
+            module: string;
+        };
         /** ProcessingLogResponse */
         ProcessingLogResponse: {
             /** Error */
@@ -2478,10 +2574,68 @@ export interface components {
             /** Vectortopk */
             vectorTopK: number;
         };
+        /** RoleDetailResponse */
+        RoleDetailResponse: {
+            /** Code */
+            code: string;
+            /** Createdat */
+            createdAt: string;
+            /** Id */
+            id: string;
+            /** Isbuiltin */
+            isBuiltin: boolean;
+            /** Name */
+            name: string;
+            /** Permissioncount */
+            permissionCount: number;
+            /** Permissions */
+            permissions: components["schemas"]["PermissionResponse"][];
+            /** Scope */
+            scope: string;
+            /** Usercount */
+            userCount: number;
+        };
+        /** RoleListItemResponse */
+        RoleListItemResponse: {
+            /** Code */
+            code: string;
+            /** Createdat */
+            createdAt: string;
+            /** Id */
+            id: string;
+            /** Isbuiltin */
+            isBuiltin: boolean;
+            /** Name */
+            name: string;
+            /** Permissioncount */
+            permissionCount: number;
+            /** Scope */
+            scope: string;
+            /** Usercount */
+            userCount: number;
+        };
         /** RoleListResponse */
         RoleListResponse: {
             /** Data */
-            data: components["schemas"]["RoleResponse"][];
+            data: components["schemas"]["RoleListItemResponse"][];
+            pagination: components["schemas"]["PaginationResponse"];
+        };
+        /**
+         * RoleOptionResponse
+         * @description Lightweight tenant role data used by the user-assignment form.
+         */
+        RoleOptionResponse: {
+            /** Code */
+            code: string;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /** RoleOptionsResponse */
+        RoleOptionsResponse: {
+            /** Data */
+            data: components["schemas"]["RoleOptionResponse"][];
         };
         /** RoleResponse */
         RoleResponse: {
@@ -2491,6 +2645,15 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+        };
+        /** RoleUpsertRequest */
+        RoleUpsertRequest: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Permissionids */
+            permissionIds?: string[];
         };
         /** StoragePolicy */
         StoragePolicy: {
@@ -3513,6 +3676,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_document_processing_summary_api_v1_documents_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentProcessingSummaryResponse"];
                 };
             };
         };
@@ -4895,7 +5078,11 @@ export interface operations {
     };
     list_roles_api_v1_roles_get: {
         parameters: {
-            query?: never;
+            query?: {
+                keyword?: string | null;
+                page?: number;
+                pageSize?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4909,6 +5096,185 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoleListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_role_api_v1_roles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoleUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_available_permissions_api_v1_roles_available_permissions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PermissionCatalogResponse"];
+                };
+            };
+        };
+    };
+    list_role_options_api_v1_roles_options_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleOptionsResponse"];
+                };
+            };
+        };
+    };
+    get_role_api_v1_roles__role_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_role_api_v1_roles__role_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoleUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_role_api_v1_roles__role_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

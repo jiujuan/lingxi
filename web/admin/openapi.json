@@ -1948,6 +1948,24 @@
         "title": "DocumentPermissionResponse",
         "type": "object"
       },
+      "DocumentProcessingSummaryResponse": {
+        "properties": {
+          "syncedDocumentCount": {
+            "title": "Synceddocumentcount",
+            "type": "integer"
+          },
+          "totalChunkCount": {
+            "title": "Totalchunkcount",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "syncedDocumentCount",
+          "totalChunkCount"
+        ],
+        "title": "DocumentProcessingSummaryResponse",
+        "type": "object"
+      },
       "FilePolicy": {
         "properties": {
           "allowedExtensions": {
@@ -3781,6 +3799,62 @@
         "title": "PaginationResponse",
         "type": "object"
       },
+      "PermissionCatalogResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PermissionResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "PermissionCatalogResponse",
+        "type": "object"
+      },
+      "PermissionResponse": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "module": {
+            "title": "Module",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "module",
+          "action",
+          "description"
+        ],
+        "title": "PermissionResponse",
+        "type": "object"
+      },
       "ProcessingLogResponse": {
         "properties": {
           "error": {
@@ -4297,11 +4371,159 @@
         "title": "RetrievalPolicy",
         "type": "object"
       },
+      "RoleDetailResponse": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "createdAt": {
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "isBuiltin": {
+            "title": "Isbuiltin",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "permissionCount": {
+            "title": "Permissioncount",
+            "type": "integer"
+          },
+          "permissions": {
+            "items": {
+              "$ref": "#/components/schemas/PermissionResponse"
+            },
+            "title": "Permissions",
+            "type": "array"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "userCount": {
+            "title": "Usercount",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "code",
+          "scope",
+          "isBuiltin",
+          "userCount",
+          "permissionCount",
+          "createdAt",
+          "permissions"
+        ],
+        "title": "RoleDetailResponse",
+        "type": "object"
+      },
+      "RoleListItemResponse": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "createdAt": {
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "isBuiltin": {
+            "title": "Isbuiltin",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "permissionCount": {
+            "title": "Permissioncount",
+            "type": "integer"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "userCount": {
+            "title": "Usercount",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "code",
+          "scope",
+          "isBuiltin",
+          "userCount",
+          "permissionCount",
+          "createdAt"
+        ],
+        "title": "RoleListItemResponse",
+        "type": "object"
+      },
       "RoleListResponse": {
         "properties": {
           "data": {
             "items": {
-              "$ref": "#/components/schemas/RoleResponse"
+              "$ref": "#/components/schemas/RoleListItemResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PaginationResponse"
+          }
+        },
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "title": "RoleListResponse",
+        "type": "object"
+      },
+      "RoleOptionResponse": {
+        "description": "Lightweight tenant role data used by the user-assignment form.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name"
+        ],
+        "title": "RoleOptionResponse",
+        "type": "object"
+      },
+      "RoleOptionsResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/RoleOptionResponse"
             },
             "title": "Data",
             "type": "array"
@@ -4310,7 +4532,7 @@
         "required": [
           "data"
         ],
-        "title": "RoleListResponse",
+        "title": "RoleOptionsResponse",
         "type": "object"
       },
       "RoleResponse": {
@@ -4334,6 +4556,35 @@
           "name"
         ],
         "title": "RoleResponse",
+        "type": "object"
+      },
+      "RoleUpsertRequest": {
+        "properties": {
+          "code": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "permissionIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Permissionids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "code"
+        ],
+        "title": "RoleUpsertRequest",
         "type": "object"
       },
       "StoragePolicy": {
@@ -6350,6 +6601,32 @@
           }
         ],
         "summary": "Bulk Update Document Classification",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/api/v1/documents/summary": {
+      "get": {
+        "operationId": "get_document_processing_summary_api_v1_documents_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentProcessingSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Document Processing Summary",
         "tags": [
           "documents"
         ]
@@ -8961,12 +9238,133 @@
     "/api/v1/roles": {
       "get": {
         "operationId": "list_roles_api_v1_roles_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "keyword",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Keyword"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Pagesize",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RoleListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Roles",
+        "tags": [
+          "roles"
+        ]
+      },
+      "post": {
+        "operationId": "create_role_api_v1_roles_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Role",
+        "tags": [
+          "roles"
+        ]
+      }
+    },
+    "/api/v1/roles/available-permissions": {
+      "get": {
+        "operationId": "list_available_permissions_api_v1_roles_available_permissions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionCatalogResponse"
                 }
               }
             },
@@ -8978,9 +9376,182 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "List Roles",
+        "summary": "List Available Permissions",
         "tags": [
-          "users"
+          "roles"
+        ]
+      }
+    },
+    "/api/v1/roles/options": {
+      "get": {
+        "operationId": "list_role_options_api_v1_roles_options_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleOptionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Role Options",
+        "tags": [
+          "roles"
+        ]
+      }
+    },
+    "/api/v1/roles/{role_id}": {
+      "delete": {
+        "operationId": "delete_role_api_v1_roles__role_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "role_id",
+            "required": true,
+            "schema": {
+              "title": "Role Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Role",
+        "tags": [
+          "roles"
+        ]
+      },
+      "get": {
+        "operationId": "get_role_api_v1_roles__role_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "role_id",
+            "required": true,
+            "schema": {
+              "title": "Role Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Role",
+        "tags": [
+          "roles"
+        ]
+      },
+      "put": {
+        "operationId": "update_role_api_v1_roles__role_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "role_id",
+            "required": true,
+            "schema": {
+              "title": "Role Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Role",
+        "tags": [
+          "roles"
         ]
       }
     },

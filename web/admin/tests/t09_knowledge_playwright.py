@@ -357,8 +357,26 @@ class KnowledgeApiMock:
             fulfill_json(route, {"ok": True})
             return
 
+        if method == "GET" and path == "/api/v1/documents/summary":
+            fulfill_json(
+                route,
+                {
+                    "syncedDocumentCount": 2,
+                    "totalChunkCount": 8,
+                },
+            )
+            return
+
         if method == "GET" and path == "/api/v1/documents":
             documents = [self._document("doc-ready"), self._document("doc-unclassified")]
+            if query.get("keyword"):
+                keyword = query["keyword"].lower()
+                documents = [
+                    document
+                    for document in documents
+                    if keyword in document["title"].lower()
+                    or keyword in document["fileName"].lower()
+                ]
             if query.get("isUnclassified") == "true":
                 documents = [document for document in documents if document["classification"] is None]
             if query.get("spaceId"):
@@ -469,10 +487,12 @@ class KnowledgeApiMock:
             return
 
         if method == "POST" and path == "/api/v1/import-jobs":
+            title = (body or {}).get("title")
+            job_id = "job-upload-failed" if title == "playwright-failed" else "job-upload"
             fulfill_json(
                 route,
                 {
-                    "id": "job-upload",
+                    "id": job_id,
                     "documentId": None,
                     "status": "PENDING",
                     "stage": "CREATED",
@@ -485,6 +505,32 @@ class KnowledgeApiMock:
                     "file": None,
                 },
                 status=201,
+            )
+            return
+
+        if method == "POST" and path == "/api/v1/import-jobs/job-upload-failed/file":
+            fulfill_json(
+                route,
+                {
+                    "id": "job-upload-failed",
+                    "documentId": None,
+                    "status": "FAILED",
+                    "stage": "PARSING",
+                    "progress": 35,
+                    "retryCount": 0,
+                    "errorCode": "PARSE_INVALID",
+                    "errorMessage": "模拟文档解析失败。",
+                    "failedStage": "PARSING",
+                    "retryable": True,
+                    "file": {
+                        "id": "file-upload-failed",
+                        "objectKey": "uploads/playwright-failed.md",
+                        "fileName": "playwright-failed.md",
+                        "mimeType": "text/markdown",
+                        "fileSize": 32,
+                        "checksum": "sha256:playwright-failed",
+                    },
+                },
             )
             return
 
@@ -527,6 +573,13 @@ class KnowledgeApiMock:
             if all(request["query"].get(key) == value for key, value in query.items()):
                 return request
         raise AssertionError(f"未捕获请求: {method} {path} query={query}; captured={self.requests}")
+
+    def request_count(self, method: str, path: str) -> int:
+        return sum(
+            1
+            for request in self.requests
+            if request["method"] == method and request["path"] == path
+        )
 
     def _space(self, space_id: str) -> dict:
         for space in self.spaces:
@@ -892,31 +945,101 @@ def verify_classification_admin_flow(page: Page, api: KnowledgeApiMock) -> None:
 
 def verify_upload_flow(page: Page, api: KnowledgeApiMock) -> None:
     upload_dir = Path(tempfile.mkdtemp(prefix="lingxi-t09-"))
+    failed_upload_file = upload_dir / "playwright-failed.md"
+    failed_upload_file.write_text("# Invalid SOP\n\n模拟失败。\n", encoding="utf-8")
     upload_file = upload_dir / "playwright-refund.md"
     upload_file.write_text("# Refund SOP\n\n退款需要主管审批。\n", encoding="utf-8")
 
     page.goto(f"{APP_ORIGIN}/#knowledge", wait_until="networkidle")
-    expect(page.get_by_role("heading", name="文档入库、权限和 QA 结果")).to_be_visible()
-    expect(page.locator("#knowledge-classification-space")).to_be_enabled()
+    expect(page.get_by_role("heading", name="文档解析与知识提炼中心")).to_be_visible()
+    expect(page.get_by_text("已同步文档")).to_be_visible()
+    expect(page.get_by_text("已解析 Chunks")).to_be_visible()
+    expect(page.get_by_role("heading", name="上传源文件")).to_be_visible()
+    expect(page.get_by_role("heading", name="从原始文档到可检索知识")).to_be_visible()
+    expect(page.get_by_role("heading", name="已同步与正在处理的文档")).to_be_visible()
+    expect(page.get_by_text("空闲：上传文档并点击一键构建解析任务后开始处理。")).to_be_visible()
+
+    department_input = page.get_by_label("部门 ID")
+    role_input = page.get_by_label("角色 ID")
+    user_input = page.get_by_label("用户 ID")
+    expect(department_input).to_be_disabled()
+    expect(role_input).to_be_disabled()
+    expect(user_input).to_be_disabled()
+
+    ordered_ids = page.evaluate(
+        '''
+        [
+          'knowledge-classification-space',
+          'knowledge-classification-department',
+          'knowledge-classification-category',
+          'knowledge-all-authenticated',
+          'knowledge-department-ids',
+          'knowledge-role-ids',
+          'knowledge-user-ids',
+          'document-processing-submit'
+        ].map((id) => ({ id, position: [...document.querySelectorAll('*')].indexOf(document.getElementById(id)) }))
+        '''
+    )
+    assert all(item["position"] >= 0 for item in ordered_ids), ordered_ids
+    assert [item["position"] for item in ordered_ids] == sorted(
+        item["position"] for item in ordered_ids
+    ), ordered_ids
+
     page.locator("#knowledge-classification-space").select_option("space-001")
     expect(page.locator("#knowledge-classification-department")).to_be_enabled()
     page.locator("#knowledge-classification-department").select_option("dept-after-sales")
     expect(page.locator("#knowledge-classification-category")).to_be_enabled()
     page.locator("#knowledge-classification-category").select_option("cat-refund")
+
+    page.get_by_label("所有登录用户可访问").uncheck()
+    expect(department_input).to_be_enabled()
+    expect(role_input).to_be_enabled()
+    expect(user_input).to_be_enabled()
+    department_input.fill("dept-after-sales")
+
+    summary_requests_before = api.request_count("GET", "/api/v1/documents/summary")
+    document_requests_before = api.request_count("GET", "/api/v1/documents")
+
+    page.locator("input[type=file]").set_input_files(str(failed_upload_file))
+    page.get_by_role("button", name="▷ 一键构建解析任务").click()
+    expect(page.get_by_text("模拟文档解析失败。")).to_be_visible()
+    expect(page.get_by_text("PARSE_INVALID")).to_be_visible()
+    expect(page.get_by_role("button", name="重试当前任务")).to_be_visible()
+    expect(page.locator(".task-pipeline-step.failed")).to_have_count(1)
+
+    page.locator("#knowledge-classification-space").select_option("space-001")
+    page.locator("#knowledge-classification-department").select_option("dept-after-sales")
+    page.locator("#knowledge-classification-category").select_option("cat-refund")
+    page.get_by_label("所有登录用户可访问").uncheck()
+    department_input.fill("dept-after-sales")
     page.locator("input[type=file]").set_input_files(str(upload_file))
-    page.get_by_role("button", name="创建导入任务").click()
-    expect(page.get_by_text("当前状态：COMPLETED · COMPLETED · 100%")).to_be_visible()
+    page.get_by_role("button", name="▷ 一键构建解析任务").click()
+    expect(page.locator(".task-pipeline-step.completed")).to_have_count(4)
+    expect(page.get_by_text("完成上架，可检索使用")).to_be_visible()
+    expect(page.get_by_text("INDEXING")).to_have_count(0)
+    expect(page.get_by_text("Refund SOP").first).to_be_visible()
 
     import_request = api.find_request("POST", "/api/v1/import-jobs")
-    assert import_request["body"]["title"] == "playwright-refund"
-    assert import_request["body"]["classification"] == {
-        "spaceId": "space-001",
-        "departmentId": "dept-after-sales",
-        "categoryId": "cat-refund",
+    assert import_request["body"] == {
+        "title": "playwright-refund",
+        "classification": {
+            "spaceId": "space-001",
+            "departmentId": "dept-after-sales",
+            "categoryId": "cat-refund",
+        },
+        "permission": {
+            "allAuthenticated": False,
+            "departmentIds": ["dept-after-sales"],
+            "roleIds": [],
+            "userIds": [],
+        },
+        "processingOptions": {"enableQaSplit": True, "enableEmbedding": True},
     }
+    api.find_request("POST", "/api/v1/import-jobs/job-upload-failed/file")
     api.find_request("POST", "/api/v1/import-jobs/job-upload/file")
+    assert api.request_count("GET", "/api/v1/documents/summary") > summary_requests_before
+    assert api.request_count("GET", "/api/v1/documents") > document_requests_before
     page.screenshot(path=str(SCREENSHOT_DIR / "t09-knowledge-upload-desktop.png"), full_page=True)
-
 
 def verify_document_filter_detail_edit_flow(page: Page, api: KnowledgeApiMock) -> None:
     page.goto(f"{APP_ORIGIN}/#documents", wait_until="networkidle")
@@ -1038,10 +1161,22 @@ def verify_category_migration_flow(page: Page, api: KnowledgeApiMock) -> None:
     api.find_request("DELETE", "/api/v1/knowledge-categories/cat-logistics")
 
 
+def verify_intermediate_viewport_smoke(page: Page) -> list[str]:
+    errors, _api = prepare_page(page)
+    page.goto(f"{APP_ORIGIN}/#knowledge", wait_until="networkidle")
+    expect(page.get_by_role("heading", name="文档解析与知识提炼中心")).to_be_visible()
+    expect(page.get_by_role("heading", name="从原始文档到可检索知识")).to_be_visible()
+    expect(page.get_by_role("heading", name="已同步与正在处理的文档")).to_be_visible()
+    verify_no_overflow(page)
+    return errors
+
+
 def verify_mobile_smoke(page: Page) -> list[str]:
     errors, _api = prepare_page(page)
     page.goto(f"{APP_ORIGIN}/#knowledge", wait_until="networkidle")
-    expect(page.get_by_role("heading", name="文档入库、权限和 QA 结果")).to_be_visible()
+    expect(page.get_by_role("heading", name="文档解析与知识提炼中心")).to_be_visible()
+    expect(page.get_by_role("heading", name="从原始文档到可检索知识")).to_be_visible()
+    expect(page.get_by_role("heading", name="已同步与正在处理的文档")).to_be_visible()
     expect(page.locator("#knowledge-classification-space")).to_be_visible()
     verify_no_overflow(page)
     page.screenshot(path=str(SCREENSHOT_DIR / "t09-knowledge-mobile.png"), full_page=True)
@@ -1055,7 +1190,9 @@ def verify_no_overflow(page: Page) -> None:
 
     local_overflows = page.evaluate(
         """
-        Array.from(document.querySelectorAll('.panel, .document-table, .filter-grid, .pagination-row'))
+        Array.from(document.querySelectorAll(
+          '.panel, .document-table, .filter-grid, .pagination-row, .document-processing-workspace, .document-processing-list'
+        ))
           .filter((element) => element.scrollWidth > element.clientWidth + 1)
           .map((element) => ({
             className: element.className,
@@ -1084,6 +1221,8 @@ def assert_phase_two_contracts(api: KnowledgeApiMock) -> None:
     api.find_request("DELETE", "/api/v1/knowledge-categories/cat-created")
     api.find_request("POST", "/api/v1/knowledge-categories/cat-logistics/migrate-documents")
     api.find_request("DELETE", "/api/v1/knowledge-categories/cat-logistics")
+    api.find_request("GET", "/api/v1/documents/summary")
+    api.find_request("GET", "/api/v1/documents", page="1", pageSize="10")
     api.find_request("GET", "/api/v1/knowledge-spaces/stats")
     api.find_request(
         "GET",
@@ -1102,12 +1241,16 @@ def main() -> None:
         assert_phase_two_contracts(desktop_api)
         desktop_page.close()
 
+        intermediate_page = browser.new_page(viewport={"width": 1024, "height": 900})
+        intermediate_errors = verify_intermediate_viewport_smoke(intermediate_page)
+        intermediate_page.close()
+
         mobile_page = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True)
         mobile_errors = verify_mobile_smoke(mobile_page)
         mobile_page.close()
         browser.close()
 
-    all_errors = desktop_errors + mobile_errors
+    all_errors = desktop_errors + intermediate_errors + mobile_errors
     if all_errors:
         raise AssertionError(f"浏览器控制台存在错误或警告: {all_errors}")
 

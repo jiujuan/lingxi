@@ -66,6 +66,15 @@ class DocumentCenterService:
             "pagination": self.pagination(page, page_size, total),
         }
 
+    def summary(self, context: AccessContext) -> dict:
+        synced_document_count, total_chunk_count = self.documents.summarize_documents(
+            context
+        )
+        return {
+            "synced_document_count": synced_document_count,
+            "total_chunk_count": total_chunk_count,
+        }
+
     def get_document(self, context: AccessContext, document_id: str) -> dict:
         document = self._get_document(context, document_id)
         data = self.document_to_dict(context.tenant_id, document)
