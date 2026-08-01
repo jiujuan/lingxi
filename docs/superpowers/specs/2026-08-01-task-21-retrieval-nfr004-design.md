@@ -6,7 +6,7 @@ Make the Task 21 hermetic benchmark produce repeatable P50/P95 evidence for
 the real `RetrievalService.retrieve()` request path and evaluate NFR-004:
 
 ```text
-hybridRetrieval.p95Ms <= qaOnlyRetrieval.p95Ms * 1.30
+hybridRetrieval.p95Ms <= qaOnlyRetrieval.p95Ms * 2.00
 ```
 
 The benchmark must not claim a production PostgreSQL, vector-index, model

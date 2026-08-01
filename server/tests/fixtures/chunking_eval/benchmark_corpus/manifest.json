@@ -1,0 +1,323 @@
+{
+  "schemaVersion": "adaptive-chunking-benchmark-corpus/v1",
+  "documents": [
+    {
+      "sourceIdentity": "operations-handbook.md",
+      "title": "Operations Handbook",
+      "blocks": [
+        {
+          "page": 1,
+          "titlePath": [
+            "Operations Handbook",
+            "Merge Window"
+          ],
+          "structuralId": "merge-window",
+          "blockType": "TEXT",
+          "content": "Merge block 1 control sentence 1 explains verified requirement ownership. Merge block 1 control sentence 2 explains verified requirement ownership. Merge block 1 control sentence 3 explains verified requirement ownership."
+        },
+        {
+          "page": 1,
+          "titlePath": [
+            "Operations Handbook",
+            "Merge Window"
+          ],
+          "structuralId": "merge-window",
+          "blockType": "TEXT",
+          "content": "Merge block 2 control sentence 1 explains verified requirement ownership. Merge block 2 control sentence 2 explains verified requirement ownership. Merge block 2 control sentence 3 explains verified requirement ownership."
+        },
+        {
+          "page": 1,
+          "titlePath": [
+            "Operations Handbook",
+            "Merge Window"
+          ],
+          "structuralId": "merge-window",
+          "blockType": "TEXT",
+          "content": "Merge block 3 control sentence 1 explains verified requirement ownership. Merge block 3 control sentence 2 explains verified requirement ownership. Merge block 3 control sentence 3 explains verified requirement ownership."
+        },
+        {
+          "page": 2,
+          "titlePath": [
+            "Operations Handbook",
+            "Escalation Narrative"
+          ],
+          "structuralId": "oversized-prose",
+          "blockType": "TEXT",
+          "content": "Oversized escalation narrative control sentence 1 explains verified requirement ownership. Oversized escalation narrative control sentence 2 explains verified requirement ownership. Oversized escalation narrative control sentence 3 explains verified requirement ownership. Oversized escalation narrative control sentence 4 explains verified requirement ownership. Oversized escalation narrative control sentence 5 explains verified requirement ownership. Oversized escalation narrative control sentence 6 explains verified requirement ownership. Oversized escalation narrative control sentence 7 explains verified requirement ownership. Oversized escalation narrative control sentence 8 explains verified requirement ownership. Oversized escalation narrative control sentence 9 explains verified requirement ownership. Oversized escalation narrative control sentence 10 explains verified requirement ownership. Oversized escalation narrative control sentence 11 explains verified requirement ownership. Oversized escalation narrative control sentence 12 explains verified requirement ownership. Oversized escalation narrative control sentence 13 explains verified requirement ownership. Oversized escalation narrative control sentence 14 explains verified requirement ownership. Oversized escalation narrative control sentence 15 explains verified requirement ownership. Oversized escalation narrative control sentence 16 explains verified requirement ownership. Oversized escalation narrative control sentence 17 explains verified requirement ownership. Oversized escalation narrative control sentence 18 explains verified requirement ownership. Oversized escalation narrative control sentence 19 explains verified requirement ownership. Oversized escalation narrative control sentence 20 explains verified requirement ownership. Oversized escalation narrative control sentence 21 explains verified requirement ownership. Oversized escalation narrative control sentence 22 explains verified requirement ownership. Oversized escalation narrative control sentence 23 explains verified requirement ownership. Oversized escalation narrative control sentence 24 explains verified requirement ownership. Oversized escalation narrative control sentence 25 explains verified requirement ownership. Oversized escalation narrative control sentence 26 explains verified requirement ownership. Oversized escalation narrative control sentence 27 explains verified requirement ownership. Oversized escalation narrative control sentence 28 explains verified requirement ownership. Oversized escalation narrative control sentence 29 explains verified requirement ownership. Oversized escalation narrative control sentence 30 explains verified requirement ownership. Oversized escalation narrative control sentence 31 explains verified requirement ownership. Oversized escalation narrative control sentence 32 explains verified requirement ownership. Oversized escalation narrative control sentence 33 explains verified requirement ownership. Oversized escalation narrative control sentence 34 explains verified requirement ownership. Oversized escalation narrative control sentence 35 explains verified requirement ownership. Oversized escalation narrative control sentence 36 explains verified requirement ownership. Oversized escalation narrative control sentence 37 explains verified requirement ownership. Oversized escalation narrative control sentence 38 explains verified requirement ownership. Oversized escalation narrative control sentence 39 explains verified requirement ownership. Oversized escalation narrative control sentence 40 explains verified requirement ownership. Oversized escalation narrative control sentence 41 explains verified requirement ownership. Oversized escalation narrative control sentence 42 explains verified requirement ownership. Oversized escalation narrative control sentence 43 explains verified requirement ownership. Oversized escalation narrative control sentence 44 explains verified requirement ownership. Oversized escalation narrative control sentence 45 explains verified requirement ownership. Oversized escalation narrative control sentence 46 explains verified requirement ownership. Oversized escalation narrative control sentence 47 explains verified requirement ownership. Oversized escalation narrative control sentence 48 explains verified requirement ownership. Oversized escalation narrative control sentence 49 explains verified requirement ownership. Oversized escalation narrative control sentence 50 explains verified requirement ownership. Oversized escalation narrative control sentence 51 explains verified requirement ownership. Oversized escalation narrative control sentence 52 explains verified requirement ownership. Oversized escalation narrative control sentence 53 explains verified requirement ownership. Oversized escalation narrative control sentence 54 explains verified requirement ownership. Oversized escalation narrative control sentence 55 explains verified requirement ownership. Oversized escalation narrative control sentence 56 explains verified requirement ownership. Oversized escalation narrative control sentence 57 explains verified requirement ownership. Oversized escalation narrative control sentence 58 explains verified requirement ownership. Oversized escalation narrative control sentence 59 explains verified requirement ownership. Oversized escalation narrative control sentence 60 explains verified requirement ownership. Oversized escalation narrative control sentence 61 explains verified requirement ownership. Oversized escalation narrative control sentence 62 explains verified requirement ownership. Oversized escalation narrative control sentence 63 explains verified requirement ownership. Oversized escalation narrative control sentence 64 explains verified requirement ownership. Oversized escalation narrative control sentence 65 explains verified requirement ownership."
+        },
+        {
+          "page": 2,
+          "titlePath": [
+            "Operations Handbook",
+            "Revenue Controls"
+          ],
+          "structuralId": "revenue-table",
+          "blockType": "TABLE",
+          "content": "| Region | Owner | Threshold |\n| --- | --- | --- |\n| North | Finance | 250000 |\n| South | Operations | 150000 |\n| East | Compliance | 100000 |",
+          "metadata": {
+            "format": "markdown-table"
+          }
+        },
+        {
+          "page": 3,
+          "titlePath": [
+            "Operations Handbook",
+            "Automation"
+          ],
+          "structuralId": "approval-code",
+          "blockType": "CODE",
+          "content": "def route_approval(amount: int, is_exception: bool) -> str:\n    if is_exception:\n        return \"compliance\"\n    if amount >= 250000:\n        return \"finance-director\"\n    return \"operations-manager\"\n",
+          "metadata": {
+            "language": "python"
+          }
+        },
+        {
+          "page": 3,
+          "titlePath": [
+            "Operations Handbook",
+            "Independent Control 1"
+          ],
+          "structuralId": "independent-control-1",
+          "blockType": "TEXT",
+          "content": "Independent control 1 records owner approval and audit evidence."
+        },
+        {
+          "page": 3,
+          "titlePath": [
+            "Operations Handbook",
+            "Independent Control 2"
+          ],
+          "structuralId": "independent-control-2",
+          "blockType": "TEXT",
+          "content": "Independent control 2 records owner approval and audit evidence."
+        },
+        {
+          "page": 3,
+          "titlePath": [
+            "Operations Handbook",
+            "Independent Control 3"
+          ],
+          "structuralId": "independent-control-3",
+          "blockType": "TEXT",
+          "content": "Independent control 3 records owner approval and audit evidence."
+        },
+        {
+          "page": 3,
+          "titlePath": [
+            "Operations Handbook",
+            "Independent Control 4"
+          ],
+          "structuralId": "independent-control-4",
+          "blockType": "TEXT",
+          "content": "Independent control 4 records owner approval and audit evidence."
+        },
+        {
+          "page": 3,
+          "titlePath": [
+            "Operations Handbook",
+            "Independent Control 5"
+          ],
+          "structuralId": "independent-control-5",
+          "blockType": "TEXT",
+          "content": "Independent control 5 records owner approval and audit evidence."
+        },
+        {
+          "page": 3,
+          "titlePath": [
+            "Operations Handbook",
+            "Independent Control 6"
+          ],
+          "structuralId": "independent-control-6",
+          "blockType": "TEXT",
+          "content": "Independent control 6 records owner approval and audit evidence."
+        },
+        {
+          "page": 3,
+          "titlePath": [
+            "Operations Handbook",
+            "Independent Control 7"
+          ],
+          "structuralId": "independent-control-7",
+          "blockType": "TEXT",
+          "content": "Independent control 7 records owner approval and audit evidence."
+        },
+        {
+          "page": 3,
+          "titlePath": [
+            "Operations Handbook",
+            "Independent Control 8"
+          ],
+          "structuralId": "independent-control-8",
+          "blockType": "TEXT",
+          "content": "Independent control 8 records owner approval and audit evidence."
+        },
+        {
+          "page": 4,
+          "titlePath": [
+            "Operations Handbook",
+            "Independent Control 9"
+          ],
+          "structuralId": "independent-control-9",
+          "blockType": "TEXT",
+          "content": "Independent control 9 records owner approval and audit evidence."
+        },
+        {
+          "page": 4,
+          "titlePath": [
+            "Operations Handbook",
+            "Independent Control 10"
+          ],
+          "structuralId": "independent-control-10",
+          "blockType": "TEXT",
+          "content": "Independent control 10 records owner approval and audit evidence."
+        },
+        {
+          "page": 4,
+          "titlePath": [
+            "Operations Handbook",
+            "Independent Control 11"
+          ],
+          "structuralId": "independent-control-11",
+          "blockType": "TEXT",
+          "content": "Independent control 11 records owner approval and audit evidence."
+        },
+        {
+          "page": 4,
+          "titlePath": [
+            "Operations Handbook",
+            "Independent Control 12"
+          ],
+          "structuralId": "independent-control-12",
+          "blockType": "TEXT",
+          "content": "Independent control 12 records owner approval and audit evidence."
+        },
+        {
+          "page": 4,
+          "titlePath": [
+            "Operations Handbook",
+            "Independent Control 13"
+          ],
+          "structuralId": "independent-control-13",
+          "blockType": "TEXT",
+          "content": "Independent control 13 records owner approval and audit evidence."
+        },
+        {
+          "page": 4,
+          "titlePath": [
+            "Operations Handbook",
+            "Independent Control 14"
+          ],
+          "structuralId": "independent-control-14",
+          "blockType": "TEXT",
+          "content": "Independent control 14 records owner approval and audit evidence."
+        },
+        {
+          "page": 4,
+          "titlePath": [
+            "Operations Handbook",
+            "Independent Control 15"
+          ],
+          "structuralId": "independent-control-15",
+          "blockType": "TEXT",
+          "content": "Independent control 15 records owner approval and audit evidence."
+        }
+      ]
+    },
+    {
+      "sourceIdentity": "customer-support-guide.md",
+      "title": "Customer Support Guide",
+      "blocks": [
+        {
+          "page": 1,
+          "titlePath": [
+            "Customer Support Guide",
+            "Independent Case 1"
+          ],
+          "structuralId": "independent-case-1",
+          "blockType": "TEXT",
+          "content": "Customer case 1 requires verification before support resolution."
+        },
+        {
+          "page": 1,
+          "titlePath": [
+            "Customer Support Guide",
+            "Independent Case 2"
+          ],
+          "structuralId": "independent-case-2",
+          "blockType": "TEXT",
+          "content": "Customer case 2 requires verification before support resolution."
+        },
+        {
+          "page": 1,
+          "titlePath": [
+            "Customer Support Guide",
+            "Independent Case 3"
+          ],
+          "structuralId": "independent-case-3",
+          "blockType": "TEXT",
+          "content": "Customer case 3 requires verification before support resolution."
+        },
+        {
+          "page": 1,
+          "titlePath": [
+            "Customer Support Guide",
+            "Independent Case 4"
+          ],
+          "structuralId": "independent-case-4",
+          "blockType": "TEXT",
+          "content": "Customer case 4 requires verification before support resolution."
+        },
+        {
+          "page": 1,
+          "titlePath": [
+            "Customer Support Guide",
+            "Independent Case 5"
+          ],
+          "structuralId": "independent-case-5",
+          "blockType": "TEXT",
+          "content": "Customer case 5 requires verification before support resolution."
+        },
+        {
+          "page": 2,
+          "titlePath": [
+            "Customer Support Guide",
+            "Independent Case 6"
+          ],
+          "structuralId": "independent-case-6",
+          "blockType": "TEXT",
+          "content": "Customer case 6 requires verification before support resolution."
+        },
+        {
+          "page": 2,
+          "titlePath": [
+            "Customer Support Guide",
+            "Independent Case 7"
+          ],
+          "structuralId": "independent-case-7",
+          "blockType": "TEXT",
+          "content": "Customer case 7 requires verification before support resolution."
+        },
+        {
+          "page": 2,
+          "titlePath": [
+            "Customer Support Guide",
+            "Independent Case 8"
+          ],
+          "structuralId": "independent-case-8",
+          "blockType": "TEXT",
+          "content": "Customer case 8 requires verification before support resolution."
+        },
+        {
+          "page": 2,
+          "titlePath": [
+            "Customer Support Guide",
+            "Independent Case 9"
+          ],
+          "structuralId": "independent-case-9",
+          "blockType": "TEXT",
+          "content": "Customer case 9 requires verification before support resolution."
+        }
+      ]
+    }
+  ]
+}
