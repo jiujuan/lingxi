@@ -272,6 +272,11 @@ def _accepts_bound_call(method: object, *arguments: object) -> bool:
 def require_token_counter(counter: object | None) -> TokenCounter:
     """Validate and safely adapt a runtime-compatible token counter."""
 
+    if isinstance(counter, _SafeTokenCounter):
+        return counter
+    if getattr(counter, "_lingxi_validated_token_counter", False) is True:
+        return counter  # type: ignore[return-value]
+
     try:
         is_protocol_compatible = (
             counter is not None and isinstance(counter, TokenCounter)

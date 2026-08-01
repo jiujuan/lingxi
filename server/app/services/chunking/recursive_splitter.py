@@ -923,6 +923,8 @@ def _build_split_block(
     layouts: Sequence[_AtomicLayout],
     span: _Span,
     token_counter: TokenCounter,
+    *,
+    token_count: int | None = None,
 ) -> SplitBlock:
     atomic_blocks, source_locators = _annotated_provenance(
         block,
@@ -940,7 +942,9 @@ def _build_split_block(
         content=content,
         block_type=block.block_type,
         title_path=block.title_path,
-        token_count=token_counter.count(content),
+        token_count=(
+            token_counter.count(content) if token_count is None else token_count
+        ),
         page_start=min(pages) if pages else None,
         page_end=max(pages) if pages else None,
         source_locators=source_locators,
@@ -971,31 +975,47 @@ def split_oversized_prose(
     layouts = _atomic_layouts(block)
     actual_tokens = counter.count(block.content)
     if actual_tokens <= policy.max_tokens:
-        spans = [_Span(0, len(block.content), SplitReason.UNSPLIT)]
-    else:
-        structural = _structure_spans(block, layouts, counter)
-        initial_spans = structural or [
-            _Span(0, len(block.content), SplitReason.UNSPLIT)
-        ]
-        leaves: list[_Span] = []
-        for initial in initial_spans:
-            leaves.extend(
-                _split_recursively(
-                    block.content,
-                    initial,
-                    policy,
+        # A complete merged span already begins and ends at every atomic
+        # normalization boundary.  Avoid rebuilding all legal boundaries and
+        # re-counting the same text; provenance still passes through the same
+        # SplitBlock construction used by the split path.
+        return RecursiveSplitResult(
+            blocks=(
+                _build_split_block(
+                    block,
+                    layouts,
+                    _Span(0, len(block.content), SplitReason.UNSPLIT),
                     counter,
-                )
-            )
-        spans = _pack_spans(
-            block.content,
-            leaves,
-            policy,
-            counter,
-            structural_boundaries=tuple(
-                layout.start for layout in layouts[1:]
+                    token_count=actual_tokens,
+                ),
             ),
+            split_count=0,
+            oversized_count=0,
         )
+
+    structural = _structure_spans(block, layouts, counter)
+    initial_spans = structural or [
+        _Span(0, len(block.content), SplitReason.UNSPLIT)
+    ]
+    leaves: list[_Span] = []
+    for initial in initial_spans:
+        leaves.extend(
+            _split_recursively(
+                block.content,
+                initial,
+                policy,
+                counter,
+            )
+        )
+    spans = _pack_spans(
+        block.content,
+        leaves,
+        policy,
+        counter,
+        structural_boundaries=tuple(
+            layout.start for layout in layouts[1:]
+        ),
+    )
 
     spans = _align_spans_to_normalization(
         block.content,

@@ -119,6 +119,27 @@ def test_json_fields_are_recursively_frozen_and_detached_from_input_aliases() ->
         block.source_locator["page"] = 2  # type: ignore[index]
 
 
+def test_reused_frozen_json_mapping_is_not_rebuilt() -> None:
+    original = AtomicBlock(
+        index=0,
+        content="body",
+        block_type=BlockType.TEXT,
+        source_locator={"page": 1, "spans": [{"start": 0, "end": 4}]},
+        metadata={"nested": {"safe": True}},
+    )
+
+    reused = AtomicBlock(
+        index=1,
+        content="body",
+        block_type=BlockType.TEXT,
+        source_locator=original.source_locator,
+        metadata=original.metadata,
+    )
+
+    assert reused.source_locator is original.source_locator
+    assert reused.metadata is original.metadata
+
+
 def test_frozen_json_fields_cannot_be_modified_to_bypass_validation() -> None:
     block = AtomicBlock(
         index=0,

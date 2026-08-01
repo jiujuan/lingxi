@@ -9,6 +9,7 @@ from typing import Any
 
 NORMALIZATION_METADATA_KEY = "_lingxi_normalization"
 NORMALIZATION_VERSION = "nfc-lf-strip-v2"
+_IDENTITY_MAP_KEY = "identityMap"
 
 
 @dataclass(frozen=True)
@@ -209,7 +210,61 @@ def _canonical_compose(
     return output, work_units
 
 
+def _is_identity_normalization_candidate(text: str) -> bool:
+    """Return whether NFC/LF normalization preserves every source character.
+
+    This intentionally remains conservative: any CR, combining mark, or
+    canonical decomposition routes to the provenance-preserving general path.
+    The common CJK/ASCII corpus path can then construct the identity span map
+    without allocating a source unit, decomposition unit, and segment object
+    for every code point.
+    """
+
+    return (
+        "\r" not in text
+        and unicodedata.is_normalized("NFC", text)
+        and not any(unicodedata.combining(char) for char in text)
+    )
+
+
+def _normalize_identity_core(text: str) -> tuple[str, dict[str, Any]]:
+    """Build the exact identity provenance map for stable NFC/LF input."""
+
+    trim_start = 0
+    while trim_start < len(text) and text[trim_start].isspace():
+        trim_start += 1
+    trim_end = len(text)
+    while trim_end > trim_start and text[trim_end - 1].isspace():
+        trim_end -= 1
+
+    normalized = text[trim_start:trim_end]
+    retained_length = len(normalized)
+    metadata: dict[str, Any] = {
+        "version": NORMALIZATION_VERSION,
+        "coordinateSpace": "normalized_atomic",
+        "originalCoordinateSpace": "original_atomic",
+        "originalLength": len(text),
+        "normalizedLength": retained_length,
+        # The common NFC/LF path is a contiguous offset mapping.  Keeping the
+        # four endpoints replaces O(n) charMap/segments JSON with O(1)
+        # metadata while retaining exact original-coordinate provenance.
+        _IDENTITY_MAP_KEY: {
+            "normalizedStart": 0,
+            "normalizedEnd": retained_length,
+            "originalStart": trim_start,
+            "originalEnd": trim_end,
+        },
+        # Count the conservative eligibility scan and trim scan so this
+        # observable remains monotonic and linear.
+        "normalizationWorkUnits": len(text) + trim_start + (len(text) - trim_end),
+        "originalText": text,
+    }
+    return normalized, metadata
+
+
 def _normalize_core(text: str) -> tuple[str, dict[str, Any]]:
+    if _is_identity_normalization_candidate(text):
+        return _normalize_identity_core(text)
     units, work_units = _line_ending_units(text)
     decomposed, decomposition_work = _canonical_decompose(units)
     work_units += decomposition_work
@@ -286,6 +341,53 @@ def normalize_text_with_map(text: str) -> tuple[str, dict[str, Any]]:
     return _normalize_core(text)
 
 
+def _identity_mapping(
+    normalization: Mapping[str, Any],
+    normalized_length: int,
+) -> Mapping[str, Any] | None:
+    """Validate and return the compact contiguous identity mapping, if present."""
+
+    raw_identity = normalization.get(_IDENTITY_MAP_KEY)
+    if raw_identity is None:
+        return None
+    original_length = normalization.get("originalLength")
+    if (
+        not isinstance(raw_identity, Mapping)
+        or not isinstance(original_length, int)
+        or isinstance(original_length, bool)
+        or original_length < 0
+    ):
+        raise ValueError("normalized atomic block has invalid identity mapping")
+    values = {
+        key: raw_identity.get(key)
+        for key in (
+            "normalizedStart",
+            "normalizedEnd",
+            "originalStart",
+            "originalEnd",
+        )
+    }
+    if any(
+        not isinstance(value, int) or isinstance(value, bool)
+        for value in values.values()
+    ):
+        raise ValueError("normalized atomic block has invalid identity mapping")
+    normalized_start = int(values["normalizedStart"])
+    normalized_end = int(values["normalizedEnd"])
+    original_start = int(values["originalStart"])
+    original_end = int(values["originalEnd"])
+    if (
+        normalized_start != 0
+        or normalized_end != normalized_length
+        or original_start < 0
+        or original_end < original_start
+        or original_end > original_length
+        or original_end - original_start != normalized_length
+    ):
+        raise ValueError("normalized atomic block has invalid identity mapping")
+    return raw_identity
+
+
 def normalized_segment_boundaries(normalization: Mapping[str, Any]) -> tuple[int, ...]:
     """Return validated legal half-open boundaries for reversible source spans."""
 
@@ -295,8 +397,11 @@ def normalized_segment_boundaries(normalization: Mapping[str, Any]) -> tuple[int
         not isinstance(normalized_length, int)
         or isinstance(normalized_length, bool)
         or normalized_length < 0
-        or not isinstance(raw_segments, (tuple, list))
     ):
+        raise ValueError("normalized atomic block has invalid normalization segments")
+    if _identity_mapping(normalization, normalized_length) is not None:
+        return tuple(range(normalized_length + 1))
+    if not isinstance(raw_segments, (tuple, list)):
         raise ValueError("normalized atomic block has invalid normalization segments")
     boundaries = {0, normalized_length}
     cursor = 0
@@ -324,6 +429,16 @@ def normalized_segment_boundaries(normalization: Mapping[str, Any]) -> tuple[int
 def _containing_segment(
     normalization: Mapping[str, Any], normalized_start: int, normalized_end: int
 ) -> Mapping[str, Any] | None:
+    normalized_length = normalization.get("normalizedLength")
+    if (
+        not isinstance(normalized_length, int)
+        or isinstance(normalized_length, bool)
+        or normalized_length < 0
+    ):
+        return None
+    identity_mapping = _identity_mapping(normalization, normalized_length)
+    if identity_mapping is not None:
+        return identity_mapping
     raw_segments = normalization.get("segments")
     if not isinstance(raw_segments, (tuple, list)):
         return None
@@ -355,10 +470,8 @@ def normalized_span_to_original(
     raw_map = normalization.get("charMap")
     normalized_length = normalization.get("normalizedLength")
     if (
-        not isinstance(raw_map, (tuple, list))
-        or not isinstance(normalized_length, int)
+        not isinstance(normalized_length, int)
         or isinstance(normalized_length, bool)
-        or len(raw_map) != normalized_length
         or not 0 <= normalized_start < normalized_end <= normalized_length
     ):
         raise ValueError("normalized atomic block has an invalid character map")
@@ -367,17 +480,24 @@ def normalized_span_to_original(
         raise ValueError(
             "normalized span does not align to a reversible normalization segment"
         )
-    start_entry = raw_map[normalized_start]
-    end_entry = raw_map[normalized_end - 1]
-    if not (
-        isinstance(start_entry, (tuple, list))
-        and len(start_entry) == 2
-        and isinstance(end_entry, (tuple, list))
-        and len(end_entry) == 2
-    ):
-        raise ValueError("normalized atomic block has an invalid character span")
-    original_start = int(start_entry[0])
-    original_end = int(end_entry[1])
+    identity_mapping = _identity_mapping(normalization, normalized_length)
+    if identity_mapping is not None:
+        original_start = int(identity_mapping["originalStart"]) + normalized_start
+        original_end = int(identity_mapping["originalStart"]) + normalized_end
+    else:
+        if not isinstance(raw_map, (tuple, list)) or len(raw_map) != normalized_length:
+            raise ValueError("normalized atomic block has an invalid character map")
+        start_entry = raw_map[normalized_start]
+        end_entry = raw_map[normalized_end - 1]
+        if not (
+            isinstance(start_entry, (tuple, list))
+            and len(start_entry) == 2
+            and isinstance(end_entry, (tuple, list))
+            and len(end_entry) == 2
+        ):
+            raise ValueError("normalized atomic block has an invalid character span")
+        original_start = int(start_entry[0])
+        original_end = int(end_entry[1])
     if original_start >= original_end:
         raise ValueError("normalized non-empty span mapped to an empty original span")
 

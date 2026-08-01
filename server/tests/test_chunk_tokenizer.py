@@ -641,6 +641,12 @@ def test_safe_token_counter_preserves_local_behavior_and_parameter_errors() -> N
         counter.split_by_token_limit(text, 0)
 
 
+def test_safe_token_counter_validation_is_idempotent() -> None:
+    counter = require_token_counter(LocalTokenCounter())
+
+    assert require_token_counter(counter) is counter
+
+
 def test_default_policy_uses_actual_exported_handler_versions() -> None:
     default = ChunkPolicy()
 

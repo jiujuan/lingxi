@@ -880,6 +880,79 @@ def test_normalization_mapping_reports_linear_work_for_large_repeated_input() ->
     assert result.children[0].content == unicodedata.normalize("NFC", raw)
 
 
+def test_stable_unicode_text_uses_fast_normalization_path_without_canonical_decomposition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = "  稳定文本 Alpha-42\n第二行  "
+
+    def decomposition_must_not_run(*_args, **_kwargs):
+        raise AssertionError("stable text must not enter canonical decomposition")
+
+    monkeypatch.setattr(
+        normalization_module,
+        "_canonical_decompose",
+        decomposition_must_not_run,
+    )
+
+    normalized, metadata = normalization_module.normalize_text_with_map(raw)
+
+    assert normalized == raw.strip()
+    assert metadata["identityMap"] == {
+        "normalizedStart": 0,
+        "normalizedEnd": len(normalized),
+        "originalStart": 2,
+        "originalEnd": len(raw) - 2,
+    }
+    assert "charMap" not in metadata
+    assert "segments" not in metadata
+    assert normalization_module.normalized_segment_boundaries(metadata) == tuple(
+        range(len(normalized) + 1)
+    )
+    assert normalization_module.normalized_span_to_original(
+        metadata,
+        1,
+        4,
+        expected_normalized=normalized[1:4],
+    ) == (3, 6)
+    with pytest.raises(ValueError, match="reversible normalization segment"):
+        normalization_module.normalized_span_to_original(
+            metadata,
+            1,
+            4,
+            expected_normalized="错误文",
+        )
+    assert normalization_module.normalized_fragment_provenance(
+        metadata, 1, 5
+    ) == {
+        "provenanceMode": "normalization_segment_fragment",
+        "coordinateSpace": "normalized_atomic_segment_fragment",
+        "originalSegmentStart": 2,
+        "originalSegmentEnd": len(raw) - 2,
+        "normalizedSegmentStart": 0,
+        "normalizedSegmentEnd": len(normalized),
+        "normalizedFragmentStart": 1,
+        "normalizedFragmentEnd": 5,
+    }
+
+
+def test_non_identity_normalization_keeps_full_span_mapping() -> None:
+    raw = "  e\u0301\r\n"
+
+    normalized, metadata = normalization_module.normalize_text_with_map(raw)
+
+    assert normalized == "é"
+    assert "identityMap" not in metadata
+    assert metadata["charMap"] == [[2, 4]]
+    assert metadata["segments"] == [
+        {
+            "normalizedStart": 0,
+            "normalizedEnd": 1,
+            "originalStart": 2,
+            "originalEnd": 4,
+        }
+    ]
+
+
 def test_normalization_cluster_detection_is_linear_for_long_combining_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

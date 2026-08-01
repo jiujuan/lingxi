@@ -89,9 +89,42 @@ class _ParentSegment:
     section_segment_index: int
 
 
+class _OperationTokenCounter:
+    """Bound repeated tokenizer work to one chunking operation.
+
+    Recursive splitting, overlap construction, parent packing, and final row
+    construction intentionally re-check token budgets.  They frequently ask
+    about the same immutable text, so memoizing exact inputs preserves the
+    tokenizer contract while avoiding repeated BPE encodes.
+    """
+
+    _lingxi_validated_token_counter = True
+
+    def __init__(self, delegate: TokenCounter) -> None:
+        self._delegate = delegate
+        self.name = delegate.name
+        self.version = delegate.version
+        self._counts: dict[str, int] = {}
+        self._splits: dict[tuple[str, int], tuple[str, ...]] = {}
+
+    def count(self, text: str) -> int:
+        if text not in self._counts:
+            self._counts[text] = self._delegate.count(text)
+        return self._counts[text]
+
+    def split_by_token_limit(self, text: str, limit: int) -> list[str]:
+        key = (text, limit)
+        if key not in self._splits:
+            self._splits[key] = tuple(
+                self._delegate.split_by_token_limit(text, limit)
+            )
+        return list(self._splits[key])
+
+
 def _content_hash(content: str) -> str:
-    canonical = normalize_text(content)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    """Hash content emitted by this service after its normalization boundary."""
+
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def _section_key(block: AtomicBlock) -> _SectionKey:
@@ -330,8 +363,11 @@ def _drafts_from_prose(
             "relativeCharStart": candidate.relative_char_start,
             "relativeCharEnd": candidate.relative_char_end,
         }
-        content = normalize_text(candidate.content)
-        unique_content = normalize_text(candidate.unique_content)
+        # Split and overlap operate only on already-normalized atomic content.
+        # Their only introduced separator is LF, so re-running full Unicode
+        # normalization here is redundant and would not change output.
+        content = candidate.content
+        unique_content = candidate.unique_content
         drafts.append(
             _ChildDraft(
                 content=content,
@@ -615,7 +651,7 @@ class ChunkingService:
         if any(not isinstance(block, AtomicBlock) for block in input_blocks):
             raise ValueError("blocks must contain only AtomicBlock values")
 
-        counter = self._token_counter
+        counter = _OperationTokenCounter(self._token_counter)
         if (
             policy.tokenizer_name != counter.name
             or policy.tokenizer_version != counter.version

@@ -151,6 +151,8 @@ def _freeze_json_mapping(
 ) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError(f"{field_name} must be a JSON-safe mapping")
+    if isinstance(value, _FrozenJsonMapping):
+        return value
     frozen = _freeze_json_value(
         value,
         field_name=field_name,
