@@ -21,6 +21,7 @@ from server.app.schemas.document import (
     DocumentListResponse,
     DocumentPermissionRequest,
     DocumentPermissionResponse,
+    DocumentProcessingSummaryResponse,
 )
 from server.app.schemas.knowledge_category import DocumentClassificationResponse
 from server.app.schemas.qa_pair import QaPairListResponse, QaRegenerationResponse
@@ -66,6 +67,14 @@ def list_documents(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/summary", response_model=DocumentProcessingSummaryResponse)
+def get_document_processing_summary(
+    context: AccessContext = Depends(require_permission("DOCUMENT_READ")),
+    db: Session = Depends(get_db),
+) -> dict:
+    return DocumentCenterService(db).summary(context)
 
 
 @router.patch(

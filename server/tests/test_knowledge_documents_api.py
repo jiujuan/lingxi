@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from sqlalchemy import select
 
 from server.tests.test_auth_rbac import build_test_client
@@ -584,3 +586,134 @@ def test_retry_failed_import_job_uses_failed_stage_and_clears_error(monkeypatch)
     assert body["errorCode"] is None
     assert body["retryable"] is False
     assert queued == [ids["failed_job_id"]]
+
+def test_document_summary_returns_visible_document_and_chunk_totals():
+    client, SessionLocal = build_test_client()
+    employee_headers = login_employee(client)
+
+    from server.app.models.document import (
+        Document,
+        DocumentAccessRule,
+        DocumentAccessSubjectType,
+        DocumentStatus,
+    )
+    from server.app.models.user import Department, Tenant
+
+    with SessionLocal() as session:
+        tenant = session.scalar(select(Tenant))
+        private_department = session.scalar(
+            select(Department).where(Department.code == "PRIVATE")
+        )
+        other_tenant = Tenant(name="其他租户")
+        session.add(other_tenant)
+        session.flush()
+
+        visible_documents = [
+            Document(
+                tenant_id=tenant.id,
+                title="员工可见文档一",
+                file_name="employee-visible-one.md",
+                file_type="MARKDOWN",
+                mime_type="text/markdown",
+                file_size=10,
+                object_key="uploads/employee-visible-one.md",
+                checksum="summary-visible-one",
+                status=DocumentStatus.READY,
+                chunk_count=3,
+            ),
+            Document(
+                tenant_id=tenant.id,
+                title="员工可见文档二",
+                file_name="employee-visible-two.md",
+                file_type="MARKDOWN",
+                mime_type="text/markdown",
+                file_size=10,
+                object_key="uploads/employee-visible-two.md",
+                checksum="summary-visible-two",
+                status=DocumentStatus.EMBEDDING,
+                chunk_count=5,
+            ),
+        ]
+        hidden_document = Document(
+            tenant_id=tenant.id,
+            title="无访问范围文档",
+            file_name="summary-private.md",
+            file_type="MARKDOWN",
+            mime_type="text/markdown",
+            file_size=10,
+            object_key="uploads/summary-private.md",
+            checksum="summary-private",
+            status=DocumentStatus.READY,
+            chunk_count=21,
+        )
+        deleted_document = Document(
+            tenant_id=tenant.id,
+            title="已删除文档",
+            file_name="summary-deleted.md",
+            file_type="MARKDOWN",
+            mime_type="text/markdown",
+            file_size=10,
+            object_key="uploads/summary-deleted.md",
+            checksum="summary-deleted",
+            status=DocumentStatus.DELETED,
+            chunk_count=99,
+            deleted_at=datetime.now(UTC),
+        )
+        other_tenant_document = Document(
+            tenant_id=other_tenant.id,
+            title="其他租户文档",
+            file_name="summary-other-tenant.md",
+            file_type="MARKDOWN",
+            mime_type="text/markdown",
+            file_size=10,
+            object_key="uploads/summary-other-tenant.md",
+            checksum="summary-other-tenant",
+            status=DocumentStatus.READY,
+            chunk_count=88,
+        )
+        session.add_all(
+            [
+                *visible_documents,
+                hidden_document,
+                deleted_document,
+                other_tenant_document,
+            ]
+        )
+        session.flush()
+        session.add_all(
+            [
+                *[
+                    DocumentAccessRule(
+                        tenant_id=tenant.id,
+                        document_id=document.id,
+                        subject_type=DocumentAccessSubjectType.ALL_AUTHENTICATED,
+                    )
+                    for document in visible_documents
+                ],
+                DocumentAccessRule(
+                    tenant_id=tenant.id,
+                    document_id=hidden_document.id,
+                    subject_type=DocumentAccessSubjectType.DEPARTMENT,
+                    subject_id=private_department.id,
+                ),
+                DocumentAccessRule(
+                    tenant_id=tenant.id,
+                    document_id=deleted_document.id,
+                    subject_type=DocumentAccessSubjectType.ALL_AUTHENTICATED,
+                ),
+                DocumentAccessRule(
+                    tenant_id=other_tenant.id,
+                    document_id=other_tenant_document.id,
+                    subject_type=DocumentAccessSubjectType.ALL_AUTHENTICATED,
+                ),
+            ]
+        )
+        session.commit()
+
+    response = client.get("/api/v1/documents/summary", headers=employee_headers)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "syncedDocumentCount": 2,
+        "totalChunkCount": 8,
+    }

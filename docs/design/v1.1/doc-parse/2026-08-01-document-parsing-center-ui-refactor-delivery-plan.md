@@ -249,17 +249,17 @@
 
 | 时间 | 任务 | 状态 | 证据/备注 |
 | --- | --- | --- | --- |
-| 2026-08-01 | T-001 | Planned | 交付前需要保留现有工作区截图改动。 |
-| 2026-08-01 | T-002 | Planned | 尚未新增 summary 失败测试。 |
-| 2026-08-01 | T-003 | Planned | 尚未实现 summary API。 |
-| 2026-08-01 | T-004 | Planned | 尚未更新 OpenAPI 与前端类型。 |
-| 2026-08-01 | T-005 | Planned | 尚未重构 `KnowledgePage`。 |
-| 2026-08-01 | T-006 | Planned | 尚未重排上传表单。 |
-| 2026-08-01 | T-007 | Planned | 尚未改造流水线。 |
-| 2026-08-01 | T-008 | Planned | 尚未新增文档处理列表。 |
-| 2026-08-01 | T-009 | Planned | 尚未新增专属样式与响应式验证。 |
-| 2026-08-01 | T-010 | Planned | 尚未更新 Playwright 场景。 |
-| 2026-08-01 | T-011 | Planned | 尚未执行最终回归。 |
+| 2026-08-01 | T-001 | Completed | 保留主工作区的既有未提交改动；在 `C:\Users\xing\.config\superpowers\worktrees\lingxi\feat-doc-parsing-center-ui-refactor` 创建隔离 worktree，分支 `feat/doc-parsing-center-ui-refactor` 已跟踪并推送至 `origin`；计划文档已作为 `9ca348e` 提交。 |
+| 2026-08-01 | T-002 | Completed | 新增 `test_document_summary_returns_visible_document_and_chunk_totals`；实现前请求 `/api/v1/documents/summary` 返回 404（红灯），实现后 summary 用例与完整 documents API 测试通过。 |
+| 2026-08-01 | T-003 | Completed | 新增遵循 `DOCUMENT_READ` 权限边界的 `/api/v1/documents/summary`，按当前用户可见、未删除文档聚合已同步文档数和 Chunk 数。 |
+| 2026-08-01 | T-004 | Completed | 已运行 `python -m server.scripts.export_openapi` 与 `npm run gen:api`，更新 OpenAPI、前端 schema 和 summary API 客户端；`npm run typecheck` 通过。 |
+| 2026-08-01 | T-005 | Completed | `KnowledgePage` 已改为“文档解析与知识提炼中心”工作台，首次并行加载 summary 和第一页文档；上传/任务完成后刷新数据。 |
+| 2026-08-01 | T-006 | Completed | 上传表单重排为文件、默认智能切分、分类、全员访问、范围 ID、构建任务；保留文件校验、分类和访问范围校验，title 自动取文件名。 |
+| 2026-08-01 | T-007 | Completed | 流水线改为 `PARSING → QA_SPLITTING → EMBEDDING → COMPLETED` 四步，支持空闲、排队、失败、重试和进度展示；未引入不存在的 `INDEXING`。 |
+| 2026-08-01 | T-008 | Completed | 新增紧凑文档处理列表，包含搜索、刷新、分页、分类空间、Chunk 数、状态和详情入口。 |
+| 2026-08-01 | T-009 | Completed | 新增隔离 CSS 命名空间与响应式布局；发现 1024px 时顶部指标和工作区最小宽度导致根节点横向溢出，已用 861–1080px 中间断点改为纵向头部/单列工作区，并新增回归验收。 |
+| 2026-08-01 | T-010 | Completed | 更新 `t09_knowledge_playwright.py`：mock summary、搜索、空闲/失败/完成流水线、表单顺序/禁用、刷新请求和 1024px smoke；先将验收截图备份到 `C:\Users\xing\AppData\Local\Temp\lingxi-t09-backup-20260802031139`，随后 Playwright 验收通过并更新 feature worktree 内截图。 |
+| 2026-08-01 | T-011 | Completed | `python -m pytest server/tests/test_knowledge_documents_api.py -v`（9 passed）；`python -m pytest server/tests/test_import_jobs.py -v`（9 passed）；`npm run typecheck` 和 `npm run build`（均退出码 0，正确工作目录 `web/admin`）；`python web/admin/tests/t09_knowledge_playwright.py`（退出码 0）。额外以 Playwright 检查 1440/1024/768/320px：无意外横向溢出、每个视口检测到 17 个主交互控件且 Tab 焦点可达原生交互元素。一次合并命令曾在仓库根目录运行 npm，因不存在根 `package.json` 出现 ENOENT；未修改代码，随后在 `web/admin` 正确目录重跑并通过。 |
 
 ## Open Questions
 
@@ -278,3 +278,5 @@
 | D-004 | 2026-08-01 | 本次不改变 QA 与 Embedding 的 Worker 顺序。 | 该变更会扩大为任务编排和重试语义重构。 | 第四步使用完成/上架语义而非伪造 QA 后置阶段。 |
 | D-005 | 2026-08-01 | 解析中心新增轻量文档处理列表，不替换完整文档管理页。 | 避免复制批量归类、权限编辑、删除等复杂管理能力。 | 页面只提供搜索、状态、Chunk 和详情入口。 |
 | D-006 | 2026-08-01 | 本期不新增无后端契约支持的 Chunk Size/Overlap 滑块。 | 不可保存或不可生效的控件会误导用户。 | 用默认智能切分说明替代。 |
+| D-007 | 2026-08-01 | 在 861–1080px 中间断点将解析中心头部改为纵向、工作区改为单列。 | 自动化验收复现 1024px 根节点横向溢出：侧栏、内容内边距、指标最小宽度和双列工作区共同超出可用宽度。 | 1440px 保持左窄右宽；1024px、768px、320px 无意外横向溢出。 |
+| D-008 | 2026-08-01 | Playwright 验收涵盖 summary、空闲/失败/完成流水线和 1024px 视口。 | 新页面的主要风险是 API 刷新遗漏、阶段伪造、访问控制排布和中等屏幕溢出。 | 回归脚本会验证上述主路径和布局边界。 |
