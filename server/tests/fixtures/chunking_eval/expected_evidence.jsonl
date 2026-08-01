@@ -1,0 +1,9 @@
+{"queryId":"exact-entity","documentId":"exact-entity.md","sourceSpan":{"anchorText":"ATLAS-7"},"expectedEvidenceId":"exact-entity-atlas-7","expectedVisible":true,"qaExpected":true}
+{"queryId":"section-limited","documentId":"section-policy.md","sourceSpan":{"anchorText":"两个工作日内完成"},"expectedEvidenceId":"section-policy-refund-window","expectedVisible":true,"qaExpected":true}
+{"queryId":"cross-paragraph","documentId":"cross-paragraph.md","sourceSpan":{"anchorText":"迁移验收完成后的第 30 天"},"expectedEvidenceId":"cross-paragraph-close-window","expectedVisible":true,"qaExpected":true}
+{"queryId":"table","documentId":"revenue-table.md","sourceSpan":{"anchorText":"| North | 10 | 11 |"},"expectedEvidenceId":"revenue-table-north-q2","expectedVisible":true,"qaExpected":true}
+{"queryId":"code-symbol","documentId":"billing.py","sourceSpan":{"anchorText":"def add_tax(amount):"},"expectedEvidenceId":"billing-add-tax","expectedVisible":true,"qaExpected":true}
+{"queryId":"formula-explanation","documentId":"formula.md","sourceSpan":{"anchorText":"revenue 是确认收入"},"expectedEvidenceId":"formula-gross-margin","expectedVisible":true,"qaExpected":true}
+{"queryId":"image-caption","documentId":"image-caption.md","sourceSpan":{"anchorText":"图 1：蓝色箭头表示同步复制"},"expectedEvidenceId":"image-caption-blue-arrow","expectedVisible":true,"qaExpected":true}
+{"queryId":"qa-gap","documentId":"qa-gap.md","sourceSpan":{"anchorText":"最长保留 365 天"},"expectedEvidenceId":"qa-gap-archive-retention","expectedVisible":true,"qaExpected":false}
+{"queryId":"permission-denied","documentId":"restricted-policy.md","sourceSpan":{"anchorText":"调薪系数为 1.15"},"expectedEvidenceId":"restricted-policy-compensation","expectedVisible":false,"qaExpected":false}

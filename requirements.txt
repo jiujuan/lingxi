@@ -10,4 +10,5 @@ psycopg[binary]
 python-multipart
 redis
 sqlalchemy
+tiktoken==0.12.0
 uvicorn

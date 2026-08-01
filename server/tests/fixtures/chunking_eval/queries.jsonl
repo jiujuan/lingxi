@@ -1,0 +1,9 @@
+{"id":"exact-entity","query":"Atlas 项目的部署代号是什么？","scenario":"exact_entity"}
+{"id":"section-limited","query":"在退款例外章节中，人工审核的时限是多少？","scenario":"section_limited"}
+{"id":"cross-paragraph","query":"客户迁移完成后多久可以关闭旧租户？","scenario":"cross_paragraph"}
+{"id":"table","query":"North 区域第二季度收入是多少？","scenario":"table"}
+{"id":"code-symbol","query":"add_tax 函数如何计算含税金额？","scenario":"code_symbol"}
+{"id":"formula-explanation","query":"毛利率公式中的 revenue 代表什么？","scenario":"formula_explanation"}
+{"id":"image-caption","query":"架构图中的蓝色箭头表示什么？","scenario":"image_caption"}
+{"id":"qa-gap","query":"离线归档最长保留多少天？","scenario":"qa_gap"}
+{"id":"permission-denied","query":"受限薪酬政策的调薪系数是多少？","scenario":"permission_denied"}

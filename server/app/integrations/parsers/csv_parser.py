@@ -2,6 +2,8 @@ import csv
 import io
 from pathlib import Path
 
+from server.app.services.chunking.contracts import BlockType
+
 from server.app.integrations.parsers.base import (
     ParsedBlock,
     ParsedDocument,
@@ -63,6 +65,15 @@ class CsvParser(ParserAdapter):
                     page_no=1,
                     title_path=list(title_path),
                     source_locator={"rowStart": row_start, "rowEnd": row_end},
+                    block_type=BlockType.TABLE,
+                    structural_id=f"csv:rows:{row_start}-{row_end}",
+                    parent_structural_id=f"csv:{Path(source.file_name).stem}",
+                    metadata={
+                        "header": list(header),
+                        "headerRow": 1,
+                        "rowStart": row_start,
+                        "rowEnd": row_end,
+                    },
                 )
             )
             buffer = []

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from server.app.core.errors import bad_request, not_found
 from server.app.core.ids import current_request_id
+from server.app.core.log_redaction import sanitize_citation_snapshot
 from server.app.core.permissions import AccessContext
 from server.app.core.secrets import decrypt_secret
 from server.app.integrations.model_providers.registry import (
@@ -24,7 +25,8 @@ from server.app.services.classification_path_service import (
 )
 from server.app.services.prompt_service import PromptService
 from server.app.schemas.retrieval import RetrievalAccessScope
-from server.app.services.retrieval_service import RetrievalService, normalize_retrieval_scope
+from server.app.core.service_factory import build_retrieval_service
+from server.app.services.retrieval_service import normalize_retrieval_scope
 from server.app.services.sse_service import SseService
 
 
@@ -106,7 +108,7 @@ class ChatService:
         user_message = self.chat_repo.add_message(
             context.tenant_id, session_id, "USER", content, request_id
         )
-        retrieval = RetrievalService(
+        retrieval = build_retrieval_service(
             self.session, provider_factory=self._build_adapter
         ).retrieve(context, content, access_scope=retrieval_scope)
         classification_paths = ClassificationPathService(self.session)
@@ -214,7 +216,7 @@ class ChatService:
             for document_id in titles
         }
         for rank, candidate in enumerate(retrieval.candidates, start=1):
-            candidate_snapshot = candidate.to_snapshot()
+            candidate_snapshot = sanitize_citation_snapshot(candidate.to_snapshot())
             candidate_classification = classifications.get(candidate.document_id)
             if candidate_classification is not None:
                 candidate_snapshot["classification"] = classification_path_to_public(

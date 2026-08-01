@@ -132,3 +132,29 @@ def test_group_chunks_oversized_chunk_forms_own_group(monkeypatch):
         ["x" * 50],
         ["cd"],
     ]
+
+
+
+def test_group_chunks_rejects_oversized_adaptive_chunk_before_qa(monkeypatch):
+    import types
+
+    import pytest
+
+    from server.app.services import qa_split_service
+    from server.app.services.qa_split_service import QaSplitService, QaSplitValidationError
+    from server.tests.test_qa_split_task import build_qa_session
+
+    monkeypatch.setattr(
+        qa_split_service,
+        "settings",
+        types.SimpleNamespace(qa_split_max_batch_chars=10, qa_split_max_concurrency=1),
+    )
+    session, _identity = build_qa_session()
+    chunk = types.SimpleNamespace(
+        content="x" * 11,
+        chunker_name="adaptive_hierarchical",
+        chunk_index=42,
+    )
+
+    with pytest.raises(QaSplitValidationError, match="超出"):
+        QaSplitService(session)._group_chunks([chunk])

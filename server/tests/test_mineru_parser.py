@@ -6,6 +6,7 @@ import pytest
 from server.app.integrations.parsers import _http as http_module
 from server.app.integrations.parsers import mineru as mineru_module
 from server.app.integrations.parsers.base import ParseRequest, ParseSource, ParserError
+from server.app.services.chunking.contracts import BlockType
 from server.app.integrations.parsers.mineru import MinerUClient, MinerUParser
 
 
@@ -89,7 +90,13 @@ def test_direct_result_mode_maps_content_list(monkeypatch):
     assert first.title_path == ["第一章 退款流程"]
     assert first.source_locator == {"pageNo": 1, "blockIndex": 1}
     assert parsed.blocks[1].page_no == 2
-    assert any("跳过 1 张" in warning for warning in parsed.warnings)
+    assert [block.block_type for block in parsed.blocks] == [
+        BlockType.TEXT, BlockType.TABLE, BlockType.IMAGE, BlockType.FORMULA
+    ]
+    assert parsed.blocks[1].metadata["sourceLabel"] == "table"
+    assert parsed.blocks[1].metadata["pageNo"] == 2
+    assert parsed.blocks[1].metadata["blockIndex"] == 2
+    assert any("IMAGE_WITHOUT_TEXT_SKIPPED" in warning for warning in parsed.warnings)
     assert parsed.markdown.startswith("# 第一章 退款流程")
 
 
@@ -116,6 +123,8 @@ def test_task_poll_mode_submits_then_fetches_result(monkeypatch):
 
     assert poll_count == 2
     assert [block.content for block in parsed.blocks] == ["正文段落。"]
+    assert parsed.blocks[0].metadata["parserFallback"] is True
+    assert parsed.blocks[0].metadata["fallbackReason"] == "MINERU_CONTENT_LIST_MISSING"
     assert any("content_list" in warning for warning in parsed.warnings)
 
 

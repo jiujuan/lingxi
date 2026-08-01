@@ -4,6 +4,188 @@ from server.tests.test_auth_rbac import build_test_client
 from server.tests.test_model_config import login_admin
 
 
+def test_adaptive_chunking_log_is_structured_and_excludes_document_content(caplog):
+    from dataclasses import dataclass
+
+    from server.app.services.chunking import (
+        AtomicBlock,
+        BlockType,
+        ChunkPolicy,
+        ChunkingService,
+    )
+    from server.app.services.document_parse_service import log_chunking_observability
+
+    @dataclass(frozen=True)
+    class Counter:
+        name: str = "observability-test-counter"
+        version: str = "1.0"
+
+        def count(self, text: str) -> int:
+            return len(text.split())
+
+        def split_by_token_limit(self, text: str, limit: int) -> list[str]:
+            words = text.split()
+            return [
+                " ".join(words[index : index + limit])
+                for index in range(0, len(words), limit)
+            ]
+
+    counter = Counter()
+    policy = ChunkPolicy(
+        tokenizer_name=counter.name,
+        tokenizer_version=counter.version,
+        min_tokens=2,
+        target_tokens=3,
+        max_tokens=4,
+        overlap_tokens=0,
+        parent_max_tokens=8,
+        embedding_provider_input_limit=16,
+    )
+    result = ChunkingService(counter).chunk(
+        [
+            AtomicBlock(
+                index=0,
+                content="private-customer-content must-never-appear-in-logs alpha beta",
+                block_type=BlockType.TEXT,
+                source_locator={"block": 0},
+                page_no=1,
+                title_path=("Private",),
+                structural_id="block-0",
+                parent_structural_id="section-0",
+            )
+        ],
+        policy,
+        document_title="Private Document",
+    )
+
+    with caplog.at_level("INFO", logger="server.app.services.document_parse_service"):
+        log_chunking_observability(
+            tenant_id="tenant-1",
+            document_id="document-1",
+            job_id="job-1",
+            parser_name="MARKDOWN",
+            parser_version="1.0",
+            policy=policy,
+            result=result,
+            duration_seconds=0.125,
+        )
+
+    record = next(
+        record for record in caplog.records if record.message == "adaptive chunking completed"
+    )
+    assert record.tenant_id == "tenant-1"
+    assert record.document_id == "document-1"
+    assert record.job_id == "job-1"
+    assert record.config_hash == policy.config_hash
+    assert record.chunker_version == policy.version
+    assert record.atomic_block_count == 1
+    assert record.child_count == result.stats.child_count
+    assert record.parent_count == result.stats.parent_count
+    assert record.tokenizerName == counter.name
+    assert record.mergeCount == result.stats.merge_count
+    assert record.splitCount == result.stats.split_count
+    assert record.tinyChunkCount == 0
+    assert record.oversizedChunkCount == result.stats.oversized_count
+    assert record.skippedImageCount == 0
+    assert record.featureFlags == {"adaptiveChunkingEnabled": True}
+    assert "private-customer-content" not in record.getMessage()
+    assert "private-customer-content" not in str(record.__dict__)
+
+
+def test_adaptive_chunking_metrics_use_pipeline_event_counts():
+    from dataclasses import dataclass
+
+    from server.app.core import metrics
+    from server.app.services.chunking import (
+        AtomicBlock,
+        BlockType,
+        ChunkPolicy,
+        ChunkingService,
+    )
+    from server.app.services.document_parse_service import log_chunking_observability
+
+    @dataclass(frozen=True)
+    class Counter:
+        name: str = "observability-event-counter"
+        version: str = "1.0"
+
+        def count(self, text: str) -> int:
+            return len(text.split())
+
+        def split_by_token_limit(self, text: str, limit: int) -> list[str]:
+            words = text.split()
+            return [
+                " ".join(words[index : index + limit])
+                for index in range(0, len(words), limit)
+            ]
+
+    counter = Counter()
+    policy = ChunkPolicy(
+        tokenizer_name=counter.name,
+        tokenizer_version=counter.version,
+        min_tokens=2,
+        target_tokens=3,
+        max_tokens=4,
+        overlap_tokens=0,
+        parent_max_tokens=8,
+        embedding_provider_input_limit=16,
+    )
+    result = ChunkingService(counter).chunk(
+        [
+            AtomicBlock(
+                index=0,
+                content="alpha",
+                block_type=BlockType.TEXT,
+                source_locator={"block": 0},
+                page_no=1,
+                title_path=("Guide",),
+                structural_id="block-0",
+                parent_structural_id="section-0",
+            ),
+            AtomicBlock(
+                index=1,
+                content="beta",
+                block_type=BlockType.TEXT,
+                source_locator={"block": 1},
+                page_no=1,
+                title_path=("Guide",),
+                structural_id="block-1",
+                parent_structural_id="section-0",
+            ),
+            AtomicBlock(
+                index=2,
+                content="one two three four five six seven eight",
+                block_type=BlockType.TEXT,
+                source_locator={"block": 2},
+                page_no=1,
+                title_path=("Guide",),
+                structural_id="block-2",
+                parent_structural_id="section-0",
+                metadata={"hard_boundary": True},
+            ),
+        ],
+        policy,
+        document_title="Guide",
+    )
+
+    metrics.reset()
+    log_chunking_observability(
+        tenant_id="tenant-1",
+        document_id="document-1",
+        job_id="job-1",
+        parser_name="MARKDOWN",
+        parser_version="1.0",
+        policy=policy,
+        result=result,
+        duration_seconds=0.125,
+    )
+
+    rendered = metrics.render_prometheus()
+    assert "lingxi_chunk_merge_total 1" in rendered
+    assert "lingxi_chunk_oversized_total 1" in rendered
+    assert "lingxi_chunk_split_total 2" in rendered
+
+
 def test_logs_api_lists_filters_and_redacts_sensitive_fields():
     client, SessionLocal = build_test_client()
     headers = login_admin(client)

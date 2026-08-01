@@ -339,3 +339,112 @@ def test_db_engine_options_sqlite_uses_default_pool(monkeypatch):
 
     # SQLite rejects QueuePool sizing args -> only pre_ping is passed
     assert options == {"pool_pre_ping": True}
+
+_ADAPTIVE_CHUNK_ENV_NAMES = (
+    "CHUNKING_MODE",
+    "CHUNK_MIN_TOKENS",
+    "CHUNK_TARGET_TOKENS",
+    "CHUNK_MAX_TOKENS",
+    "CHUNK_OVERLAP_TOKENS",
+    "CHUNK_PARENT_MAX_TOKENS",
+    "CHUNK_TOKENIZER_NAME",
+    "CHUNK_SEMANTIC_SPLIT_ENABLED",
+    "QA_STRICT_PROVENANCE_ENABLED",
+    "CHUNK_INDEXING_ENABLED",
+    "HYBRID_CHUNK_RETRIEVAL_ENABLED",
+    "PARENT_CONTEXT_ENABLED",
+    "RETRIEVAL_VECTOR_TOP_K",
+    "RETRIEVAL_TEXT_TOP_K",
+    "RETRIEVAL_FINAL_TOP_K",
+    "RETRIEVAL_HYBRID_QA_VECTOR_TOP_K",
+    "RETRIEVAL_HYBRID_CHUNK_VECTOR_TOP_K",
+    "RETRIEVAL_HYBRID_QA_TEXT_TOP_K",
+    "RETRIEVAL_HYBRID_CHUNK_TEXT_TOP_K",
+    "RETRIEVAL_RRF_K",
+    "RETRIEVAL_CHUNK_VECTOR_WEIGHT",
+    "RETRIEVAL_CHUNK_TEXT_WEIGHT",
+    "RETRIEVAL_QA_VECTOR_WEIGHT",
+    "RETRIEVAL_QA_TEXT_WEIGHT",
+)
+
+
+def _clear_adaptive_chunk_env(monkeypatch):
+    for name in _ADAPTIVE_CHUNK_ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_adaptive_chunking_settings_defaults_are_spec_values(monkeypatch):
+    _clear_adaptive_chunk_env(monkeypatch)
+
+    current = Settings()
+
+    assert current.chunking_mode == "legacy"
+    assert (current.chunk_min_tokens, current.chunk_target_tokens, current.chunk_max_tokens) == (100, 450, 800)
+    assert current.chunk_overlap_tokens == 64
+    assert current.chunk_parent_max_tokens == 1800
+    assert current.chunk_tokenizer_name == "local-tiktoken-cl100k_base"
+    assert current.chunk_semantic_split_enabled is False
+    assert current.qa_strict_provenance_enabled is False
+    assert current.chunk_indexing_enabled is False
+    assert current.hybrid_chunk_retrieval_enabled is False
+    assert current.parent_context_enabled is False
+    assert current.retrieval_rrf_k == 60
+    assert (
+        current.retrieval_hybrid_qa_vector_top_k,
+        current.retrieval_hybrid_chunk_vector_top_k,
+        current.retrieval_hybrid_qa_text_top_k,
+        current.retrieval_hybrid_chunk_text_top_k,
+    ) == (10, 10, 10, 10)
+    assert current.retrieval_rrf_channel_weights == {
+        "qa_vector": 1.0,
+        "qa_text": 1.0,
+        "chunk_vector": 1.0,
+        "chunk_text": 1.0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("environment", "expected"),
+    [
+        ({"CHUNKING_MODE": "unknown"}, "CHUNKING_MODE"),
+        ({"CHUNK_TOKENIZER_NAME": "unknown-tokenizer"}, "CHUNK_TOKENIZER_NAME"),
+        ({"CHUNK_MIN_TOKENS": "451"}, "min_tokens"),
+        ({"CHUNK_OVERLAP_TOKENS": "100"}, "overlap_tokens"),
+        ({"CHUNK_PARENT_MAX_TOKENS": "799"}, "parent_max_tokens"),
+        ({"RETRIEVAL_RRF_K": "0"}, "RETRIEVAL_RRF_K"),
+        ({"RETRIEVAL_QA_VECTOR_WEIGHT": "-0.1"}, "RETRIEVAL_QA_VECTOR_WEIGHT"),
+        ({"RETRIEVAL_CHUNK_TEXT_WEIGHT": "nan"}, "RETRIEVAL_CHUNK_TEXT_WEIGHT"),
+        ({"RETRIEVAL_CHUNK_VECTOR_WEIGHT": "inf"}, "RETRIEVAL_CHUNK_VECTOR_WEIGHT"),
+    ],
+)
+def test_validate_chunking_config_rejects_invalid_values(monkeypatch, environment, expected):
+    from server.app.core.config import validate_chunking_config
+
+    _clear_adaptive_chunk_env(monkeypatch)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+
+    with pytest.raises(ConfigurationError, match=expected):
+        validate_chunking_config(Settings())
+
+
+def test_validate_chunking_config_rejects_hybrid_candidate_budgets_above_qa_only_cap(monkeypatch):
+    from server.app.core.config import validate_chunking_config
+
+    _clear_adaptive_chunk_env(monkeypatch)
+    monkeypatch.setenv("RETRIEVAL_VECTOR_TOP_K", "10")
+    monkeypatch.setenv("RETRIEVAL_HYBRID_QA_VECTOR_TOP_K", "6")
+    monkeypatch.setenv("RETRIEVAL_HYBRID_CHUNK_VECTOR_TOP_K", "5")
+
+    with pytest.raises(ConfigurationError, match="RETRIEVAL_HYBRID_QA_VECTOR_TOP_K"):
+        validate_chunking_config(Settings())
+
+
+def test_validate_chunking_config_requires_hybrid_for_parent_context(monkeypatch):
+    from server.app.core.config import validate_chunking_config
+
+    _clear_adaptive_chunk_env(monkeypatch)
+    monkeypatch.setenv("PARENT_CONTEXT_ENABLED", "true")
+
+    with pytest.raises(ConfigurationError, match="PARENT_CONTEXT_ENABLED"):
+        validate_chunking_config(Settings())

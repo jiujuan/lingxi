@@ -1,4 +1,10 @@
+import json
+from types import SimpleNamespace
+
+import pytest
 from sqlalchemy import select
+
+from server.app.models.qa_pair import DocumentChunk
 
 
 def build_qa_session():
@@ -117,13 +123,143 @@ def test_qa_split_validator_rejects_invalid_json_and_missing_fields():
     )
     assert valid[0].question == "怎么退款？"
 
-    for payload in ["not-json", '{"items":[{"question":"缺少答案"}]}']:
+    for payload, expected_code in [
+        ("not-json", "QA_SPLIT_INVALID_OUTPUT"),
+        ('{"items":[{"question":"缺少答案"}]}', "QA_PROVENANCE_CONTRACT_INVALID"),
+    ]:
         try:
             validate_qa_split_output(payload)
         except QaSplitValidationError as exc:
-            assert exc.code == "QA_SPLIT_INVALID_OUTPUT"
+            assert exc.code == expected_code
         else:
             raise AssertionError("invalid QA output should fail validation")
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        ("not-json", "QA_PROVENANCE_INVALID_JSON"),
+        ('{"items":[42]}', "QA_PROVENANCE_ITEM_NOT_OBJECT"),
+        (
+            '{"items":[{"question":" ","answer":"答案","quote":"引用","pageNo":1}]}',
+            "QA_PROVENANCE_EMPTY_REQUIRED_FIELD",
+        ),
+        (
+            '{"items":[{"question":"问题","answer":"答案","quote":"引用","pageNo":0}]}',
+            "QA_PROVENANCE_INVALID_PAGE_NO",
+        ),
+        ('{"items":[]}', "QA_PROVENANCE_EMPTY_ITEMS"),
+    ],
+)
+def test_qa_output_validation_failures_record_stable_provenance_metric(payload, reason):
+    from server.app.core import metrics
+    from server.app.services.qa_split_service import (
+        QaSplitValidationError,
+        validate_qa_split_output,
+    )
+
+    metrics.reset()
+    with pytest.raises(QaSplitValidationError):
+        validate_qa_split_output(payload)
+
+    assert (
+        f'lingxi_qa_provenance_validation_failure_total{{reason="{reason}"}} 1'
+        in metrics.render_prometheus()
+    )
+
+
+def test_qa_split_without_chunks_records_stable_provenance_metric():
+    from server.app.core import metrics
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.services.qa_split_service import QaSplitService
+
+    session, identity = build_qa_session()
+    job_id, _document_id, chunks = create_qa_ready_job(session, identity)
+    for chunk in chunks:
+        session.delete(chunk)
+    session.commit()
+
+    metrics.reset()
+    QaSplitService(session).split_import_job(job_id)
+
+    assert (
+        'lingxi_qa_provenance_validation_failure_total'
+        '{reason="QA_PROVENANCE_NO_SPLITTABLE_CHUNKS"} 1'
+        in metrics.render_prometheus()
+    )
+
+
+def test_qa_source_validation_failures_record_stable_provenance_metrics():
+    from server.app.core import metrics
+    from server.app.models.document import Document
+    from server.app.models.import_job import ImportJob
+    from server.app.services.qa_split_service import (
+        QaSplitService,
+        QaSplitValidationError,
+        ValidatedQaItem,
+    )
+
+    metrics.reset()
+    with pytest.raises(QaSplitValidationError):
+        QaSplitService._bind_embedding_run_config_hash(
+            SimpleNamespace(options={}),
+            [DocumentChunk(chunker_config_hash="generation-a"), DocumentChunk(chunker_config_hash="generation-b")],
+        )
+    assert (
+        "lingxi_qa_provenance_validation_failure_total"
+        '{reason="QA_PROVENANCE_SOURCE_CONFIG_INVALID"} 1'
+        in metrics.render_prometheus()
+    )
+
+    session, identity = build_qa_session()
+    job_id, document_id, chunks = create_qa_ready_job(session, identity)
+    job = session.get(ImportJob, job_id)
+    document = session.get(Document, document_id)
+    assert job is not None
+    assert document is not None
+
+    metrics.reset()
+    with pytest.raises(QaSplitValidationError):
+        QaSplitService(session)._replace_qa_pairs(
+            job,
+            document,
+            chunks,
+            [
+                ValidatedQaItem(
+                    question="问题",
+                    answer="答案",
+                    quote="退款需要主管审批。",
+                    page_no=1,
+                    chunk_index=99,
+                )
+            ],
+        )
+    assert (
+        "lingxi_qa_provenance_validation_failure_total"
+        '{reason="QA_PROVENANCE_UNKNOWN_CHUNK_INDEX"} 1'
+        in metrics.render_prometheus()
+    )
+
+
+def test_qa_model_configuration_validation_failure_records_stable_metric():
+    from server.app.core import metrics
+    from server.app.services.qa_split_service import QaSplitService, QaSplitValidationError
+
+    session, _identity = build_qa_session()
+    metrics.reset()
+
+    with pytest.raises(QaSplitValidationError) as exc_info:
+        QaSplitService(session)._default_model("tenant-id-must-not-be-a-metric-label")
+
+    assert exc_info.value.code == "QA_SPLIT_MODEL_NOT_CONFIGURED"
+    assert exc_info.value.retryable is False
+    rendered = metrics.render_prometheus()
+    assert (
+        "lingxi_qa_provenance_validation_failure_total"
+        '{reason="QA_PROVENANCE_MODEL_NOT_CONFIGURED"} 1'
+        in rendered
+    )
+    assert "tenant-id-must-not-be-a-metric-label" not in rendered
 
 
 def test_qa_split_service_writes_pairs_and_is_idempotent():
@@ -133,8 +269,8 @@ def test_qa_split_service_writes_pairs_and_is_idempotent():
     add_default_qa_model(
         session,
         tenant_id,
-        {
-            "items": [
+        _strict_qa_payload(
+            items=[
                 {
                     "question": "退款需要谁审批？",
                     "answer": "退款需要主管审批。",
@@ -149,8 +285,10 @@ def test_qa_split_service_writes_pairs_and_is_idempotent():
                     "pageNo": 2,
                     "chunkIndex": 1,
                 },
-            ]
-        },
+            ],
+            covered=[0, 1],
+            skipped=[],
+        ),
     )
 
     from server.app.models.document import Document, DocumentStatus
@@ -177,6 +315,7 @@ def test_qa_split_service_writes_pairs_and_is_idempotent():
     assert qa_pairs[0].chunk_id == chunks[0].id
     assert qa_pairs[1].page_no == 2
     assert qa_pairs[1].quote == "已开票订单需先红冲发票。"
+    assert job.options["embedding"]["run_config_hash"] == chunks[0].chunker_config_hash
 
 
 def test_qa_split_failure_records_error_and_keeps_chunks():
@@ -226,8 +365,8 @@ def test_qa_regeneration_api_and_qa_pair_list():
         add_default_qa_model(
             session,
             tenant.id,
-            {
-                "items": [
+            _strict_qa_payload(
+                items=[
                     {
                         "question": "退款怎么审批？",
                         "answer": "由主管审批。",
@@ -235,8 +374,10 @@ def test_qa_regeneration_api_and_qa_pair_list():
                         "pageNo": 1,
                         "chunkIndex": 0,
                     }
-                ]
-            },
+                ],
+                covered=[0],
+                skipped=[{"chunkIndex": 1, "reason": "本片段未生成 QA"}],
+            ),
         )
         session.commit()
 
@@ -254,3 +395,651 @@ def test_qa_regeneration_api_and_qa_pair_list():
     assert listed.status_code == 200
     assert listed.json()["pagination"]["totalItems"] == 1
     assert listed.json()["data"][0]["question"] == "退款怎么审批？"
+
+
+
+def _strict_qa_payload(*, items, covered, skipped):
+    return {
+        "items": items,
+        "coveredChunkIndexes": covered,
+        "skippedChunks": skipped,
+    }
+
+
+def test_qa_prompt_requires_complete_batch_coverage_contract():
+    from server.app.models.document import Document
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.services.qa_prompt_builder import build_qa_split_prompt
+
+    document = Document(title="Refund SOP")
+    chunks = [
+        DocumentChunk(chunk_index=7, content="退款需要主管审批。", page_no=1),
+        DocumentChunk(chunk_index=12, content="已开票订单需先红冲发票。", page_no=2),
+    ]
+
+    prompt = build_qa_split_prompt(document, chunks)
+
+    assert '"coveredChunkIndexes"' in prompt
+    assert '"skippedChunks"' in prompt
+    assert '"chunkIndex"' in prompt
+    assert "完备分区" in prompt
+    assert "不能同时" in prompt
+
+
+def test_strict_adaptive_output_rejects_missing_provenance_without_writing_pairs():
+    session, identity = build_qa_session()
+    tenant_id = identity["tenant"].id
+    job_id, document_id, chunks = create_qa_ready_job(session, identity)
+    for chunk in chunks:
+        chunk.chunker_name = "adaptive_hierarchical"
+        chunk.chunker_version = "1.0"
+        chunk.chunker_config_hash = "adaptive-generation"
+    session.commit()
+    add_default_qa_model(
+        session,
+        tenant_id,
+        {"items": [{
+            "question": "退款需要谁审批？",
+            "answer": "退款需要主管审批。",
+            "quote": "退款需要主管审批。",
+            "pageNo": 1,
+        }]},
+    )
+
+    from server.app.models.document import Document, DocumentStatus
+    from server.app.models.qa_pair import QaPair
+    from server.app.services.qa_split_service import QaSplitService
+
+    result = QaSplitService(session).split_import_job(job_id)
+
+    assert result.status == "FAILED"
+    assert session.get(Document, document_id).status == DocumentStatus.FAILED
+    assert session.scalars(select(QaPair).where(QaPair.document_id == document_id)).all() == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        _strict_qa_payload(
+            items=[{
+                "question": "退款需要谁审批？",
+                "answer": "退款需要主管审批。",
+                "quote": "退款需要主管审批。",
+                "pageNo": 1,
+                "chunkIndex": 99,
+            }],
+            covered=[0],
+            skipped=[{"chunkIndex": 1, "reason": "没有可生成的问题"}],
+        ),
+        _strict_qa_payload(
+            items=[{
+                "question": "退款需要谁审批？",
+                "answer": "退款需要主管审批。",
+                "quote": "不属于片段的引用。",
+                "pageNo": 1,
+                "chunkIndex": 0,
+            }],
+            covered=[0],
+            skipped=[{"chunkIndex": 1, "reason": "没有可生成的问题"}],
+        ),
+        _strict_qa_payload(
+            items=[{
+                "question": "退款需要谁审批？",
+                "answer": "退款需要主管审批。",
+                "quote": "退款需要主管审批。",
+                "pageNo": 3,
+                "chunkIndex": 0,
+            }],
+            covered=[0],
+            skipped=[{"chunkIndex": 1, "reason": "没有可生成的问题"}],
+        ),
+        _strict_qa_payload(
+            items=[{
+                "question": "退款需要谁审批？",
+                "answer": "退款需要主管审批。",
+                "quote": "退款需要主管审批。",
+                "pageNo": 1,
+                "chunkIndex": 0,
+            }],
+            covered=[0],
+            skipped=[],
+        ),
+    ],
+)
+def test_strict_validator_rejects_unknown_quote_page_and_incomplete_coverage(payload):
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.services.qa_split_service import (
+        QaSplitValidationError,
+        validate_qa_split_output,
+    )
+
+    chunks = [
+        DocumentChunk(
+            chunk_index=0,
+            content="退款需要主管审批。",
+            page_no=1,
+            page_start=1,
+            page_end=1,
+        ),
+        DocumentChunk(
+            chunk_index=1,
+            content="已开票订单需先红冲发票。",
+            page_no=2,
+            page_start=2,
+            page_end=2,
+        ),
+    ]
+
+    with pytest.raises(QaSplitValidationError):
+        validate_qa_split_output(json.dumps(payload), chunks)
+
+
+def test_strict_validator_normalizes_quote_containment_but_preserves_original_quote():
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.services.qa_split_service import validate_qa_split_output
+
+    quote = "Cafe\u0301\n  policy"
+    chunks = [
+        DocumentChunk(
+            chunk_index=4,
+            content="Caf\u00e9 policy must be followed.",
+            page_no=3,
+            page_start=3,
+            page_end=3,
+        )
+    ]
+    payload = _strict_qa_payload(
+        items=[{
+            "question": "What applies?",
+            "answer": "The policy applies.",
+            "quote": quote,
+            "pageNo": 3,
+            "chunkIndex": 4,
+        }],
+        covered=[4],
+        skipped=[],
+    )
+
+    validated = validate_qa_split_output(json.dumps(payload), chunks)
+
+    assert validated[0].quote == quote
+    assert validated[0].chunk_index == 4
+
+
+def test_legacy_compatibility_missing_index_never_uses_first_chunk_fallback():
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.services.qa_split_service import (
+        QaSplitValidationError,
+        validate_qa_split_output,
+    )
+
+    chunks = [
+        DocumentChunk(chunk_index=0, content="退款需要主管审批。", page_no=1),
+        DocumentChunk(chunk_index=1, content="已开票订单需先红冲发票。", page_no=2),
+    ]
+    payload = {"items": [{
+        "question": "退款前要做什么？",
+        "answer": "先红冲发票。",
+        "quote": "不存在的引用。",
+        "pageNo": 2,
+    }]}
+
+    with pytest.raises(QaSplitValidationError):
+        validate_qa_split_output(
+            json.dumps(payload), chunks, allow_legacy_missing_chunk_index=True
+        )
+
+
+def test_multi_batch_validation_retains_global_chunk_indexes(monkeypatch):
+    import types
+
+    from server.app.models.document import Document
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.services import qa_split_service
+    from server.app.services.qa_split_service import QaSplitService
+
+    monkeypatch.setattr(
+        qa_split_service,
+        "settings",
+        types.SimpleNamespace(qa_split_max_batch_chars=12, qa_split_max_concurrency=1),
+    )
+    session, _identity = build_qa_session()
+    chunks = [
+        DocumentChunk(chunk_index=10, content="a" * 8, page_no=1),
+        DocumentChunk(chunk_index=25, content="b" * 8, page_no=2),
+    ]
+
+    class Adapter:
+        def __init__(self):
+            self.calls = 0
+
+        def generate_qa_pairs(self, _prompt):
+            index = (10, 25)[self.calls]
+            page = (1, 2)[self.calls]
+            content = ("a" * 8, "b" * 8)[self.calls]
+            self.calls += 1
+            return json.dumps(_strict_qa_payload(
+                items=[{
+                    "question": f"q{index}",
+                    "answer": "answer",
+                    "quote": content,
+                    "pageNo": page,
+                    "chunkIndex": index,
+                }],
+                covered=[index],
+                skipped=[],
+            ))
+
+    items = QaSplitService(session)._generate_qa_items(
+        Adapter(), Document(title="T"), [[chunks[0]], [chunks[1]]]
+    )
+
+    assert [item.chunk_index for item in items] == [10, 25]
+
+
+
+def _assert_provenance_error(exc_info, code, retryable):
+    assert exc_info.value.code == code
+    assert exc_info.value.retryable is retryable
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        pytest.param(field, value, id=f"{field}-{value_type}")
+        for field in ("question", "answer", "quote")
+        for value_type, value in (
+            ("number", 123),
+            ("bool", True),
+            ("list", ["not-a-json-string"]),
+            ("object", {"value": "not-a-json-string"}),
+        )
+    ],
+)
+def test_strict_qa_fields_reject_non_json_string_values(field, invalid_value):
+    from server.app.services.qa_split_service import (
+        QaSplitValidationError,
+        validate_qa_split_output,
+    )
+
+    item = {
+        "question": "question",
+        "answer": "answer",
+        # A numeric quote would match this content if coercion were allowed.
+        "quote": "123",
+        "pageNo": 1,
+        "chunkIndex": 0,
+    }
+    item[field] = invalid_value
+    payload = _strict_qa_payload(items=[item], covered=[0], skipped=[])
+    chunks = [DocumentChunk(chunk_index=0, content="123", page_no=1)]
+
+    with pytest.raises(QaSplitValidationError) as exc_info:
+        validate_qa_split_output(json.dumps(payload), chunks)
+
+    _assert_provenance_error(exc_info, "QA_PROVENANCE_CONTRACT_INVALID", False)
+
+
+def test_numeric_quote_is_not_coerced_or_persisted_as_qa_pair():
+    from server.app.models.document import Document
+    from server.app.models.qa_pair import QaPair
+    from server.app.services.qa_split_service import QaSplitService
+
+    session, identity = build_qa_session()
+    job_id, document_id, chunks = create_qa_ready_job(session, identity)
+    chunks[0].content = "123"
+    session.commit()
+    add_default_qa_model(
+        session,
+        identity["tenant"].id,
+        _strict_qa_payload(
+            items=[{
+                "question": "question",
+                "answer": "answer",
+                "quote": 123,
+                "pageNo": 1,
+                "chunkIndex": 0,
+            }],
+            covered=[0],
+            skipped=[1],
+        ),
+    )
+
+    result = QaSplitService(session).split_import_job(job_id)
+    document = session.get(Document, document_id)
+
+    assert result.status == "FAILED"
+    assert document.last_error_code == "QA_PROVENANCE_CONTRACT_INVALID"
+    assert session.scalars(
+        select(QaPair).where(QaPair.document_id == document_id)
+    ).all() == []
+
+
+@pytest.mark.parametrize(
+    ("page_start", "page_end"),
+    [
+        pytest.param(0, None, id="page-start-zero"),
+        pytest.param(None, 0, id="page-end-zero"),
+        pytest.param(False, None, id="page-start-false"),
+        pytest.param(None, False, id="page-end-false"),
+        pytest.param(2, 1, id="page-end-before-page-start"),
+    ],
+)
+def test_chunk_page_range_rejects_invalid_values(page_start, page_end):
+    from server.app.services.qa_split_service import (
+        QaSplitValidationError,
+        validate_qa_split_output,
+    )
+
+    payload = _strict_qa_payload(
+        items=[{
+            "question": "question",
+            "answer": "answer",
+            "quote": "content",
+            "pageNo": 1,
+            "chunkIndex": 0,
+        }],
+        covered=[0],
+        skipped=[],
+    )
+    chunk = DocumentChunk(
+        chunk_index=0,
+        content="content",
+        page_no=1,
+        page_start=page_start,
+        page_end=page_end,
+    )
+
+    with pytest.raises(QaSplitValidationError) as exc_info:
+        validate_qa_split_output(json.dumps(payload), [chunk])
+
+    _assert_provenance_error(exc_info, "QA_PROVENANCE_CONTRACT_INVALID", False)
+
+
+@pytest.mark.parametrize(
+    ("payload", "chunks", "code", "retryable"),
+    [
+        (
+            _strict_qa_payload(
+                items=[{
+                    "question": "退款需要谁审批？",
+                    "answer": "退款需要主管审批。",
+                    "quote": "退款需要主管审批。",
+                    "pageNo": 1,
+                }],
+                covered=[0],
+                skipped=[],
+            ),
+            [DocumentChunk(chunk_index=0, content="退款需要主管审批。", page_no=1)],
+            "QA_PROVENANCE_MISSING_CHUNK_INDEX",
+            True,
+        ),
+        (
+            _strict_qa_payload(
+                items=[{
+                    "question": "退款需要谁审批？",
+                    "answer": "退款需要主管审批。",
+                    "quote": "退款需要主管审批。",
+                    "pageNo": 1,
+                    "chunkIndex": 9,
+                }],
+                covered=[0],
+                skipped=[],
+            ),
+            [DocumentChunk(chunk_index=0, content="退款需要主管审批。", page_no=1)],
+            "QA_PROVENANCE_UNKNOWN_CHUNK_INDEX",
+            True,
+        ),
+        (
+            _strict_qa_payload(
+                items=[{
+                    "question": "退款需要谁审批？",
+                    "answer": "退款需要主管审批。",
+                    "quote": "不属于当前 Chunk。",
+                    "pageNo": 1,
+                    "chunkIndex": 0,
+                }],
+                covered=[0],
+                skipped=[],
+            ),
+            [DocumentChunk(chunk_index=0, content="退款需要主管审批。", page_no=1)],
+            "QA_PROVENANCE_QUOTE_MISMATCH",
+            True,
+        ),
+        (
+            _strict_qa_payload(
+                items=[{
+                    "question": "退款需要谁审批？",
+                    "answer": "退款需要主管审批。",
+                    "quote": "退款需要主管审批。",
+                    "pageNo": 1,
+                    "chunkIndex": 0,
+                }],
+                covered=[],
+                skipped=[],
+            ),
+            [DocumentChunk(chunk_index=0, content="退款需要主管审批。", page_no=1)],
+            "QA_PROVENANCE_COVERAGE_MISMATCH",
+            True,
+        ),
+        (
+            _strict_qa_payload(
+                items=[],
+                covered=[],
+                skipped=[],
+            ),
+            [
+                DocumentChunk(chunk_index=0, content="first", page_no=1),
+                DocumentChunk(chunk_index=0, content="second", page_no=2),
+            ],
+            "QA_PROVENANCE_CONTRACT_INVALID",
+            False,
+        ),
+    ],
+)
+def test_provenance_failures_have_spec_codes_and_retryability(
+    payload, chunks, code, retryable
+):
+    from server.app.services.qa_split_service import (
+        QaSplitValidationError,
+        validate_qa_split_output,
+    )
+
+    with pytest.raises(QaSplitValidationError) as exc_info:
+        validate_qa_split_output(json.dumps(payload), chunks)
+
+    _assert_provenance_error(exc_info, code, retryable)
+
+
+def test_legacy_missing_chunk_index_requires_constructor_compatibility_flag():
+    from server.app.models.document import Document
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.services.qa_split_service import QaSplitService, QaSplitValidationError
+
+    session, _identity = build_qa_session()
+    chunks = [
+        DocumentChunk(chunk_index=0, content="first fact", page_no=1),
+        DocumentChunk(chunk_index=1, content="second fact", page_no=2),
+    ]
+    output = json.dumps({"items": [
+        {
+            "question": "first?",
+            "answer": "first",
+            "quote": "first fact",
+            "pageNo": 1,
+        },
+        {
+            "question": "second?",
+            "answer": "second",
+            "quote": "second fact",
+            "pageNo": 2,
+        },
+    ]})
+
+    class Adapter:
+        def generate_qa_pairs(self, _prompt):
+            return output
+
+    with pytest.raises(QaSplitValidationError) as exc_info:
+        QaSplitService(session)._generate_qa_items(Adapter(), Document(title="T"), [chunks])
+    _assert_provenance_error(exc_info, "QA_PROVENANCE_MISSING_CHUNK_INDEX", True)
+
+    accepted = QaSplitService(
+        session, legacy_missing_chunk_index_compatibility=True
+    )._generate_qa_items(Adapter(), Document(title="T"), [chunks])
+    assert [item.chunk_index for item in accepted] == [0, 1]
+
+
+def test_compatibility_log_never_contains_quote_or_content(monkeypatch):
+    from server.app.models.document import Document
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.services import qa_split_service
+    from server.app.services.qa_split_service import QaSplitService
+
+    secret_quote = "UNIQUE-QUOTE-DO-NOT-LOG"
+    secret_content = f"prefix {secret_quote} suffix"
+    session, _identity = build_qa_session()
+    chunks = [DocumentChunk(chunk_index=0, content=secret_content, page_no=1)]
+    log_calls = []
+
+    def capture_info(message, *args, **kwargs):
+        log_calls.append((message, args, kwargs))
+
+    monkeypatch.setattr(qa_split_service.logger, "info", capture_info)
+
+    class Adapter:
+        def generate_qa_pairs(self, _prompt):
+            return json.dumps({"items": [{
+                "question": "q",
+                "answer": "a",
+                "quote": secret_quote,
+                "pageNo": 1,
+            }]})
+
+    QaSplitService(
+        session, legacy_missing_chunk_index_compatibility=True
+    )._generate_qa_items(Adapter(), Document(title="T"), [chunks])
+
+    assert log_calls == [
+        ("qa_provenance_legacy_compatibility_total", (), {"extra": {"result": "accepted"}})
+    ]
+    assert secret_quote not in repr(log_calls)
+    assert secret_content not in repr(log_calls)
+
+
+def test_invalid_json_does_not_persist_raw_model_output_in_failure_messages():
+    secret_output = "SECRET-MODEL-OUTPUT-MUST-NOT-PERSIST"
+    session, identity = build_qa_session()
+    tenant_id = identity["tenant"].id
+    job_id, document_id, _chunks = create_qa_ready_job(session, identity)
+    add_default_qa_model(session, tenant_id, f"not-json: {secret_output}")
+
+    from server.app.models.document import Document
+    from server.app.models.import_job import ImportJob
+    from server.app.models.logs import TaskRun
+    from server.app.services.qa_split_service import (
+        QaSplitService,
+        QaSplitValidationError,
+        validate_qa_split_output,
+    )
+
+    with pytest.raises(QaSplitValidationError) as exc_info:
+        validate_qa_split_output(f"not-json: {secret_output}")
+    assert secret_output not in exc_info.value.message
+
+    QaSplitService(session).split_import_job(job_id)
+    document = session.get(Document, document_id)
+    job = session.get(ImportJob, job_id)
+    task_run = session.scalar(select(TaskRun).where(TaskRun.resource_id == job_id))
+
+    assert secret_output not in (document.last_error_message or "")
+    assert secret_output not in (job.error_message or "")
+    assert secret_output not in json.dumps(task_run.error, ensure_ascii=False)
+
+
+def test_unexpected_qa_provider_error_does_not_leak_raw_exception_to_logs(caplog):
+    from server.app.services import qa_split_service
+    from server.app.services.qa_split_service import QaSplitService
+
+    secret = "PROVIDER_RAW_SECRET_DO-NOT-LOG"
+    session, identity = build_qa_session()
+    job_id, _document_id, _chunks = create_qa_ready_job(session, identity)
+    add_default_qa_model(session, identity["tenant"].id, {"items": []})
+
+    class _Adapter:
+        @staticmethod
+        def generate_qa_pairs(_prompt):
+            raise RuntimeError(secret)
+
+    caplog.set_level("ERROR", logger=qa_split_service.__name__)
+    result = QaSplitService(
+        session,
+        provider_factory=lambda *_args, **_kwargs: _Adapter(),
+    ).split_import_job(job_id)
+
+    assert result.status == "FAILED"
+    assert secret not in caplog.text
+
+
+def test_later_invalid_batch_leaves_no_qa_pairs_from_earlier_valid_batch(monkeypatch):
+    import types
+
+    from server.app.models.document import Document
+    from server.app.models.import_job import ImportJob
+    from server.app.models.qa_pair import QaPair
+    from server.app.services import qa_split_service
+    from server.app.services.qa_split_service import QaSplitService
+
+    monkeypatch.setattr(
+        qa_split_service,
+        "settings",
+        types.SimpleNamespace(qa_split_max_batch_chars=12, qa_split_max_concurrency=1),
+    )
+    session, identity = build_qa_session()
+    job_id, document_id, chunks = create_qa_ready_job(session, identity)
+    for chunk in chunks:
+        chunk.chunker_name = "adaptive_hierarchical"
+        chunk.chunker_config_hash = "adaptive-generation"
+    session.commit()
+    add_default_qa_model(session, identity["tenant"].id, {"items": []})
+
+    class Adapter:
+        calls = 0
+
+        def generate_qa_pairs(self, _prompt):
+            type(self).calls += 1
+            if type(self).calls == 1:
+                return json.dumps(_strict_qa_payload(
+                    items=[{
+                        "question": "退款需要谁审批？",
+                        "answer": "退款需要主管审批。",
+                        "quote": "退款需要主管审批。",
+                        "pageNo": 1,
+                        "chunkIndex": 0,
+                    }],
+                    covered=[0],
+                    skipped=[],
+                ))
+            return json.dumps(_strict_qa_payload(
+                items=[{
+                    "question": "已开票订单退款前要做什么？",
+                    "answer": "先红冲发票。",
+                    "quote": "已开票订单需先红冲发票。",
+                    "pageNo": 2,
+                    "chunkIndex": 999,
+                }],
+                covered=[1],
+                skipped=[],
+            ))
+
+    service = QaSplitService(session, provider_factory=lambda *_args, **_kwargs: Adapter())
+    result = service.split_import_job(job_id)
+
+    document = session.get(Document, document_id)
+    job = session.get(ImportJob, job_id)
+
+    assert result.status == "FAILED"
+    assert Adapter.calls == 2
+    assert document.last_error_code == "QA_PROVENANCE_UNKNOWN_CHUNK_INDEX"
+    assert job.error_code == "QA_PROVENANCE_UNKNOWN_CHUNK_INDEX"
+    assert session.scalars(select(QaPair).where(QaPair.document_id == document_id)).all() == []

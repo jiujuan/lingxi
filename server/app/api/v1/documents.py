@@ -25,7 +25,7 @@ from server.app.schemas.document import (
 from server.app.schemas.knowledge_category import DocumentClassificationResponse
 from server.app.schemas.qa_pair import QaPairListResponse, QaRegenerationResponse
 from server.app.services.document_center_service import DocumentCenterService
-from server.app.services.qa_split_service import QaSplitService
+from server.app.core.service_factory import build_qa_split_service
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -123,7 +123,7 @@ def regenerate_document_qa_pairs(
     db: Session = Depends(get_db),
 ) -> dict:
     _get_document(db, context, document_id)
-    job = QaSplitService(db).regenerate_document(context.tenant_id, document_id)
+    job = build_qa_split_service(db).regenerate_document(context.tenant_id, document_id)
     return {
         "id": job.id,
         "document_id": job.document_id,

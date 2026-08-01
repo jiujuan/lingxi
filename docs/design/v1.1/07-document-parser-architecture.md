@@ -233,3 +233,20 @@ GET  /v1/result/{task_id}       → {"document": {"md_content", "json_content"},
 **要点**：想让 Docling 解析 PDF，必须显式 `DOC_PARSER_ENGINE=docling`——auto 下 MinerU 优先是有意为之（中文文档解析质量优先、保持既有部署行为不变）。未配置引擎的格式照旧被上传门 415 拒绝，机制未变。停用某引擎时应同时清空其 `*_BASE_URL`（健康探针按配置驱动，见 §九）。
 
 部署指南：[docs/deployment/docling-local.md](../../deployment/docling-local.md)。
+
+## 十三、自适应层级分块衔接（2026-08-01）
+
+解析器仍只负责输出可追溯的 `ParsedBlock`；在启用自适应模式时，持久化层将其
+归一为带 `block_type`、结构关系和 locator 的 AtomicBlock，再由
+`ChunkingService` 生成 Parent/Child。Parser 不直接决定最终检索 Chunk 的 Token
+边界，因此 CSV 的兼容性字符切分和 MinerU/Docling 的原始 block 粒度不会绕过
+统一的 Token 预算、类型策略或 provenance。
+
+上线按兼容优先的顺序执行：先升级
+`0007_adaptive_chunking` schema，保持 `CHUNKING_MODE=legacy`、
+`QA_STRICT_PROVENANCE_ENABLED=false`、`CHUNK_INDEXING_ENABLED=false`、
+`HYBRID_CHUNK_RETRIEVAL_ENABLED=false` 与 `PARENT_CONTEXT_ENABLED=false`；随后依次进行
+adaptive shadow、adaptive write/QA-only read、strict provenance、Chunk indexing、
+Hybrid shadow、tenant 灰度和 Parent hydration。任何阶段出现权限差异、provenance
+错误、质量回退或延迟超限时，立即关闭后续 flag 并将新导入切回 legacy，已写入数据
+通过 Active version 切换回滚而不做物理删除。

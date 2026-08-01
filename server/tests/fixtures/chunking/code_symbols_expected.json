@@ -1,0 +1,11 @@
+{
+  "contents": [
+    "def add_tax(amount):\n    return amount * 1.2\n\n",
+    "def subtract_tax(amount):\n    return amount / 1.2"
+  ],
+  "signatures": [
+    "def add_tax(amount):",
+    "def subtract_tax(amount):"
+  ],
+  "lineRanges": [[1, 3], [4, 5]]
+}

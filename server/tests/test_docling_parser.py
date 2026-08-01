@@ -4,6 +4,7 @@ import pytest
 from server.app.integrations.parsers import _http as http_module
 from server.app.integrations.parsers import docling as docling_module
 from server.app.integrations.parsers.base import ParseRequest, ParseSource, ParserError
+from server.app.services.chunking.contracts import BlockType
 from server.app.integrations.parsers.docling import DoclingClient, DoclingParser
 
 
@@ -145,8 +146,95 @@ def test_async_flow_maps_docling_document(monkeypatch):
     assert parsed.blocks[2].source_locator["selfRef"] == "#/tables/0"
     assert parsed.blocks[2].source_locator["pageNo"] == 2
     assert parsed.page_count == 3
-    assert any("跳过 1 张" in warning for warning in parsed.warnings)
+    assert [block.block_type for block in parsed.blocks] == [
+        BlockType.TEXT,
+        BlockType.LIST,
+        BlockType.TABLE,
+        BlockType.IMAGE,
+        BlockType.FORMULA,
+    ]
+    assert parsed.blocks[1].metadata["sourceLabel"] == "list_item"
+    assert parsed.blocks[2].metadata["selfRef"] == "#/tables/0"
+    assert any("IMAGE_WITHOUT_TEXT_SKIPPED" in warning for warning in parsed.warnings)
     assert parsed.markdown.startswith("# 产品手册")
+
+
+def test_docling_reads_single_page_bbox_from_provenance():
+    doc = _doc()
+    bbox = {"l": 10, "t": 20, "r": 30, "b": 40}
+    doc["texts"][2]["prov"] = [{"page_no": 2, "bbox": bbox}]
+
+    blocks, page_count, _ = DoclingParser._blocks_from_document(doc)
+    block = next(item for item in blocks if item.source_locator["selfRef"] == "#/texts/2")
+
+    assert page_count == 3
+    assert block.source_locator["pageStart"] == 2
+    assert block.source_locator["pageEnd"] == 2
+    assert block.metadata["bbox"] == bbox
+    assert block.metadata["bboxes"] == [bbox]
+
+
+def test_docling_preserves_complete_cross_page_provenance_and_bboxes():
+    doc = _doc()
+    provenance = [
+        {"page_no": 2, "bbox": {"l": 10, "t": 20, "r": 30, "b": 40}},
+        {"page_no": 5, "bbox": {"l": 1, "t": 2, "r": 3, "b": 4}},
+    ]
+    doc["texts"][2]["prov"] = provenance
+
+    blocks, page_count, _ = DoclingParser._blocks_from_document(doc)
+    block = next(item for item in blocks if item.source_locator["selfRef"] == "#/texts/2")
+
+    assert block.page_no == 2
+    assert page_count == 5
+    assert block.source_locator["pageNo"] == 2
+    assert block.source_locator["pageStart"] == 2
+    assert block.source_locator["pageEnd"] == 5
+    assert block.metadata["provenance"] == provenance
+    assert block.metadata["bboxes"] == [item["bbox"] for item in provenance]
+
+
+def test_docling_ignores_invalid_provenance_entries_without_losing_valid_ones():
+    doc = _doc()
+    valid = {"page_no": 4, "bbox": {"l": 1, "t": 2, "r": 3, "b": 4}}
+    doc["texts"][2]["prov"] = [None, "bad", {"page_no": "bad"}, {"page_no": 0}, valid]
+
+    blocks, page_count, _ = DoclingParser._blocks_from_document(doc)
+    block = next(item for item in blocks if item.source_locator["selfRef"] == "#/texts/2")
+
+    assert block.page_no == 4
+    assert page_count == 4
+    assert block.source_locator["pageStart"] == 4
+    assert block.source_locator["pageEnd"] == 4
+    assert block.metadata["provenance"] == [{"page_no": "bad"}, {"page_no": 0}, valid]
+
+
+def test_docling_self_ref_provenance_is_stable_when_noncontent_nodes_are_inserted():
+    baseline_doc = _doc()
+    baseline_blocks, _, _ = DoclingParser._blocks_from_document(baseline_doc)
+    baseline = next(
+        item for item in baseline_blocks if item.source_locator["selfRef"] == "#/texts/2"
+    )
+
+    inserted_doc = _doc()
+    inserted_doc["groups"].append(
+        {
+            "self_ref": "#/groups/1",
+            "label": "group",
+            "children": [
+                {"$ref": "#/texts/6"},
+                {"$ref": "#/texts/4"},
+            ],
+        }
+    )
+    inserted_doc["body"]["children"].insert(3, {"$ref": "#/groups/1"})
+    inserted_blocks, _, _ = DoclingParser._blocks_from_document(inserted_doc)
+    inserted = next(
+        item for item in inserted_blocks if item.source_locator["selfRef"] == "#/texts/2"
+    )
+
+    assert inserted.structural_id == baseline.structural_id
+    assert inserted.source_locator == baseline.source_locator
 
 
 def test_submit_sends_repeated_to_formats_and_api_key(monkeypatch):
@@ -291,6 +379,8 @@ def test_markdown_fallback_when_json_content_missing(monkeypatch):
     parsed = DoclingParser(_client()).parse(_pdf_request())
 
     assert [block.content for block in parsed.blocks] == ["正文段落。"]
+    assert parsed.blocks[0].metadata["parserFallback"] is True
+    assert parsed.blocks[0].metadata["fallbackReason"] == "DOCLING_JSON_CONTENT_MISSING"
     assert any("json_content" in warning for warning in parsed.warnings)
 
 

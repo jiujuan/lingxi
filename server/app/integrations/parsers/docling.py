@@ -9,11 +9,12 @@ versions. Errors carry the same ``ParserError`` code matrix as MinerU so the
 Celery retry pipeline treats both engines identically.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import time
 
 from server.app.core.config import settings
 from server.app.integrations.parsers._http import RetryingHttpClient
+from server.app.services.chunking.contracts import BlockType
 from server.app.integrations.parsers.base import (
     ParsedBlock,
     ParsedDocument,
@@ -31,6 +32,34 @@ _TASK_FAILURE_STATES = {"failure", "cancelled", "canceled"}
 # Body items that never become retrievable blocks: page furniture, and
 # standalone captions (captions are attached via their owner's refs).
 _SKIP_LABELS = {"page_header", "page_footer", "footnote", "caption"}
+
+_DOCLING_BLOCK_TYPES = {
+    "text": BlockType.TEXT,
+    "list": BlockType.LIST,
+    "list_item": BlockType.LIST,
+    "table": BlockType.TABLE,
+    "picture": BlockType.IMAGE,
+    "image": BlockType.IMAGE,
+    "code": BlockType.CODE,
+    "formula": BlockType.FORMULA,
+    "equation": BlockType.FORMULA,
+    "quote": BlockType.QUOTE,
+    "blockquote": BlockType.QUOTE,
+}
+
+
+def _fallback_blocks(markdown: str, reason: str) -> list[ParsedBlock]:
+    return [
+        replace(
+            block,
+            metadata={
+                **block.metadata,
+                "parserFallback": True,
+                "fallbackReason": reason,
+            },
+        )
+        for block in split_markdown_blocks(markdown)
+    ]
 
 
 @dataclass(frozen=True)
@@ -250,12 +279,12 @@ class DoclingParser(ParserAdapter):
                 # whose schema this walker doesn't recognise. The markdown
                 # export is complete and reliable, so split that instead of
                 # discarding the whole document to a downstream "no chunk" error.
-                blocks = split_markdown_blocks(markdown)
+                blocks = _fallback_blocks(markdown, "DOCLING_STRUCTURED_CONTENT_EMPTY")
                 page_count = page_count or (1 if markdown else 0)
                 warnings.append("Docling 结构化内容为空，已按 markdown 回退切分")
         else:
             markdown = result.markdown or ""
-            blocks = split_markdown_blocks(markdown)
+            blocks = _fallback_blocks(markdown, "DOCLING_JSON_CONTENT_MISSING")
             page_count = 1 if markdown else 0
             warnings.append("Docling 未返回 json_content，已按 markdown 回退切分")
 
@@ -277,7 +306,6 @@ class DoclingParser(ParserAdapter):
         page_count: int | None = None
         skipped_images = 0
         visited: set[str] = set()
-        walk_index = 0
 
         def resolve(ref: str) -> dict | None:
             # "#/texts/0" -> doc["texts"][0]; same for tables/pictures/groups
@@ -295,6 +323,15 @@ class DoclingParser(ParserAdapter):
                 return item if isinstance(item, dict) else None
             return None
 
+        def source_index(ref: str) -> int | None:
+            parts = ref.lstrip("#/").split("/")
+            if len(parts) != 2:
+                return None
+            try:
+                return int(parts[1])
+            except ValueError:
+                return None
+
         def caption_text(item: dict) -> str:
             parts: list[str] = []
             for ref in item.get("captions") or []:
@@ -307,35 +344,81 @@ class DoclingParser(ParserAdapter):
                         parts.append(text)
             return " ".join(parts)
 
-        def page_no_of(item: dict) -> int | None:
-            prov = item.get("prov")
-            if isinstance(prov, list) and prov and isinstance(prov[0], dict):
-                value = prov[0].get("page_no")
-                if isinstance(value, int) and value >= 1:
-                    return value
-            return None
+        def provenance_of(item: dict) -> list[dict]:
+            raw = item.get("prov")
+            if not isinstance(raw, list):
+                return []
+            # docling-serve returns JSON. Copy only mapping entries so malformed
+            # provenance cannot break parsing while every valid source record,
+            # including bbox, survives in JSON-safe metadata.
+            return [dict(entry) for entry in raw if isinstance(entry, dict)]
 
-        def emit(content: str, item: dict, item_index: int) -> None:
+        def page_numbers(provenance: list[dict]) -> list[int]:
+            return [
+                entry["page_no"]
+                for entry in provenance
+                if isinstance(entry.get("page_no"), int) and entry["page_no"] >= 1
+            ]
+
+        def page_info(item: dict) -> tuple[list[dict], list[int]]:
             nonlocal page_count
-            page_no = page_no_of(item)
-            if page_no is not None:
-                page_count = max(page_count or 0, page_no)
+            provenance = provenance_of(item)
+            pages = page_numbers(provenance)
+            if pages:
+                page_count = max(page_count or 0, max(pages))
+            return provenance, pages
+
+        def emit(content: str, item: dict, ref_str: str) -> None:
+            provenance, pages = page_info(item)
+            page_no = pages[0] if pages else None
+            source_ref = item.get("self_ref")
+            source_ref = source_ref if isinstance(source_ref, str) and source_ref else ref_str
+            stable_index = source_index(ref_str)
+            label = str(item.get("label") or "")
+            bboxes = [entry["bbox"] for entry in provenance if entry.get("bbox") is not None]
+            metadata = {
+                "sourceLabel": label,
+                "selfRef": source_ref,
+                "pageNo": page_no,
+                "pageStart": min(pages) if pages else None,
+                "pageEnd": max(pages) if pages else None,
+                "blockIndex": stable_index,
+                "documentOrder": len(blocks),
+                "provenance": provenance,
+            }
+            if bboxes:
+                metadata["bboxes"] = bboxes
+                if len(bboxes) == 1:
+                    metadata["bbox"] = bboxes[0]
+            elif item.get("bbox") is not None:
+                # Keep compatibility with older Docling exports where bbox was
+                # surfaced directly on the item rather than under prov.
+                metadata["bbox"] = item.get("bbox")
+            source_locator = {
+                "pageNo": page_no,
+                "pageStart": min(pages) if pages else None,
+                "pageEnd": max(pages) if pages else None,
+                "blockIndex": stable_index,
+                "selfRef": source_ref,
+            }
             blocks.append(
                 ParsedBlock(
                     index=len(blocks),
                     content=content,
                     page_no=page_no,
                     title_path=list(title_path),
-                    source_locator={
-                        "pageNo": page_no,
-                        "blockIndex": item_index,
-                        "selfRef": item.get("self_ref"),
-                    },
+                    source_locator=source_locator,
+                    block_type=_DOCLING_BLOCK_TYPES.get(label, BlockType.UNKNOWN),
+                    structural_id=f"docling:{source_ref}",
+                    parent_structural_id=(
+                        f"docling:section:{'/'.join(title_path)}" if title_path else None
+                    ),
+                    metadata=metadata,
                 )
             )
 
         def visit(ref_str: str) -> None:
-            nonlocal walk_index, skipped_images, title_path
+            nonlocal skipped_images, title_path
             # The body is a tree by contract, but this is untrusted JSON — a
             # ref cycle must not hang the worker.
             if not ref_str or ref_str in visited:
@@ -344,8 +427,9 @@ class DoclingParser(ParserAdapter):
             item = resolve(ref_str)
             if item is None:
                 return
-            item_index = walk_index
-            walk_index += 1
+            # Count every valid source page, including headings/captions and
+            # uncaptained images which do not themselves produce a block.
+            page_info(item)
 
             if ref_str.startswith("#/groups"):
                 for child in item.get("children") or []:
@@ -361,13 +445,13 @@ class DoclingParser(ParserAdapter):
             if ref_str.startswith("#/tables"):
                 content = cls._table_markdown(item, caption_text(item))
                 if content:
-                    emit(content, item, item_index)
+                    emit(content, item, ref_str)
                 return
 
             if ref_str.startswith("#/pictures"):
                 caption = caption_text(item)
                 if caption:
-                    emit(f"[图片] {caption}", item, item_index)
+                    emit(f"[图片] {caption}", item, ref_str)
                 else:
                     skipped_images += 1
                 return
@@ -386,7 +470,7 @@ class DoclingParser(ParserAdapter):
                 return
             # text / list_item / code / formula — and unknown labels with
             # text also emit (drift shield for label-vocab changes)
-            emit(text, item, item_index)
+            emit(text, item, ref_str)
 
         body = doc.get("body")
         children = body.get("children") if isinstance(body, dict) else None
@@ -397,7 +481,10 @@ class DoclingParser(ParserAdapter):
 
         warnings: list[str] = []
         if skipped_images:
-            warnings.append(f"跳过 {skipped_images} 张无描述图片")
+            warnings.append(
+                "IMAGE_WITHOUT_TEXT_SKIPPED: Docling skipped "
+                f"{skipped_images} image blocks without caption"
+            )
         return blocks, page_count, warnings
 
     @classmethod

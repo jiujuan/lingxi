@@ -149,10 +149,15 @@ def test_knowledge_classification_migration_is_idempotent_against_create_all(
 
 
 def test_alembic_upgrade_head_creates_knowledge_classification_schema(tmp_path):
+    import logging
+
     from server.app.core.config import settings
 
     db_path = tmp_path / "knowledge_classification.sqlite3"
     original_database_url = settings.database_url
+    application_logger = logging.getLogger("server.app.services.document_parse_service")
+    original_logger_disabled = application_logger.disabled
+    application_logger.disabled = False
     object.__setattr__(
         settings, "database_url", f"sqlite+pysqlite:///{db_path.as_posix()}"
     )
@@ -162,6 +167,7 @@ def test_alembic_upgrade_head_creates_knowledge_classification_schema(tmp_path):
         command.upgrade(config, "head")
     finally:
         object.__setattr__(settings, "database_url", original_database_url)
+        application_logger.disabled = original_logger_disabled
 
     engine = create_engine(f"sqlite+pysqlite:///{db_path.as_posix()}")
     inspector = inspect(engine)
@@ -173,6 +179,7 @@ def test_alembic_upgrade_head_creates_knowledge_classification_schema(tmp_path):
         "category_department_id",
         "knowledge_category_id",
     }.issubset(document_columns)
+    assert application_logger.disabled is original_logger_disabled
 
 
 
@@ -1247,3 +1254,108 @@ def test_classification_stats_api_returns_space_category_and_unclassified_counts
     assert category_body["unclassified"]["totalCount"] == 1
 
     assert client.get("/api/v1/knowledge-spaces/stats").status_code in {401, 403}
+
+
+def test_chunk_sqlite_fallback_scopes_before_sorting_and_excludes_deleted_document():
+    from datetime import UTC, datetime
+
+    from server.app.core.permissions import AccessContext
+    from server.app.models.document import (
+        Document,
+        DocumentAccessRule,
+        DocumentAccessSubjectType,
+        DocumentStatus,
+    )
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.repositories.retrieval_repo import RetrievalRepository
+    from server.tests.test_document_permissions import build_session
+
+    session, identity = build_session()
+    tenant_id = identity["tenant"].id
+    context = AccessContext(
+        tenant_id=tenant_id,
+        user_id=identity["users"]["employee"].id,
+        department_id=identity["departments"]["support"].id,
+        role_ids=[identity["roles"]["employee"].id],
+        permissions={"DOCUMENT_READ"},
+    )
+    visible = Document(
+        tenant_id=tenant_id,
+        title="Visible",
+        file_name="visible.pdf",
+        file_type="PDF",
+        mime_type="application/pdf",
+        file_size=1,
+        object_key="documents/visible.pdf",
+        checksum="visible",
+        status=DocumentStatus.READY,
+    )
+    deleted = Document(
+        tenant_id=tenant_id,
+        title="Deleted",
+        file_name="deleted.pdf",
+        file_type="PDF",
+        mime_type="application/pdf",
+        file_size=1,
+        object_key="documents/deleted.pdf",
+        checksum="deleted",
+        status=DocumentStatus.READY,
+        deleted_at=datetime.now(UTC),
+    )
+    session.add_all([visible, deleted])
+    session.flush()
+    session.add(
+        DocumentAccessRule(
+            tenant_id=tenant_id,
+            document_id=visible.id,
+            subject_type=DocumentAccessSubjectType.DEPARTMENT,
+            subject_id=context.department_id,
+        )
+    )
+    visible_parent = DocumentChunk(
+        tenant_id=tenant_id,
+        document_id=visible.id,
+        chunk_index=0,
+        content="parent",
+        chunk_level="PARENT",
+        status="ACTIVE",
+    )
+    deleted_parent = DocumentChunk(
+        tenant_id=tenant_id,
+        document_id=deleted.id,
+        chunk_index=0,
+        content="parent",
+        chunk_level="PARENT",
+        status="ACTIVE",
+    )
+    visible_child = DocumentChunk(
+        tenant_id=tenant_id,
+        document_id=visible.id,
+        chunk_index=1,
+        content="refund policy",
+        search_text="refund policy",
+        chunk_level="CHILD",
+        parent_chunk=visible_parent,
+        status="ACTIVE",
+        embedding=[0.5, 0.5],
+    )
+    deleted_child = DocumentChunk(
+        tenant_id=tenant_id,
+        document_id=deleted.id,
+        chunk_index=1,
+        content="refund refund refund",
+        search_text="refund refund refund",
+        chunk_level="CHILD",
+        parent_chunk=deleted_parent,
+        status="ACTIVE",
+        embedding=[1.0, 0.0],
+    )
+    session.add_all([visible_parent, deleted_parent, visible_child, deleted_child])
+    session.commit()
+
+    # SQLite uses Python scoring. The deleted record scores higher, so returning
+    # only the visible result proves authorization/deletion scope is applied before
+    # top-k sorting.
+    results = RetrievalRepository(session).search_chunk_vector(context, [1.0, 0.0], 1)
+
+    assert [chunk.id for chunk, _score in results] == [visible_child.id]

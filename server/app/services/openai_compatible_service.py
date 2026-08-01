@@ -6,6 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from server.app.core.ids import current_request_id
+from server.app.core.log_redaction import sanitize_citation_snapshot
+from server.app.core.service_factory import build_retrieval_service
 from server.app.core.permissions import AccessContext
 from server.app.core.secrets import decrypt_secret
 from server.app.integrations.model_providers.registry import (
@@ -17,7 +19,6 @@ from server.app.models.model_config import ModelCapability, ModelConfig, ModelPr
 from server.app.repositories.query_run_repo import QueryRunRepository
 from server.app.schemas.retrieval import RetrievalAccessScope, RetrievalCandidate
 from server.app.services.prompt_service import PromptService
-from server.app.services.retrieval_service import RetrievalService
 
 
 class OpenAICompatibleService:
@@ -135,7 +136,7 @@ class OpenAICompatibleService:
             role_codes=set(),
             department_ids=api_key.allowed_department_ids or [],
         )
-        return RetrievalService(self.session).retrieve(
+        return build_retrieval_service(self.session).retrieve(
             context,
             question,
             access_scope=RetrievalAccessScope(document_ids=None),
@@ -161,7 +162,7 @@ class OpenAICompatibleService:
                 qa_pair_id=candidate.qa_pair_id,
                 quote=quote,
                 rank=rank,
-                snapshot=candidate.to_snapshot(),
+                snapshot=sanitize_citation_snapshot(candidate.to_snapshot()),
             )
             document = self.session.get(Document, candidate.document_id)
             citations.append(

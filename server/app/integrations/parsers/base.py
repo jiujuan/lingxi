@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from server.app.services.chunking.contracts import BlockType
+
 
 class ParserError(Exception):
     def __init__(self, code: str, message: str, retryable: bool = False) -> None:
@@ -31,6 +33,10 @@ class ParsedBlock:
     page_no: int | None = None
     title_path: list[str] = field(default_factory=list)
     source_locator: dict = field(default_factory=dict)
+    block_type: BlockType = BlockType.TEXT
+    structural_id: str | None = None
+    parent_structural_id: str | None = None
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

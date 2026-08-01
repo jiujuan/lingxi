@@ -1,0 +1,67 @@
+{
+  "contents": [
+    "# billing helpers\nimport decimal\n\nTAX_RATE = decimal.Decimal('1.2')\n\n",
+    "def add_tax(amount):\n    return amount * TAX_RATE\n",
+    "\nROUNDING = decimal.ROUND_HALF_UP\n\n",
+    "def subtract_tax(amount):\n    return amount / TAX_RATE\n",
+    "\n# exported API\n__all__ = ['add_tax', 'subtract_tax']\n"
+  ],
+  "splitReasons": [
+    "symbol_gap",
+    "symbol",
+    "symbol_gap",
+    "symbol",
+    "symbol_gap"
+  ],
+  "signatures": [
+    null,
+    "def add_tax(amount):",
+    null,
+    "def subtract_tax(amount):",
+    null
+  ],
+  "lineRanges": [
+    [
+      1,
+      5
+    ],
+    [
+      6,
+      7
+    ],
+    [
+      8,
+      10
+    ],
+    [
+      11,
+      12
+    ],
+    [
+      13,
+      15
+    ]
+  ],
+  "sourceCharRanges": [
+    [
+      0,
+      69
+    ],
+    [
+      69,
+      119
+    ],
+    [
+      119,
+      154
+    ],
+    [
+      154,
+      209
+    ],
+    [
+      209,
+      263
+    ]
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "content": "# billing helpers\nimport decimal\n\nTAX_RATE = decimal.Decimal('1.2')\n\ndef add_tax(amount):\n    return amount * TAX_RATE\n\nROUNDING = decimal.ROUND_HALF_UP\n\ndef subtract_tax(amount):\n    return amount / TAX_RATE\n\n# exported API\n__all__ = ['add_tax', 'subtract_tax']\n",
+  "language": "python",
+  "file": "billing.py",
+  "symbols": [
+    {
+      "signature": "def add_tax(amount):",
+      "lineStart": 6,
+      "lineEnd": 7
+    },
+    {
+      "signature": "def subtract_tax(amount):",
+      "lineStart": 11,
+      "lineEnd": 12
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import pytest
 from sqlalchemy import select
 
 from server.tests.test_auth_rbac import build_test_client
@@ -56,6 +57,97 @@ def test_query_run_citations_source_and_explanation_are_authorized():
     assert body["stages"]["text"]
     assert body["stages"]["rrf"]
     assert body["stages"]["rerank"]
+
+
+def test_chunk_citation_snapshot_resolves_the_exact_chunk_source():
+    from server.app.models.chat import QueryCitation
+    from server.app.models.qa_pair import DocumentChunk
+
+    client, SessionLocal = build_test_client()
+    _seed_chat_data(SessionLocal)
+    employee_headers = login_employee(client)
+    _run_id, citation_id = _create_answer_with_citation(client, employee_headers)
+
+    with SessionLocal() as session:
+        citation = session.get(QueryCitation, citation_id)
+        assert citation is not None
+        chunk = DocumentChunk(
+            tenant_id=citation.tenant_id,
+            document_id=citation.document_id,
+            chunk_index=44,
+            title_path=["退款", "审批"],
+            content="纯 Chunk 引用应当返回这一段原文。",
+            page_start=7,
+            page_end=7,
+            source_locator={"block": "refund-44", "source_rel_start": 10},
+            source_locators=[{"block": "refund-44", "source_rel_start": 10}],
+            status="ACTIVE",
+            chunk_level="CHILD",
+        )
+        session.add(chunk)
+        session.flush()
+        citation.qa_pair_id = None
+        citation.snapshot = {**citation.snapshot, "chunkId": chunk.id, "pageNo": 7}
+        session.commit()
+
+    source = client.get(f"/api/v1/citations/{citation_id}/source", headers=employee_headers)
+
+    assert source.status_code == 200
+    assert source.json()["sourceText"] == "纯 Chunk 引用应当返回这一段原文。"
+    assert source.json()["sourceLocator"] == {"block": "refund-44", "source_rel_start": 10}
+    assert source.json()["pageNo"] == 7
+
+
+@pytest.mark.parametrize("mismatch", ["tenant", "document"])
+def test_chunk_citation_snapshot_rejects_cross_tenant_or_document_source(mismatch):
+    from server.app.models.chat import QueryCitation
+    from server.app.models.document import Document, DocumentStatus
+    from server.app.models.qa_pair import DocumentChunk
+
+    client, SessionLocal = build_test_client()
+    _seed_chat_data(SessionLocal)
+    employee_headers = login_employee(client)
+    _run_id, citation_id = _create_answer_with_citation(client, employee_headers)
+
+    with SessionLocal() as session:
+        citation = session.get(QueryCitation, citation_id)
+        assert citation is not None
+        foreign_document_id = citation.document_id
+        if mismatch == "document":
+            foreign_document = Document(
+                tenant_id=citation.tenant_id,
+                title="Foreign source",
+                file_name="foreign.md",
+                file_type="MARKDOWN",
+                mime_type="text/markdown",
+                file_size=1,
+                object_key="documents/foreign.md",
+                checksum="foreign-source",
+                status=DocumentStatus.READY,
+            )
+            session.add(foreign_document)
+            session.flush()
+            foreign_document_id = foreign_document.id
+        foreign_chunk = DocumentChunk(
+            tenant_id="foreign-tenant" if mismatch == "tenant" else citation.tenant_id,
+            document_id=foreign_document_id,
+            chunk_index=45,
+            title_path=["Foreign"],
+            content="不得泄露的跨范围来源。",
+            source_locator={"block": "foreign"},
+            status="ACTIVE",
+            chunk_level="CHILD",
+        )
+        session.add(foreign_chunk)
+        session.flush()
+        citation.qa_pair_id = None
+        citation.snapshot = {**citation.snapshot, "chunkId": foreign_chunk.id}
+        session.commit()
+
+    source = client.get(f"/api/v1/citations/{citation_id}/source", headers=employee_headers)
+
+    assert source.status_code == 404
+    assert "不得泄露" not in source.text
 
 
 def test_scoped_query_run_explanation_and_citations_include_classification_path():
@@ -240,3 +332,96 @@ def test_citation_source_requires_current_document_permission_but_deleted_snapsh
     assert source.status_code == 200
     assert source.json()["documentDeleted"] is True
     assert source.json()["quote"] == "退款需要主管审批。"
+
+
+def test_prompt_keeps_child_evidence_and_citation_metadata_separate_from_hydrated_parent_context():
+    from dataclasses import dataclass
+
+    from server.app.schemas.retrieval import RetrievalCandidate
+    from server.app.services.context_hydration_service import HydratedContextSegment
+    from server.app.services.prompt_service import PromptService
+
+    @dataclass(frozen=True)
+    class WordCounter:
+        name: str = "word-fixture"
+        version: str = "1.0"
+
+        def count(self, text: str) -> int:
+            return len(text.split())
+
+        def split_by_token_limit(self, text: str, limit: int) -> list[str]:
+            words = text.split()
+            return [" ".join(words[index : index + limit]) for index in range(0, len(words), limit)]
+
+    high = RetrievalCandidate(
+        qa_pair_id=None, document_id="doc", question="高分", answer="高分 Child 证据",
+        quote="高分 Child 精确引用", page_no=1, pair_index=1, evidence_id="high",
+        evidence_type="CHUNK", chunk_id="child-high", parent_chunk_id="parent-high",
+        content="高分 Child 证据", fused_score=0.9,
+    )
+    low = RetrievalCandidate(
+        qa_pair_id=None, document_id="doc", question="低分", answer="低分 Child 证据",
+        quote="低分 Child 精确引用", page_no=2, pair_index=2, evidence_id="low",
+        evidence_type="CHUNK", chunk_id="child-low", parent_chunk_id="parent-low",
+        content="低分 Child 证据", fused_score=0.1,
+    )
+    high._lingxi_context_segments = (
+        HydratedContextSegment("PARENT", "低分 Parent 补充上下文", "parent-high", "child-high"),
+    )
+    low._lingxi_context_segments = ()
+
+    prompt = PromptService(token_counter=WordCounter(), context_max_tokens=200).build_chat_prompt(
+        "退款怎么审批", [low, high]
+    )
+
+    assert "Evidence（用于回答）" in prompt
+    assert "Citation metadata（仅引用 Child）" in prompt
+    assert "Supplemental context（仅补充上下文，不单独引用）" in prompt
+    assert prompt.index("高分 Child 证据") < prompt.index("低分 Child 证据") < prompt.index("低分 Parent 补充上下文")
+    assert "child-high" in prompt
+
+    bounded = PromptService(token_counter=WordCounter(), context_max_tokens=20).build_chat_prompt(
+        "退款怎么审批", [low, high]
+    )
+    bounded_context = bounded.split("<<<REFERENCES\n", 1)[1].split("\nREFERENCES>>>", 1)[0]
+    assert WordCounter().count(bounded_context) <= 20
+    assert "低分 Parent 补充上下文" not in bounded_context
+
+
+
+def test_prompt_counts_reference_separators_and_stops_when_next_high_score_evidence_would_overflow():
+    from dataclasses import dataclass
+
+    from server.app.schemas.retrieval import RetrievalCandidate
+    from server.app.services.prompt_service import PromptService
+
+    @dataclass(frozen=True)
+    class SeparatorAwareCounter:
+        name: str = "separator-aware"
+        version: str = "1.0"
+
+        def count(self, text: str) -> int:
+            return (1 if text else 0) + text.count("\n\n") * 10
+
+        def split_by_token_limit(self, text: str, limit: int) -> list[str]:
+            return [text]
+
+    high = RetrievalCandidate(
+        qa_pair_id=None, document_id="doc", question="高分", answer="高分 evidence",
+        quote="高分引用", page_no=1, pair_index=1, evidence_id="high", evidence_type="CHUNK",
+        chunk_id="high", content="高分 evidence", fused_score=0.9,
+    )
+    low = RetrievalCandidate(
+        qa_pair_id=None, document_id="doc", question="低分", answer="低分 evidence",
+        quote="低分引用", page_no=1, pair_index=2, evidence_id="low", evidence_type="CHUNK",
+        chunk_id="low", content="低分 evidence", fused_score=0.1,
+    )
+
+    prompt = PromptService(
+        token_counter=SeparatorAwareCounter(), context_max_tokens=2
+    ).build_chat_prompt("问题", [low, high])
+    context = prompt.split("<<<REFERENCES\n", 1)[1].split("\nREFERENCES>>>", 1)[0]
+
+    assert "高分 evidence" in context
+    assert "低分 evidence" not in context
+    assert SeparatorAwareCounter().count(context) <= 2

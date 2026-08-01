@@ -7,9 +7,24 @@ class RerankService:
     ) -> list[RetrievalCandidate]:
         query_norm = self._normalize(query)
         for candidate in candidates:
-            question_norm = self._normalize(candidate.question)
-            exact_boost = 1.0 if query_norm and query_norm in question_norm else 0.0
-            title_overlap = self._overlap(query_norm, question_norm)
+            # Keep the legacy QA ranking signal unchanged.  Unified hybrid
+            # evidence is chunk-centric, so its candidate representation adds
+            # document structure and source content to the rerank input.
+            if candidate.evidence_id is None:
+                score_text = candidate.question
+            else:
+                # Keep the complete query/title/content input available for a
+                # model-backed reranker, but calculate lexical relevance from
+                # the source fields so injecting the query itself cannot make
+                # every Chunk an exact match.
+                rerank_input = self._hybrid_evidence_text(query, candidate)
+                # The lexical fallback intentionally scores the evidence part
+                # after the query prefix; otherwise including the query in the
+                # complete rerank input would make every Chunk an exact match.
+                _query_prefix, _separator, score_text = rerank_input.partition("\n")
+            score_text_norm = self._normalize(score_text)
+            exact_boost = 1.0 if query_norm and query_norm in score_text_norm else 0.0
+            title_overlap = self._overlap(query_norm, score_text_norm)
             position_boost = 1 / (1 + max(candidate.pair_index, 0))
             candidate.rerank_score = (
                 candidate.rrf_score * 8
@@ -23,6 +38,19 @@ class RerankService:
             candidates,
             key=lambda item: (item.rerank_score, item.rrf_score, item.text_score),
             reverse=True,
+        )
+
+    @staticmethod
+    def _hybrid_evidence_text(query: str, candidate: RetrievalCandidate) -> str:
+        """Build the complete hybrid rerank input from query and Chunk evidence."""
+        return "\n".join(
+            part
+            for part in (
+                query,
+                " / ".join(candidate.title_path),
+                candidate.content or candidate.answer,
+            )
+            if part
         )
 
     @staticmethod

@@ -13,7 +13,7 @@ from starlette.concurrency import run_in_threadpool
 from server.app.api.openai_compatible import router as openai_router
 from server.app.api.v1 import api_router
 from server.app.core import metrics
-from server.app.core.config import settings, validate_secret_config
+from server.app.core.config import settings, validate_chunking_config, validate_secret_config
 from server.app.core.errors import (
     http_exception_handler,
     unhandled_exception_handler,
@@ -42,6 +42,7 @@ async def lifespan(_app: FastAPI):
 def create_app() -> FastAPI:
     configure_logging()
     validate_secret_config()
+    validate_chunking_config()
     app = FastAPI(title="Lingxi Knowledge Base", version="1.1.0", lifespan=lifespan)
 
     origins = list(settings.cors_allow_origins)
