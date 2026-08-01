@@ -9,7 +9,9 @@ from typing import Mapping
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from server.app.core import metrics
 from server.app.core.ids import current_request_id
+from server.app.core.log_redaction import sanitize_retrieval_snapshot
 from server.app.core.permissions import AccessContext
 from server.app.core.retrieval_config import RetrievalConfig, get_retrieval_config
 from server.app.core.secrets import decrypt_secret
@@ -94,6 +96,8 @@ class RetrievalService:
         )
         query_vector = self._embed_query(context.tenant_id, question)
         query_tokens = self.tokenizer.tokenize(question)
+        retrieval_started = perf_counter()
+        config_hash = self._observability_config_hash()
 
         if self.hybrid_chunk_retrieval_enabled:
             fused, stages, chunk_degraded = self._retrieve_hybrid(
@@ -106,7 +110,11 @@ class RetrievalService:
                 access_scope,
                 started,
                 chunk_degraded,
+                config_hash,
             )
+            candidate_counts = {
+                channel: len(stages[channel]) for channel in _CHANNEL_NAMES
+            }
         else:
             vector_ranked = self.repo.vector_search(
                 context, query_vector, self.config.vector_top_k, access_scope
@@ -116,11 +124,27 @@ class RetrievalService:
             )
             fused = self._rrf(vector_ranked, text_ranked)
             snapshot = self._legacy_snapshot(
-                question, vector_ranked, text_ranked, fused, access_scope, started
+                question,
+                vector_ranked,
+                text_ranked,
+                fused,
+                access_scope,
+                started,
+                config_hash,
             )
+            candidate_counts = {
+                "qa_vector": len(vector_ranked),
+                "qa_text": len(text_ranked),
+            }
+            chunk_degraded = False
+        retrieve_duration = perf_counter() - retrieval_started
 
+        rerank_started = perf_counter()
         reranked = self.reranker.rerank(question, fused)[: self.config.final_top_k]
+        rerank_duration = perf_counter() - rerank_started
+        hydration_duration = 0.0
         if self.hybrid_chunk_retrieval_enabled and self.parent_context_enabled:
+            hydration_started = perf_counter()
             try:
                 hydrator = self.context_hydration_service or ContextHydrationService(
                     self.session
@@ -139,11 +163,57 @@ class RetrievalService:
                 )
                 for candidate in reranked:
                     candidate._lingxi_context_segments = ()
+            finally:
+                hydration_duration = perf_counter() - hydration_started
         confidence = reranked[0].rerank_score if reranked else 0.0
         has_answer = bool(reranked and confidence >= self.config.low_confidence_threshold)
         snapshot["stages"]["rerank"] = [
             item.to_snapshot() for item in reranked
         ][: self.config.snapshot_max_items_per_stage]
+        snapshot = sanitize_retrieval_snapshot(
+            snapshot,
+            max_items_per_stage=self.config.snapshot_max_items_per_stage,
+        )
+        hydration_tokens = self._hydration_token_count(reranked)
+        channel_hit_ratios = {
+            channel: 1.0 if count else 0.0
+            for channel, count in candidate_counts.items()
+        }
+        raw_candidate_count = sum(candidate_counts.values())
+        dedup_ratio = (
+            max(0.0, (raw_candidate_count - len(fused)) / raw_candidate_count)
+            if raw_candidate_count
+            else 0.0
+        )
+        metrics.observe_retrieval(
+            candidate_counts=candidate_counts,
+            channel_hit_ratios=channel_hit_ratios,
+            dedup_ratio=dedup_ratio,
+            hydration_tokens=hydration_tokens,
+            latency_by_stage_seconds={
+                "retrieve": retrieve_duration,
+                "rerank": rerank_duration,
+                "hydrate": hydration_duration,
+            },
+            degraded_reason=(
+                "chunk_channel_unavailable" if chunk_degraded else None
+            ),
+        )
+        logger.info(
+            "retrieval completed",
+            extra={
+                "tenant_id": context.tenant_id,
+                "request_id": current_request_id(),
+                "config_hash": config_hash,
+                "hybrid_chunk_retrieval_enabled": self.hybrid_chunk_retrieval_enabled,
+                "parent_context_enabled": self.parent_context_enabled,
+                "candidate_counts": candidate_counts,
+                "fused_candidate_count": len(fused),
+                "final_candidate_count": len(reranked),
+                "chunk_retrieval_degraded": chunk_degraded,
+                "latency_ms": int((perf_counter() - started) * 1000),
+            },
+        )
         result = RetrievalResult(
             question=question,
             candidates=reranked,
@@ -186,7 +256,7 @@ class RetrievalService:
             chunk_text = self.repo.search_chunk_text(
                 context, query_tokens, question, self.config.text_top_k, access_scope
             )
-        except ChunkChannelUnavailableError as exc:
+        except ChunkChannelUnavailableError:
             # A declared Chunk-index availability fault is the only permitted
             # fallback.  Never turn ACL/configuration bugs into QA-only results.
             logger.warning(
@@ -194,7 +264,7 @@ class RetrievalService:
                 extra={
                     "tenant_id": context.tenant_id,
                     "request_id": current_request_id(),
-                    "error": str(exc),
+                    "reason": "chunk_channel_unavailable",
                 },
             )
             chunk_vector = []
@@ -218,6 +288,7 @@ class RetrievalService:
         fused: list[RetrievalCandidate],
         access_scope: RetrievalAccessScope | None,
         started: float,
+        config_hash: str,
     ) -> dict:
         cap = self.config.snapshot_max_items_per_stage
         return {
@@ -229,6 +300,12 @@ class RetrievalService:
                 "rerank": [],
             },
             "filters": self._snapshot_filters(access_scope),
+            "channels": ["qa_vector", "qa_text"],
+            "configHash": config_hash,
+            "featureFlags": {
+                "hybridChunkRetrievalEnabled": False,
+                "parentContextEnabled": False,
+            },
             "latencyMs": int((perf_counter() - started) * 1000),
             "requestId": current_request_id(),
         }
@@ -241,6 +318,7 @@ class RetrievalService:
         access_scope: RetrievalAccessScope | None,
         started: float,
         chunk_degraded: bool,
+        config_hash: str,
     ) -> dict:
         cap = self.config.snapshot_max_items_per_stage
         stage_snapshot = {
@@ -258,6 +336,12 @@ class RetrievalService:
             "question": question,
             "stages": stage_snapshot,
             "filters": self._snapshot_filters(access_scope),
+            "channels": list(_CHANNEL_NAMES),
+            "configHash": config_hash,
+            "featureFlags": {
+                "hybridChunkRetrievalEnabled": True,
+                "parentContextEnabled": self.parent_context_enabled,
+            },
             "rrfParameters": {
                 "k": self.config.rrf_k,
                 "weights": dict(self.rrf_channel_weights),
@@ -656,6 +740,37 @@ class RetrievalService:
             self._rank_snapshot(item, score, rank)
             for rank, (item, score) in enumerate(ranked, start=1)
         ]
+
+    def _observability_config_hash(self) -> str:
+        payload = {
+            "retrieval": {
+                "vectorTopK": self.config.vector_top_k,
+                "textTopK": self.config.text_top_k,
+                "finalTopK": self.config.final_top_k,
+                "rrfK": self.config.rrf_k,
+                "lowConfidenceThreshold": self.config.low_confidence_threshold,
+                "snapshotMaxItemsPerStage": self.config.snapshot_max_items_per_stage,
+            },
+            "featureFlags": {
+                "hybridChunkRetrievalEnabled": self.hybrid_chunk_retrieval_enabled,
+                "parentContextEnabled": self.parent_context_enabled,
+            },
+            "rrfChannelWeights": self.rrf_channel_weights,
+        }
+        encoded = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _hydration_token_count(
+        self, candidates: list[RetrievalCandidate]
+    ) -> int:
+        return sum(
+            len(self.tokenizer.tokenize(segment.content))
+            for candidate in candidates
+            for segment in getattr(candidate, "_lingxi_context_segments", ())
+        )
+
 
 def normalize_retrieval_scope(
     access_scope: RetrievalAccessScope | None,

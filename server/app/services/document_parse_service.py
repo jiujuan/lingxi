@@ -2,11 +2,13 @@ from datetime import UTC, datetime
 import hashlib
 import logging
 import re
+from time import perf_counter
 from uuid import uuid4
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from server.app.core import metrics
 from server.app.integrations.parsers.base import (
     ParseRequest,
     ParseSource,
@@ -33,6 +35,60 @@ logger = logging.getLogger(__name__)
 # CJK-aware token proxy: one token per ideograph, one per alphanumeric run.
 # ``len(content.split())`` counted whole Chinese paragraphs as a single token.
 _TOKEN_COUNT_RE = re.compile(r"[一-鿿]|[^\W_]+")
+
+
+def log_chunking_observability(
+    *,
+    tenant_id: str,
+    document_id: str,
+    job_id: str,
+    parser_name: str,
+    parser_version: str,
+    policy: ChunkPolicy,
+    result,
+    duration_seconds: float,
+) -> None:
+    """Emit safe adaptive-chunking audit fields and aggregate health metrics."""
+
+    token_counts_by_block_type: dict[str, list[int]] = {}
+    for child in result.children:
+        token_counts_by_block_type.setdefault(child.block_type.value, []).append(
+            child.token_count
+        )
+    warning_codes = [warning.code for warning in result.warnings]
+    metrics.observe_chunking(
+        duration_seconds=duration_seconds,
+        token_counts_by_block_type=token_counts_by_block_type,
+        tiny_count=warning_codes.count("TINY_CHUNK_UNMERGEABLE"),
+        oversized_count=sum(
+            1 for child in result.children if child.token_count > policy.max_tokens
+        ),
+        # The result contract deliberately does not expose intermediate merge
+        # operations. Count observable output expansions instead of retaining
+        # document text or per-block identifiers in metrics.
+        merge_count=0,
+        split_count=max(0, result.stats.child_count - result.stats.input_block_count),
+    )
+    logger.info(
+        "adaptive chunking completed",
+        extra={
+            "tenant_id": tenant_id,
+            "document_id": document_id,
+            "job_id": job_id,
+            "parser_name": parser_name,
+            "parser_version": parser_version,
+            "config_hash": policy.config_hash,
+            "chunker_name": policy.name,
+            "chunker_version": policy.version,
+            "duration_ms": round(duration_seconds * 1000),
+            "atomic_block_count": result.stats.input_block_count,
+            "skipped_block_count": result.stats.skipped_block_count,
+            "child_count": result.stats.child_count,
+            "parent_count": result.stats.parent_count,
+            "total_token_count": result.stats.total_token_count,
+            "warning_count": len(result.warnings),
+        },
+    )
 
 
 def _count_tokens(content: str) -> int:
@@ -484,10 +540,21 @@ class DocumentParseService:
             )
             for block in blocks
         )
+        started = perf_counter()
         result = self.chunking_service.chunk(
             atomic_blocks,
             self.chunking_policy,
             document_title=document.title,
+        )
+        log_chunking_observability(
+            tenant_id=job.tenant_id,
+            document_id=document.id,
+            job_id=job.id,
+            parser_name=document.parser_name or "unknown",
+            parser_version=document.parser_version or "unknown",
+            policy=self.chunking_policy,
+            result=result,
+            duration_seconds=perf_counter() - started,
         )
         parent_by_local_id: dict[str, DocumentChunk] = {}
         staged: list[DocumentChunk] = []

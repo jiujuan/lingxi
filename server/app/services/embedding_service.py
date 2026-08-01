@@ -12,6 +12,7 @@ from typing import TypeAlias
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from server.app.core import metrics
 from server.app.core.config import settings
 from server.app.core.secrets import decrypt_secret
 import server.app.db.base  # noqa: F401
@@ -70,6 +71,34 @@ class EmbeddingTarget:
 def _input_text_hash(input_text: str) -> str:
     """Return the SHA256 of the exact text sent to the embedding provider."""
     return hashlib.sha256(input_text.encode("utf-8")).hexdigest()
+
+
+def log_embedding_observability(
+    *,
+    tenant_id: str,
+    document_id: str,
+    job_id: str,
+    config_hash: str | None,
+    qa_target_count: int,
+    chunk_target_count: int,
+    status: str,
+) -> None:
+    """Record embedding target outcome without provider inputs or vectors."""
+
+    metrics.observe_embedding_targets("QA", status, qa_target_count)
+    metrics.observe_embedding_targets("CHUNK", status, chunk_target_count)
+    logger.info(
+        "embedding targets processed",
+        extra={
+            "tenant_id": tenant_id,
+            "document_id": document_id,
+            "job_id": job_id,
+            "config_hash": config_hash,
+            "qa_target_count": qa_target_count,
+            "chunk_target_count": chunk_target_count,
+            "status": status,
+        },
+    )
 
 
 def _title_path_text(chunk: DocumentChunk | None) -> str:
@@ -185,13 +214,14 @@ class EmbeddingService:
         self.session.commit()
 
         qa_targets: list[EmbeddingTarget] = []
+        chunk_targets: list[EmbeddingTarget] = []
+        run_config_hash: str | None = None
         try:
             model_config, provider = self._default_model(job.tenant_id)
             expected_dimension = int(
                 model_config.embedding_dimension or settings.embedding_vector_dimension
             )
             model_key = self._model_key(model_config, provider, expected_dimension)
-            run_config_hash = None
             if self.chunk_indexing_enabled:
                 run_config_hash = self._bound_run_config_hash(job)
                 self._assert_bound_active_collection(document.id, run_config_hash)
@@ -260,9 +290,27 @@ class EmbeddingService:
             job.error_message = None
             task_run.status = "SUCCESS"
             task_run.error = None
+            log_embedding_observability(
+                tenant_id=job.tenant_id,
+                document_id=document.id,
+                job_id=job.id,
+                config_hash=run_config_hash,
+                qa_target_count=len(qa_targets),
+                chunk_target_count=len(chunk_targets),
+                status="success",
+            )
             self.session.commit()
             return job
         except EmbeddingServiceError as exc:
+            log_embedding_observability(
+                tenant_id=job.tenant_id,
+                document_id=document.id,
+                job_id=job.id,
+                config_hash=run_config_hash,
+                qa_target_count=len(qa_targets),
+                chunk_target_count=len(chunk_targets),
+                status="failed",
+            )
             self._mark_failed(
                 job,
                 document,
@@ -275,6 +323,15 @@ class EmbeddingService:
             return job
         except Exception:
             logger.exception("Unexpected error embedding import job %s", job.id)
+            log_embedding_observability(
+                tenant_id=job.tenant_id,
+                document_id=document.id,
+                job_id=job.id,
+                config_hash=run_config_hash,
+                qa_target_count=len(qa_targets),
+                chunk_target_count=len(chunk_targets),
+                status="failed",
+            )
             self._mark_failed(
                 job,
                 document,

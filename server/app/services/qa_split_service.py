@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from server.app.core.errors import not_found
 from server.app.core.config import settings
+from server.app.core import metrics
 from server.app.core.secrets import decrypt_secret
 import server.app.db.base  # noqa: F401
 from server.app.integrations.model_providers.registry import (
@@ -107,7 +108,45 @@ def _provenance_error(
     *,
     retryable: bool = True,
 ) -> QaSplitValidationError:
+    metrics.observe_qa_provenance_validation_failure(code)
     return QaSplitValidationError(message, code=code, retryable=retryable)
+
+
+def log_qa_split_observability(
+    *,
+    tenant_id: str,
+    document_id: str,
+    job_id: str,
+    chunks: list[DocumentChunk],
+    items: list[ValidatedQaItem],
+) -> None:
+    """Log QA-generation provenance metadata without prompt or QA content."""
+
+    source_indexes = {chunk.chunk_index for chunk in chunks}
+    covered_indexes = {
+        item.chunk_index for item in items if item.chunk_index in source_indexes
+    }
+    coverage_ratio = len(covered_indexes) / len(source_indexes) if source_indexes else 0.0
+    config_hashes = {
+        chunk.chunker_config_hash
+        for chunk in chunks
+        if isinstance(chunk.chunker_config_hash, str) and chunk.chunker_config_hash
+    }
+    config_hash = next(iter(config_hashes)) if len(config_hashes) == 1 else None
+    metrics.observe_qa_chunk_coverage_ratio(coverage_ratio)
+    logger.info(
+        "qa split completed",
+        extra={
+            "tenant_id": tenant_id,
+            "document_id": document_id,
+            "job_id": job_id,
+            "config_hash": config_hash,
+            "source_chunk_count": len(source_indexes),
+            "covered_chunk_count": len(covered_indexes),
+            "qa_pair_count": len(items),
+            "coverage_ratio": round(coverage_ratio, 6),
+        },
+    )
 
 
 def _normalized_quote(value: str) -> str:
@@ -465,6 +504,13 @@ class QaSplitService:
             items = self._generate_qa_items(adapter, document, prompt_batches)
             self._replace_qa_pairs(job, document, chunks, items)
             self._bind_embedding_run_config_hash(job, chunks)
+            log_qa_split_observability(
+                tenant_id=job.tenant_id,
+                document_id=document.id,
+                job_id=job.id,
+                chunks=chunks,
+                items=items,
+            )
 
             document.qa_pair_count = len(items)
             document.status = DocumentStatus.EMBEDDING
