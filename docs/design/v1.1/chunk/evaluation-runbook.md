@@ -272,21 +272,22 @@ the checked-in implementation and hermetic evidence below; it does not close
 the staging or production release gates listed in "External release gates"
 below.
 
-The Task 22 executable logger/migration acceptance changes are committed as
-`dc764b9` (`fix(observability): preserve logger state during migrations`).
-The commands below ran in the shared, dirty worktree whose executable Task 22
-files match that commit; unrelated user changes were deliberately left
-unstaged. This record is worktree evidence, not an assertion that a clean
-checkout has completed every external release gate.
+The Task 22 acceptance work includes `dc764b9`
+(`fix(observability): preserve logger state during migrations`), `64b771d`
+(`fix(retrieval): bound hybrid candidates and degrade safely`), and `fc1856b`
+(`perf(chunking): cache normalization and token counting`). The commands below
+ran in a clean acceptance worktree at `fc1856b`; unrelated changes in the main
+worktree were not staged. This record is repository-local evidence, not an
+assertion that a clean checkout has completed every external release gate.
 
 ### Local regression evidence
 
 | Check | Command or environment | Result |
 |---|---|---|
-| Full backend regression | `.\.venv\Scripts\python.exe -m pytest server/tests -q -rs` | `740 passed, 3 skipped, 3 warnings` in `401.65s` |
-| Chunking specialization | Task 22's 12-file Chunking command | `329 passed, 2 skipped` in `71.61s` |
-| Parser baseline | Task 22 parser baseline command | `58 passed` in `20.19s` |
-| Task 21 performance/degradation tests | `.\.venv\Scripts\python.exe -m pytest server/tests/test_chunking_performance.py -q` | `17 passed` in `62.30s` |
+| Full backend regression | `.\.venv\Scripts\python.exe -m pytest server/tests -q -rs` | `740 passed, 3 skipped, 3 warnings` in `399.52s` |
+| Chunking specialization | Task 22's 12-file Chunking command | `329 passed, 2 skipped` in `72.56s` |
+| Parser baseline | Task 22 parser baseline command | `58 passed` in `20.27s` |
+| Task 21 performance/degradation tests | `.\.venv\Scripts\python.exe -m pytest server/tests/test_chunking_performance.py -q` | `17 passed` in `62.87s` |
 | Logging and Alembic regressions | `test_observability_infra.py` and `test_knowledge_classification.py` | `28 passed, 3 warnings` in `18.45s` |
 | Static tooling | `pyproject.toml`, repository config search, and `.venv\Scripts` | No Ruff or Mypy configuration or executable is present. This is recorded as an absent project gate, not a passing lint/type check. |
 
@@ -345,9 +346,10 @@ run a dry run first, and use the explicit confirmation form:
 
 ### Task 21 benchmark decision and evidence
 
-The current hermetic report is `.data/chunking-benchmark.json`, schema
+The current hermetic report is
+`.data/task22-chunking-benchmark-acceptance-20260801.json`, schema
 `adaptive-chunking-benchmark/v1`, with report SHA-256
-`5DDEAAE5116D753B5F596CC69462CC3F226B0BF6C233DBBB3FBA89A6A9967F26`
+`B203C15D5C58B4F09155E67E6C1381A2D2101F19385E8A1352B56C27198FB4C9`
 and corpus SHA-256
 `7dd8742013d20e0e7a770025a0045b62242ee4d5e0414463b6a5a63bcf6192ce`.
 It was regenerated with `--repeat 5` on 2026-08-01 and reports stable Child
@@ -355,8 +357,8 @@ hash sets, 29 Child chunks, and no acceptance failure reasons.
 
 | Measurement | QA-only P50/P95 | Hybrid P50/P95 | Result |
 |---|---:|---:|---|
-| Full local retrieval path | `57.3384 / 65.0697 ms` | `103.5504 / 121.37496 ms` | P50 `1.806x`, P95 `1.865x`; local NFR-004 passes at `<= 2.00x` |
-| Parse/persist CPU | legacy `281.25 / 310.9375 ms` | adaptive `125.0 / 132.8125 ms` | NFR-003 passes |
+| Full local retrieval path | `53.9415 / 56.9713 ms` | `100.9203 / 113.3091 ms` | P50 `1.871x`, P95 `1.989x`; local NFR-004 passes at `<= 2.00x` |
+| Parse/persist CPU | legacy `296.875 / 342.1875 ms` | adaptive `119.140625 / 126.5625 ms` | NFR-003 passes |
 
 The Task 21 local NFR-004 threshold is deliberately `2.00x`, rather than the
 production `<=30%` requirement. Its deterministic in-memory SQLite path adds
