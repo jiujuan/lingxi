@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from server.app.core.errors import bad_request, not_found
 from server.app.core.ids import current_request_id
+from server.app.core.log_redaction import sanitize_citation_snapshot
 from server.app.core.permissions import AccessContext
 from server.app.core.secrets import decrypt_secret
 from server.app.integrations.model_providers.registry import (
@@ -215,7 +216,7 @@ class ChatService:
             for document_id in titles
         }
         for rank, candidate in enumerate(retrieval.candidates, start=1):
-            candidate_snapshot = candidate.to_snapshot()
+            candidate_snapshot = sanitize_citation_snapshot(candidate.to_snapshot())
             candidate_classification = classifications.get(candidate.document_id)
             if candidate_classification is not None:
                 candidate_snapshot["classification"] = classification_path_to_public(

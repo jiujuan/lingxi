@@ -97,7 +97,7 @@ class RetrievalService:
         query_vector = self._embed_query(context.tenant_id, question)
         query_tokens = self.tokenizer.tokenize(question)
         retrieval_started = perf_counter()
-        config_hash = self._observability_config_hash()
+        retrieval_config_hash = self._observability_config_hash()
 
         if self.hybrid_chunk_retrieval_enabled:
             fused, stages, chunk_degraded = self._retrieve_hybrid(
@@ -110,7 +110,7 @@ class RetrievalService:
                 access_scope,
                 started,
                 chunk_degraded,
-                config_hash,
+                retrieval_config_hash,
             )
             candidate_counts = {
                 channel: len(stages[channel]) for channel in _CHANNEL_NAMES
@@ -130,7 +130,7 @@ class RetrievalService:
                 fused,
                 access_scope,
                 started,
-                config_hash,
+                retrieval_config_hash,
             )
             candidate_counts = {
                 "qa_vector": len(vector_ranked),
@@ -204,7 +204,7 @@ class RetrievalService:
             extra={
                 "tenant_id": context.tenant_id,
                 "request_id": current_request_id(),
-                "config_hash": config_hash,
+                "retrieval_config_hash": retrieval_config_hash,
                 "hybrid_chunk_retrieval_enabled": self.hybrid_chunk_retrieval_enabled,
                 "parent_context_enabled": self.parent_context_enabled,
                 "candidate_counts": candidate_counts,
@@ -288,23 +288,30 @@ class RetrievalService:
         fused: list[RetrievalCandidate],
         access_scope: RetrievalAccessScope | None,
         started: float,
-        config_hash: str,
+        retrieval_config_hash: str,
     ) -> dict:
         cap = self.config.snapshot_max_items_per_stage
         return {
             "question": question,
             "stages": {
-                "vector": [self._rank_snapshot(item, score) for item, score in vector_ranked][:cap],
-                "text": [self._rank_snapshot(item, score) for item, score in text_ranked][:cap],
-                "rrf": [item.to_snapshot() for item in fused][:cap],
+                "vector": self._ranked_snapshots(vector_ranked)[:cap],
+                "text": self._ranked_snapshots(text_ranked)[:cap],
+                "rrf": self._candidate_snapshots(fused)[:cap],
                 "rerank": [],
             },
             "filters": self._snapshot_filters(access_scope),
             "channels": ["qa_vector", "qa_text"],
-            "configHash": config_hash,
+            "chunkerConfigHashes": self._chunker_config_hashes(
+                vector_ranked, text_ranked
+            ),
+            "retrievalConfigHash": retrieval_config_hash,
             "featureFlags": {
                 "hybridChunkRetrievalEnabled": False,
                 "parentContextEnabled": False,
+            },
+            "rrfParameters": {
+                "k": self.config.rrf_k,
+                "weights": {"qa_vector": 1.0, "qa_text": 1.0},
             },
             "latencyMs": int((perf_counter() - started) * 1000),
             "requestId": current_request_id(),
@@ -318,7 +325,7 @@ class RetrievalService:
         access_scope: RetrievalAccessScope | None,
         started: float,
         chunk_degraded: bool,
-        config_hash: str,
+        retrieval_config_hash: str,
     ) -> dict:
         cap = self.config.snapshot_max_items_per_stage
         stage_snapshot = {
@@ -329,7 +336,7 @@ class RetrievalService:
             "qaText": self._ranked_snapshots(stages["qa_text"])[:cap],
             "chunkVector": self._ranked_snapshots(stages["chunk_vector"])[:cap],
             "chunkText": self._ranked_snapshots(stages["chunk_text"])[:cap],
-            "rrf": [item.to_snapshot() for item in fused][:cap],
+            "rrf": self._candidate_snapshots(fused)[:cap],
             "rerank": [],
         }
         return {
@@ -337,7 +344,10 @@ class RetrievalService:
             "stages": stage_snapshot,
             "filters": self._snapshot_filters(access_scope),
             "channels": list(_CHANNEL_NAMES),
-            "configHash": config_hash,
+            "chunkerConfigHashes": self._chunker_config_hashes(
+                *stages.values()
+            ),
+            "retrievalConfigHash": retrieval_config_hash,
             "featureFlags": {
                 "hybridChunkRetrievalEnabled": True,
                 "parentContextEnabled": self.parent_context_enabled,
@@ -387,7 +397,10 @@ class RetrievalService:
         vector_scores = {item.id: score for item, score in vector_ranked}
         text_scores = {item.id: score for item, score in text_ranked}
 
-        for ranked in (vector_ranked, text_ranked):
+        for channel, ranked in (
+            ("qa_vector", vector_ranked),
+            ("qa_text", text_ranked),
+        ):
             for rank, (qa_pair, _score) in enumerate(ranked, start=1):
                 candidate = by_id.get(qa_pair.id)
                 if candidate is None:
@@ -402,11 +415,13 @@ class RetrievalService:
                     )
                     by_id[qa_pair.id] = candidate
                 candidate.rrf_score += 1 / (self.config.rrf_k + rank)
+                candidate.channel_ranks[channel] = rank
                 candidate.source_rank = rank
 
         for candidate in by_id.values():
             candidate.vector_score = vector_scores.get(candidate.qa_pair_id, 0.0)
             candidate.text_score = text_scores.get(candidate.qa_pair_id, 0.0)
+            candidate.fused_score = candidate.rrf_score
         return sorted(by_id.values(), key=lambda item: item.rrf_score, reverse=True)
 
     def _fuse_evidence(self, channels: Mapping[str, list]) -> list[RetrievalEvidence]:
@@ -740,6 +755,56 @@ class RetrievalService:
             self._rank_snapshot(item, score, rank)
             for rank, (item, score) in enumerate(ranked, start=1)
         ]
+
+    @staticmethod
+    def _candidate_snapshots(candidates: list[RetrievalCandidate]) -> list[dict]:
+        snapshots: list[dict] = []
+        for rank, candidate in enumerate(candidates, start=1):
+            snapshot = candidate.to_snapshot()
+            if candidate.evidence_id is None and candidate.qa_pair_id is not None:
+                # Legacy QA candidates intentionally remain evidence-less at
+                # runtime so their reranker path and public response semantics
+                # remain unchanged.  Audit snapshots still expose a stable QA
+                # evidence identity without changing that runtime contract.
+                snapshot["evidenceId"] = candidate.qa_pair_id
+                snapshot["evidenceType"] = "QA"
+                snapshot["channelRanks"] = dict(candidate.channel_ranks)
+                snapshot["fusedScore"] = round(candidate.fused_score, 6)
+            snapshot["rank"] = rank
+            snapshots.append(snapshot)
+        return snapshots
+
+    def _chunker_config_hashes(self, *ranked_lists: list) -> list[str]:
+        """Return deterministic source-Chunk config hashes for audit snapshots."""
+
+        chunks_by_id: dict[str, DocumentChunk] = {}
+        qa_chunk_ids: set[str] = set()
+        for ranked in ranked_lists:
+            for item, _score in ranked:
+                if isinstance(item, DocumentChunk):
+                    chunks_by_id[item.id] = item
+                elif isinstance(item, QaPair) and item.chunk_id:
+                    qa_chunk_ids.add(item.chunk_id)
+        missing_chunk_ids = qa_chunk_ids - set(chunks_by_id)
+        if missing_chunk_ids:
+            chunks_by_id.update(
+                {
+                    chunk.id: chunk
+                    for chunk in self.session.scalars(
+                        select(DocumentChunk).where(
+                            DocumentChunk.id.in_(missing_chunk_ids)
+                        )
+                    )
+                }
+            )
+        return sorted(
+            {
+                chunk.chunker_config_hash.strip()
+                for chunk in chunks_by_id.values()
+                if isinstance(chunk.chunker_config_hash, str)
+                and chunk.chunker_config_hash.strip()
+            }
+        )
 
     def _observability_config_hash(self) -> str:
         payload = {

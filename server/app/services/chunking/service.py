@@ -317,7 +317,7 @@ def _drafts_from_prose(
     *,
     policy: ChunkPolicy,
     counter: TokenCounter,
-) -> tuple[_ChildDraft, ...]:
+) -> tuple[tuple[_ChildDraft, ...], int, int]:
     split_result = split_oversized_prose(block, policy, counter)
     overlap_result = apply_prose_overlap(split_result, policy, counter)
     original_type = _original_type_metadata(block.atomic_blocks)
@@ -348,7 +348,11 @@ def _drafts_from_prose(
                 section_key=_section_key(block.atomic_blocks[0]),
             )
         )
-    return tuple(drafts)
+    return (
+        tuple(drafts),
+        split_result.split_count,
+        split_result.oversized_count,
+    )
 
 
 def _child_drafts(
@@ -357,13 +361,21 @@ def _child_drafts(
     ordered_blocks: Sequence[AtomicBlock],
     policy: ChunkPolicy,
     counter: TokenCounter,
-) -> tuple[tuple[_ChildDraft, ...], tuple[ChunkingWarning, ...], int]:
+) -> tuple[
+    tuple[_ChildDraft, ...],
+    tuple[ChunkingWarning, ...],
+    int,
+    int,
+    int,
+]:
     position_by_index = {
         block.index: position for position, block in enumerate(ordered_blocks)
     }
     drafts: list[_ChildDraft] = []
     warnings: list[ChunkingWarning] = []
     skipped = 0
+    split_count = 0
+    oversized_count = 0
 
     for merged in merged_blocks:
         is_single_typed_atomic = (
@@ -391,11 +403,24 @@ def _child_drafts(
             )
             continue
 
-        drafts.extend(_drafts_from_prose(merged, policy=policy, counter=counter))
+        prose_drafts, prose_splits, prose_oversized = _drafts_from_prose(
+            merged,
+            policy=policy,
+            counter=counter,
+        )
+        drafts.extend(prose_drafts)
+        split_count += prose_splits
+        oversized_count += prose_oversized
 
     if any(draft.token_count > policy.max_tokens for draft in drafts):
         raise ValueError("ChunkingService emitted a Child over max_tokens")
-    return tuple(drafts), tuple(warnings), skipped
+    return (
+        tuple(drafts),
+        tuple(warnings),
+        skipped,
+        split_count,
+        oversized_count,
+    )
 
 
 def _parent_content(
@@ -619,7 +644,13 @@ class ChunkingService:
             )
 
         merge_result = _merge_for_orchestration(normalized, policy, counter)
-        drafts, handler_warnings, handler_skips = _child_drafts(
+        (
+            drafts,
+            handler_warnings,
+            handler_skips,
+            split_count,
+            oversized_count,
+        ) = _child_drafts(
             merge_result.blocks,
             ordered_blocks=normalized,
             policy=policy,
@@ -712,6 +743,9 @@ class ChunkingService:
                 child_count=len(children),
                 skipped_block_count=normalization_skips + handler_skips,
                 total_token_count=sum(child.token_count for child in children),
+                merge_count=merge_result.merge_count,
+                split_count=split_count,
+                oversized_count=oversized_count,
             ),
             warnings=warnings,
         )

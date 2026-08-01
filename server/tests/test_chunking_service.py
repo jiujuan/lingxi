@@ -187,6 +187,27 @@ def test_oversized_prose_applies_overlap_but_parent_uses_unique_content() -> Non
     assert result.children[1].metadata["overlap"]["prefix_token_count"] == 1
 
 
+def test_stats_capture_real_merge_and_oversized_split_events() -> None:
+    counter = WhitespaceTokenCounter()
+    result = ChunkingService(counter).chunk(
+        [
+            atomic(0, "alpha"),
+            atomic(1, "beta"),
+            atomic(
+                2,
+                "one two three four five six seven eight",
+                metadata={"hard_boundary": True},
+            ),
+        ],
+        policy(max_tokens=4, parent_max_tokens=8, counter=counter),
+        document_title="Guide",
+    )
+
+    assert result.stats.merge_count == 1
+    assert result.stats.oversized_count == 1
+    assert result.stats.split_count == 3
+
+
 def test_parent_overflow_segments_only_at_child_boundaries() -> None:
     counter = WhitespaceTokenCounter()
     blocks = [

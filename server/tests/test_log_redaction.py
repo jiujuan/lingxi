@@ -8,7 +8,8 @@ def test_retrieval_snapshot_sanitization_retains_evidence_metadata_not_content()
         "question": "private-customer-question",
         "queryEmbedding": [0.1, 0.2],
         "channels": ["qa_vector", "chunk_text"],
-        "configHash": "chunk-config-1",
+        "chunkerConfigHashes": ["chunk-config-b", "chunk-config-a"],
+        "retrievalConfigHash": "retrieval-config-1",
         "rrfParameters": {"k": 60, "weights": {"qa_vector": 1.0}},
         "stages": {
             "qaVector": [
@@ -47,7 +48,8 @@ def test_retrieval_snapshot_sanitization_retains_evidence_metadata_not_content()
     sanitized = sanitize_retrieval_snapshot(snapshot, max_items_per_stage=1)
 
     assert sanitized["channels"] == ["qa_vector", "chunk_text"]
-    assert sanitized["configHash"] == "chunk-config-1"
+    assert sanitized["chunkerConfigHashes"] == ["chunk-config-a", "chunk-config-b"]
+    assert sanitized["retrievalConfigHash"] == "retrieval-config-1"
     assert sanitized["rrfParameters"] == {"k": 60, "weights": {"qa_vector": 1.0}}
     assert sanitized["stages"]["qaVector"] == [
         {
@@ -68,6 +70,40 @@ def test_retrieval_snapshot_sanitization_retains_evidence_metadata_not_content()
     ]
     assert "private-" not in str(sanitized)
     assert "Embedding" not in str(sanitized)
+
+
+def test_citation_snapshot_sanitization_retains_only_evidence_metadata():
+    from server.app.core.log_redaction import sanitize_citation_snapshot
+
+    sanitized = sanitize_citation_snapshot(
+        {
+            "qaPairId": "qa-1",
+            "documentId": "document-1",
+            "evidenceId": "chunk-1",
+            "chunkId": "chunk-1",
+            "parentChunkId": "parent-1",
+            "pageNo": 2,
+            "rank": 1,
+            "rerankScore": 0.91,
+            "question": "private-question",
+            "titlePath": ["private-title"],
+            "content": "private-content",
+            "quote": "private-quote",
+            "embedding": [0.1, 0.2],
+        }
+    )
+
+    assert sanitized == {
+        "qaPairId": "qa-1",
+        "documentId": "document-1",
+        "evidenceId": "chunk-1",
+        "chunkId": "chunk-1",
+        "parentChunkId": "parent-1",
+        "pageNo": 2,
+        "rank": 1,
+        "rerankScore": 0.91,
+    }
+    assert "private-" not in str(sanitized)
 
 
 def test_log_redaction_masks_nested_secrets_and_authorization_headers():
@@ -104,4 +140,3 @@ def test_value_level_redaction_masks_secrets_under_innocuous_keys():
     assert "eyJhbGciOi" not in redacted["note"]
     assert redacted["requestId"] == "req_1234567890abcdef"
     assert redacted["keyPrefix"] == "lk_live_abcdefgh"
-

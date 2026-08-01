@@ -273,6 +273,9 @@ def _stub_hybrid_channels(monkeypatch, service, *, qa_vector, qa_text, chunk_vec
 def test_hybrid_retrieval_fuses_four_channels_into_one_source_chunk_and_snapshots_ranks(monkeypatch):
     session, identity = build_session()
     qa_pairs, chunks = _seed_hybrid_evidence(session, identity)
+    chunks[0].chunker_config_hash = "chunk-config-b"
+    chunks[1].chunker_config_hash = "chunk-config-a"
+    session.flush()
     service = _hybrid_service(
         session,
         weights={
@@ -324,6 +327,8 @@ def test_hybrid_retrieval_fuses_four_channels_into_one_source_chunk_and_snapshot
             "chunk_text": 4.0,
         },
     }
+    assert result.snapshot["chunkerConfigHashes"] == ["chunk-config-a", "chunk-config-b"]
+    assert len(result.snapshot["retrievalConfigHash"]) == 64
     fused_snapshot = result.snapshot["stages"]["rrf"][0]
     assert fused_snapshot["evidenceId"] == chunks[0].id
     assert fused_snapshot["channelRanks"] == first.channel_ranks
@@ -748,7 +753,66 @@ def test_hybrid_disabled_uses_legacy_qa_only_paths(monkeypatch):
 
     assert result.candidates[0].qa_pair_id == qa_pairs[0].id
     assert "qaVector" not in result.snapshot["stages"]
-    assert "rrfParameters" not in result.snapshot
+    assert result.snapshot["channels"] == ["qa_vector", "qa_text"]
+    assert result.snapshot["rrfParameters"] == {
+        "k": service.config.rrf_k,
+        "weights": {"qa_vector": 1.0, "qa_text": 1.0},
+    }
+    assert result.snapshot["stages"]["vector"][0]["rank"] == 1
+    assert result.snapshot["stages"]["text"][0]["rank"] == 1
+    assert result.snapshot["stages"]["rrf"][0]["qaPairId"] == qa_pairs[0].id
+    assert result.snapshot["stages"]["rrf"][0]["evidenceId"] == qa_pairs[0].id
+    assert result.snapshot["stages"]["rrf"][0]["rrfScore"] > 0
+    assert result.snapshot["stages"]["rrf"][0]["fusedScore"] > 0
+    assert result.snapshot["stages"]["rrf"][0]["channelRanks"] == {
+        "qa_vector": 1,
+        "qa_text": 1,
+    }
+    assert result.snapshot["chunkerConfigHashes"] == [_chunks[0].chunker_config_hash]
+    assert len(result.snapshot["retrievalConfigHash"]) == 64
+    assert result.candidates[0].evidence_id is None
+
+
+def test_legacy_rrf_snapshot_records_actual_rank_per_qa_channel(monkeypatch):
+    session, identity = build_session()
+    qa_pairs, _chunks = _seed_hybrid_evidence(session, identity)
+
+    from server.app.services.retrieval_service import RetrievalService
+
+    service = RetrievalService(session)
+    monkeypatch.setattr(
+        service,
+        "_embed_query",
+        lambda _tenant_id, _question: [1.0, 0.0, 0.0, 0.0],
+    )
+    monkeypatch.setattr(service.tokenizer, "tokenize", lambda _question: ["退款"])
+    monkeypatch.setattr(
+        service.repo,
+        "vector_search",
+        lambda *_args: [(qa_pairs[0], 0.9), (qa_pairs[1], 0.8)],
+    )
+    monkeypatch.setattr(
+        service.repo,
+        "text_search",
+        lambda *_args: [(qa_pairs[1], 0.7), (qa_pairs[0], 0.6)],
+    )
+
+    result = service.retrieve(_employee_context(identity), "退款需要谁审批？")
+
+    rrf_by_pair_id = {
+        snapshot["qaPairId"]: snapshot for snapshot in result.snapshot["stages"]["rrf"]
+    }
+    assert rrf_by_pair_id[qa_pairs[0].id]["channelRanks"] == {
+        "qa_vector": 1,
+        "qa_text": 2,
+    }
+    assert rrf_by_pair_id[qa_pairs[1].id]["channelRanks"] == {
+        "qa_vector": 2,
+        "qa_text": 1,
+    }
+    for snapshot in rrf_by_pair_id.values():
+        assert snapshot["fusedScore"] == snapshot["rrfScore"]
+    assert all(candidate.evidence_id is None for candidate in result.candidates)
 
 
 @pytest.mark.parametrize(

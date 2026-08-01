@@ -122,6 +122,7 @@ class RecursiveSplitResult:
 
     blocks: tuple[SplitBlock, ...]
     split_count: int
+    oversized_count: int = 0
 
     def __post_init__(self) -> None:
         blocks = tuple(self.blocks)
@@ -133,6 +134,12 @@ class RecursiveSplitResult:
             or self.split_count < 0
         ):
             raise ValueError("split_count must be a non-negative integer")
+        if (
+            not isinstance(self.oversized_count, int)
+            or isinstance(self.oversized_count, bool)
+            or self.oversized_count < 0
+        ):
+            raise ValueError("oversized_count must be a non-negative integer")
         object.__setattr__(self, "blocks", blocks)
 
 
@@ -1010,4 +1017,5 @@ def split_oversized_prose(
     return RecursiveSplitResult(
         blocks=split_blocks,
         split_count=max(0, len(split_blocks) - 1),
+        oversized_count=int(actual_tokens > policy.max_tokens),
     )

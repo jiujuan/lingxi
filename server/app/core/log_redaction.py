@@ -36,8 +36,9 @@ def redact_log_payload(payload: Any) -> Any:
 
 _SNAPSHOT_ROOT_FIELDS = {
     "channels",
-    "configHash",
+    "chunkerConfigHashes",
     "featureFlags",
+    "retrievalConfigHash",
     "rrfParameters",
     "chunkRetrievalDegraded",
     "filters",
@@ -96,6 +97,14 @@ def sanitize_retrieval_snapshot(
             sanitized = _sanitize_snapshot_filters(value)
         elif key == "channels":
             sanitized = [str(channel) for channel in value] if isinstance(value, list) else []
+        elif key == "chunkerConfigHashes":
+            sanitized = sorted(
+                {
+                    value.strip()
+                    for value in value
+                    if isinstance(value, str) and value.strip()
+                }
+            )[:64]
         elif key == "featureFlags":
             sanitized = (
                 {str(name): bool(enabled) for name, enabled in value.items()}
@@ -106,7 +115,7 @@ def sanitize_retrieval_snapshot(
             sanitized = bool(value)
         elif key == "latencyMs":
             sanitized = value if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
-        elif key in {"configHash", "requestId"}:
+        elif key in {"retrievalConfigHash", "requestId"}:
             sanitized = value if isinstance(value, str) else None
         else:
             sanitized = value
@@ -126,6 +135,12 @@ def sanitize_retrieval_snapshot(
     else:
         result["stages"] = {}
     return result
+
+
+def sanitize_citation_snapshot(snapshot: Any) -> dict[str, Any]:
+    """Return citation audit metadata without question, title, or document text."""
+
+    return _sanitize_snapshot_item(snapshot) if isinstance(snapshot, dict) else {}
 
 
 def _sanitize_rrf_parameters(value: Any) -> dict[str, Any]:

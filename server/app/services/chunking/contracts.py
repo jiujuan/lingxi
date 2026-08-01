@@ -248,6 +248,9 @@ class ChunkingStats:
     child_count: int = 0
     skipped_block_count: int = 0
     total_token_count: int = 0
+    merge_count: int = 0
+    split_count: int = 0
+    oversized_count: int = 0
 
 
 @dataclass(frozen=True)

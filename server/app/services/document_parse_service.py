@@ -56,18 +56,15 @@ def log_chunking_observability(
             child.token_count
         )
     warning_codes = [warning.code for warning in result.warnings]
+    tiny_chunk_count = warning_codes.count("TINY_CHUNK_UNMERGEABLE")
+    skipped_image_count = warning_codes.count("IMAGE_WITHOUT_TEXT_SKIPPED")
     metrics.observe_chunking(
         duration_seconds=duration_seconds,
         token_counts_by_block_type=token_counts_by_block_type,
-        tiny_count=warning_codes.count("TINY_CHUNK_UNMERGEABLE"),
-        oversized_count=sum(
-            1 for child in result.children if child.token_count > policy.max_tokens
-        ),
-        # The result contract deliberately does not expose intermediate merge
-        # operations. Count observable output expansions instead of retaining
-        # document text or per-block identifiers in metrics.
-        merge_count=0,
-        split_count=max(0, result.stats.child_count - result.stats.input_block_count),
+        tiny_count=tiny_chunk_count,
+        oversized_count=result.stats.oversized_count,
+        merge_count=result.stats.merge_count,
+        split_count=result.stats.split_count,
     )
     logger.info(
         "adaptive chunking completed",
@@ -87,6 +84,27 @@ def log_chunking_observability(
             "parent_count": result.stats.parent_count,
             "total_token_count": result.stats.total_token_count,
             "warning_count": len(result.warnings),
+            # Canonical Task 18 structured-log contract.  Keep existing
+            # snake_case fields above for operational compatibility while
+            # emitting the specification's camelCase audit names.
+            "tenantId": tenant_id,
+            "documentId": document_id,
+            "jobId": job_id,
+            "parserName": parser_name,
+            "parserVersion": parser_version,
+            "chunkerName": policy.name,
+            "chunkerVersion": policy.version,
+            "configHash": policy.config_hash,
+            "tokenizerName": policy.tokenizer_name,
+            "atomicBlockCount": result.stats.input_block_count,
+            "childCount": result.stats.child_count,
+            "parentCount": result.stats.parent_count,
+            "mergeCount": result.stats.merge_count,
+            "splitCount": result.stats.split_count,
+            "tinyChunkCount": tiny_chunk_count,
+            "oversizedChunkCount": result.stats.oversized_count,
+            "skippedImageCount": skipped_image_count,
+            "featureFlags": {"adaptiveChunkingEnabled": True},
         },
     )
 

@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -132,6 +133,133 @@ def test_qa_split_validator_rejects_invalid_json_and_missing_fields():
             assert exc.code == expected_code
         else:
             raise AssertionError("invalid QA output should fail validation")
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        ("not-json", "QA_PROVENANCE_INVALID_JSON"),
+        ('{"items":[42]}', "QA_PROVENANCE_ITEM_NOT_OBJECT"),
+        (
+            '{"items":[{"question":" ","answer":"答案","quote":"引用","pageNo":1}]}',
+            "QA_PROVENANCE_EMPTY_REQUIRED_FIELD",
+        ),
+        (
+            '{"items":[{"question":"问题","answer":"答案","quote":"引用","pageNo":0}]}',
+            "QA_PROVENANCE_INVALID_PAGE_NO",
+        ),
+        ('{"items":[]}', "QA_PROVENANCE_EMPTY_ITEMS"),
+    ],
+)
+def test_qa_output_validation_failures_record_stable_provenance_metric(payload, reason):
+    from server.app.core import metrics
+    from server.app.services.qa_split_service import (
+        QaSplitValidationError,
+        validate_qa_split_output,
+    )
+
+    metrics.reset()
+    with pytest.raises(QaSplitValidationError):
+        validate_qa_split_output(payload)
+
+    assert (
+        f'lingxi_qa_provenance_validation_failure_total{{reason="{reason}"}} 1'
+        in metrics.render_prometheus()
+    )
+
+
+def test_qa_split_without_chunks_records_stable_provenance_metric():
+    from server.app.core import metrics
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.services.qa_split_service import QaSplitService
+
+    session, identity = build_qa_session()
+    job_id, _document_id, chunks = create_qa_ready_job(session, identity)
+    for chunk in chunks:
+        session.delete(chunk)
+    session.commit()
+
+    metrics.reset()
+    QaSplitService(session).split_import_job(job_id)
+
+    assert (
+        'lingxi_qa_provenance_validation_failure_total'
+        '{reason="QA_PROVENANCE_NO_SPLITTABLE_CHUNKS"} 1'
+        in metrics.render_prometheus()
+    )
+
+
+def test_qa_source_validation_failures_record_stable_provenance_metrics():
+    from server.app.core import metrics
+    from server.app.models.document import Document
+    from server.app.models.import_job import ImportJob
+    from server.app.services.qa_split_service import (
+        QaSplitService,
+        QaSplitValidationError,
+        ValidatedQaItem,
+    )
+
+    metrics.reset()
+    with pytest.raises(QaSplitValidationError):
+        QaSplitService._bind_embedding_run_config_hash(
+            SimpleNamespace(options={}),
+            [DocumentChunk(chunker_config_hash="generation-a"), DocumentChunk(chunker_config_hash="generation-b")],
+        )
+    assert (
+        "lingxi_qa_provenance_validation_failure_total"
+        '{reason="QA_PROVENANCE_SOURCE_CONFIG_INVALID"} 1'
+        in metrics.render_prometheus()
+    )
+
+    session, identity = build_qa_session()
+    job_id, document_id, chunks = create_qa_ready_job(session, identity)
+    job = session.get(ImportJob, job_id)
+    document = session.get(Document, document_id)
+    assert job is not None
+    assert document is not None
+
+    metrics.reset()
+    with pytest.raises(QaSplitValidationError):
+        QaSplitService(session)._replace_qa_pairs(
+            job,
+            document,
+            chunks,
+            [
+                ValidatedQaItem(
+                    question="问题",
+                    answer="答案",
+                    quote="退款需要主管审批。",
+                    page_no=1,
+                    chunk_index=99,
+                )
+            ],
+        )
+    assert (
+        "lingxi_qa_provenance_validation_failure_total"
+        '{reason="QA_PROVENANCE_UNKNOWN_CHUNK_INDEX"} 1'
+        in metrics.render_prometheus()
+    )
+
+
+def test_qa_model_configuration_validation_failure_records_stable_metric():
+    from server.app.core import metrics
+    from server.app.services.qa_split_service import QaSplitService, QaSplitValidationError
+
+    session, _identity = build_qa_session()
+    metrics.reset()
+
+    with pytest.raises(QaSplitValidationError) as exc_info:
+        QaSplitService(session)._default_model("tenant-id-must-not-be-a-metric-label")
+
+    assert exc_info.value.code == "QA_SPLIT_MODEL_NOT_CONFIGURED"
+    assert exc_info.value.retryable is False
+    rendered = metrics.render_prometheus()
+    assert (
+        "lingxi_qa_provenance_validation_failure_total"
+        '{reason="QA_PROVENANCE_MODEL_NOT_CONFIGURED"} 1'
+        in rendered
+    )
+    assert "tenant-id-must-not-be-a-metric-label" not in rendered
 
 
 def test_qa_split_service_writes_pairs_and_is_idempotent():

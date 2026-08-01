@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from server.app.core.ids import current_request_id
+from server.app.core.log_redaction import sanitize_citation_snapshot
 from server.app.core.service_factory import build_retrieval_service
 from server.app.core.permissions import AccessContext
 from server.app.core.secrets import decrypt_secret
@@ -161,7 +162,7 @@ class OpenAICompatibleService:
                 qa_pair_id=candidate.qa_pair_id,
                 quote=quote,
                 rank=rank,
-                snapshot=candidate.to_snapshot(),
+                snapshot=sanitize_citation_snapshot(candidate.to_snapshot()),
             )
             document = self.session.get(Document, candidate.document_id)
             citations.append(

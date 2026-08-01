@@ -33,6 +33,14 @@ QA_PROVENANCE_UNKNOWN_CHUNK_INDEX = "QA_PROVENANCE_UNKNOWN_CHUNK_INDEX"
 QA_PROVENANCE_QUOTE_MISMATCH = "QA_PROVENANCE_QUOTE_MISMATCH"
 QA_PROVENANCE_COVERAGE_MISMATCH = "QA_PROVENANCE_COVERAGE_MISMATCH"
 QA_PROVENANCE_CONTRACT_INVALID = "QA_PROVENANCE_CONTRACT_INVALID"
+QA_PROVENANCE_INVALID_JSON = "QA_PROVENANCE_INVALID_JSON"
+QA_PROVENANCE_ITEM_NOT_OBJECT = "QA_PROVENANCE_ITEM_NOT_OBJECT"
+QA_PROVENANCE_EMPTY_REQUIRED_FIELD = "QA_PROVENANCE_EMPTY_REQUIRED_FIELD"
+QA_PROVENANCE_INVALID_PAGE_NO = "QA_PROVENANCE_INVALID_PAGE_NO"
+QA_PROVENANCE_EMPTY_ITEMS = "QA_PROVENANCE_EMPTY_ITEMS"
+QA_PROVENANCE_NO_SPLITTABLE_CHUNKS = "QA_PROVENANCE_NO_SPLITTABLE_CHUNKS"
+QA_PROVENANCE_SOURCE_CONFIG_INVALID = "QA_PROVENANCE_SOURCE_CONFIG_INVALID"
+QA_PROVENANCE_MODEL_NOT_CONFIGURED = "QA_PROVENANCE_MODEL_NOT_CONFIGURED"
 
 __all__ = [
     "QaSplitService",
@@ -107,8 +115,9 @@ def _provenance_error(
     message: str,
     *,
     retryable: bool = True,
+    metric_reason: str | None = None,
 ) -> QaSplitValidationError:
-    metrics.observe_qa_provenance_validation_failure(code)
+    metrics.observe_qa_provenance_validation_failure(metric_reason or code)
     return QaSplitValidationError(message, code=code, retryable=retryable)
 
 
@@ -186,7 +195,12 @@ def _is_valid_chunk_index(value: object) -> bool:
 
 def _validate_item_fields(item: object, position: int) -> ValidatedQaItem:
     if not isinstance(item, dict):
-        raise QaSplitValidationError(f"第 {position + 1} 个 QA 项不是对象")
+        raise _provenance_error(
+            QA_PROVENANCE_CONTRACT_INVALID,
+            f"第 {position + 1} 个 QA 项不是对象",
+            retryable=False,
+            metric_reason=QA_PROVENANCE_ITEM_NOT_OBJECT,
+        )
     question_value = item.get("question")
     answer_value = item.get("answer")
     quote = item.get("quote")
@@ -201,9 +215,19 @@ def _validate_item_fields(item: object, position: int) -> ValidatedQaItem:
     page_no = item.get("pageNo", item.get("page_no"))
     chunk_index = item.get("chunkIndex", item.get("chunk_index"))
     if not question or not answer or not quote.strip():
-        raise QaSplitValidationError("QA 项缺少 question、answer 或 quote")
+        raise _provenance_error(
+            QA_PROVENANCE_CONTRACT_INVALID,
+            "QA 项缺少 question、answer 或 quote",
+            retryable=False,
+            metric_reason=QA_PROVENANCE_EMPTY_REQUIRED_FIELD,
+        )
     if not isinstance(page_no, int) or isinstance(page_no, bool) or page_no < 1:
-        raise QaSplitValidationError("QA 项缺少合法 pageNo")
+        raise _provenance_error(
+            QA_PROVENANCE_CONTRACT_INVALID,
+            "QA 项缺少合法 pageNo",
+            retryable=False,
+            metric_reason=QA_PROVENANCE_INVALID_PAGE_NO,
+        )
     if chunk_index is not None and not _is_valid_chunk_index(chunk_index):
         raise _provenance_error(
             QA_PROVENANCE_CONTRACT_INVALID,
@@ -323,7 +347,12 @@ def validate_qa_split_output(
     try:
         parsed = json.loads(_extract_json_text(raw_output))
     except json.JSONDecodeError as exc:
-        raise QaSplitValidationError("QA 拆分模型输出不是合法 JSON") from exc
+        raise _provenance_error(
+            "QA_SPLIT_INVALID_OUTPUT",
+            "QA 拆分模型输出不是合法 JSON",
+            retryable=False,
+            metric_reason=QA_PROVENANCE_INVALID_JSON,
+        ) from exc
 
     if not isinstance(parsed, dict):
         raise _provenance_error(
@@ -342,7 +371,12 @@ def validate_qa_split_output(
     validated = [_validate_item_fields(item, index) for index, item in enumerate(items)]
     if chunks is None:
         if not validated:
-            raise QaSplitValidationError("QA 拆分输出 items 为空")
+            raise _provenance_error(
+                QA_PROVENANCE_CONTRACT_INVALID,
+                "QA 拆分输出 items 为空",
+                retryable=False,
+                metric_reason=QA_PROVENANCE_EMPTY_ITEMS,
+            )
         return validated
 
     chunk_by_index = {chunk.chunk_index: chunk for chunk in chunks}
@@ -490,7 +524,11 @@ class QaSplitService:
         try:
             chunks = self._list_chunks(document.id)
             if not chunks:
-                raise QaSplitValidationError("文档没有可拆分的 Chunk")
+                raise _provenance_error(
+                    QA_PROVENANCE_NO_SPLITTABLE_CHUNKS,
+                    "文档没有可拆分的 Chunk",
+                    retryable=False,
+                )
             model_config, provider = self._default_model(job.tenant_id)
             adapter = self._build_adapter(
                 provider.provider_type,
@@ -604,12 +642,13 @@ class QaSplitService:
         )
         row = self.session.execute(statement).first()
         if row is None:
-            raise QaSplitValidationError(
+            raise _provenance_error(
+                "QA_SPLIT_MODEL_NOT_CONFIGURED",
                 "未配置默认 QA Split 模型",
-                code="QA_SPLIT_MODEL_NOT_CONFIGURED",
                 # Deterministic config gap: auto-retry can't help until an admin
                 # configures a default QA_SPLIT model, so don't burn retries.
                 retryable=False,
+                metric_reason=QA_PROVENANCE_MODEL_NOT_CONFIGURED,
             )
         return row[0], row[1]
 
@@ -691,9 +730,10 @@ class QaSplitService:
             if isinstance(chunk.chunker_config_hash, str) and chunk.chunker_config_hash.strip()
         }
         if len(config_hashes) != 1:
-            raise QaSplitValidationError(
-                "QA 来源 Chunk generation 无法唯一确定",
+            raise _provenance_error(
                 "QA_SPLIT_RUN_CONFIG_INVALID",
+                "QA 来源 Chunk generation 无法唯一确定",
+                metric_reason=QA_PROVENANCE_SOURCE_CONFIG_INVALID,
             )
         options = dict(job.options) if isinstance(job.options, dict) else {}
         embedding_options = options.get("embedding")
@@ -746,7 +786,11 @@ class QaSplitService:
         for index, item in enumerate(items):
             chunk = chunk_by_index.get(item.chunk_index)
             if chunk is None:
-                raise QaSplitValidationError("QA 项未能关联到当前 Document Chunk")
+                raise _provenance_error(
+                    QA_PROVENANCE_UNKNOWN_CHUNK_INDEX,
+                    "QA 项未能关联到当前 Document Chunk",
+                    retryable=False,
+                )
             resolved_chunks.append((index, item, chunk))
 
         self.session.execute(delete(QaPair).where(QaPair.document_id == document.id))
