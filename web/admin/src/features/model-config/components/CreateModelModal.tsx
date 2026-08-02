@@ -70,7 +70,7 @@ export function CreateModelModal({ provider, onClose, onSubmit }: Props) {
         {error ? <div className="error-box">{error}</div> : null}
         <form className="model-config-form" onSubmit={submit}>
           <label>
-            模型名称 <em>*</em>
+            <span className="model-config-field-label">模型名称 <em>*</em></span>
             <input
               onChange={(event) => setDisplayName(event.target.value)}
               placeholder="如：DeepSeek V4 Ultra"
@@ -79,7 +79,7 @@ export function CreateModelModal({ provider, onClose, onSubmit }: Props) {
             />
           </label>
           <label>
-            模型 ID <em>*</em>
+            <span className="model-config-field-label">模型 ID <em>*</em></span>
             <input
               onChange={(event) => setModelName(event.target.value)}
               placeholder="如：deepseek-v4-ultra"

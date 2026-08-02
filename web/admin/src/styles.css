@@ -3409,11 +3409,16 @@ a code {
 }
 
 .model-provider-switch {
+  align-items: center;
   background: #d7dee9;
   border-radius: 999px;
+  box-sizing: border-box;
   cursor: pointer;
-  height: 21px;
+  display: flex;
+  height: 20px;
+  justify-content: flex-start;
   justify-self: end;
+  line-height: 0;
   padding: 2px;
   transition: background 160ms ease;
   width: 38px;
@@ -3424,10 +3429,11 @@ a code {
   border-radius: 50%;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
   display: block;
-  height: 17px;
+  flex: 0 0 16px;
+  height: 16px;
   transform: translateX(0);
   transition: transform 160ms ease;
-  width: 17px;
+  width: 16px;
 }
 
 .model-provider-switch.active {
@@ -3435,7 +3441,7 @@ a code {
 }
 
 .model-provider-switch.active i {
-  transform: translateX(17px);
+  transform: translateX(18px);
 }
 
 .model-provider-detail {
@@ -3673,11 +3679,16 @@ a code {
   gap: 16px;
 }
 
+.model-config-field-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 3px;
+}
+
 .model-config-form em {
   color: #ef4444;
   font-size: 14px;
   font-style: normal;
-  margin-left: 3px;
 }
 
 .model-config-form input,

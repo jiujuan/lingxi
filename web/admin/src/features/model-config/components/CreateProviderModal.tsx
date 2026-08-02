@@ -58,7 +58,7 @@ export function CreateProviderModal({ onClose, onSubmit }: Props) {
         {error ? <div className="error-box">{error}</div> : null}
         <form className="model-config-form" onSubmit={submit}>
           <label>
-            供应商类型 <em>*</em>
+            <span className="model-config-field-label">供应商类型 <em>*</em></span>
             <select onChange={(event) => setProviderType(event.target.value)} value={providerType}>
               <option value="OPENAI_COMPATIBLE">OpenAI 兼容</option>
               <option value="CLAUDE">Anthropic Claude</option>
@@ -67,7 +67,7 @@ export function CreateProviderModal({ onClose, onSubmit }: Props) {
             </select>
           </label>
           <label>
-            供应商名称 <em>*</em>
+            <span className="model-config-field-label">供应商名称 <em>*</em></span>
             <input
               onChange={(event) => setName(event.target.value)}
               placeholder="如：DeepSeek"
