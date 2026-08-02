@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { errorMessage } from '../../../api/client';
 import {
@@ -46,9 +46,43 @@ export function KnowledgePage() {
   const [documentsLoading, setDocumentsLoading] = useState(true);
   const [documentsError, setDocumentsError] = useState<string | null>(null);
 
+  const loadSummary = useCallback(async () => {
+    setSummaryLoading(true);
+    setSummaryError(null);
+    try {
+      setSummary(await getDocumentProcessingSummary());
+    } catch (caught) {
+      setSummaryError(errorMessage(caught, '文档统计加载失败。'));
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, []);
+
+  const loadDocuments = useCallback(async (nextFilters: DocumentFilters) => {
+    setFilters(nextFilters);
+    setDocumentsLoading(true);
+    setDocumentsError(null);
+    try {
+      const result = await listDocuments(nextFilters);
+      setDocuments(result.data);
+      setPagination(result.pagination);
+    } catch (caught) {
+      setDocumentsError(errorMessage(caught, '文档列表加载失败。'));
+    } finally {
+      setDocumentsLoading(false);
+    }
+  }, []);
+
+  const refreshWorkspace = useCallback(
+    async (nextFilters: DocumentFilters) => {
+      await Promise.all([loadSummary(), loadDocuments(nextFilters)]);
+    },
+    [loadDocuments, loadSummary],
+  );
+
   useEffect(() => {
     void refreshWorkspace(INITIAL_FILTERS);
-  }, []);
+  }, [refreshWorkspace]);
 
   useEffect(() => {
     if (!activeJob || !['PENDING', 'RUNNING'].includes(activeJob.status)) {
@@ -65,38 +99,7 @@ export function KnowledgePage() {
         .catch(() => undefined);
     }, 2000);
     return () => window.clearInterval(timer);
-  }, [activeJob, filters]);
-
-  async function loadSummary() {
-    setSummaryLoading(true);
-    setSummaryError(null);
-    try {
-      setSummary(await getDocumentProcessingSummary());
-    } catch (caught) {
-      setSummaryError(errorMessage(caught, '文档统计加载失败。'));
-    } finally {
-      setSummaryLoading(false);
-    }
-  }
-
-  async function loadDocuments(nextFilters: DocumentFilters) {
-    setFilters(nextFilters);
-    setDocumentsLoading(true);
-    setDocumentsError(null);
-    try {
-      const result = await listDocuments(nextFilters);
-      setDocuments(result.data);
-      setPagination(result.pagination);
-    } catch (caught) {
-      setDocumentsError(errorMessage(caught, '文档列表加载失败。'));
-    } finally {
-      setDocumentsLoading(false);
-    }
-  }
-
-  async function refreshWorkspace(nextFilters = filters) {
-    await Promise.all([loadSummary(), loadDocuments(nextFilters)]);
-  }
+  }, [activeJob, filters, refreshWorkspace]);
 
   function handleUploaded(job: ImportJob) {
     setActiveJob(job);
@@ -125,15 +128,21 @@ export function KnowledgePage() {
         <div aria-live="polite" className="document-processing-metrics">
           <div className="document-processing-metric">
             <span>已同步文档</span>
-            <strong>{summaryLoading ? '—' : (summary?.syncedDocumentCount ?? 0).toLocaleString()}</strong>
+            <strong>
+              {summaryLoading ? '—' : (summary?.syncedDocumentCount ?? 0).toLocaleString()}
+            </strong>
             <small>篇</small>
           </div>
           <div className="document-processing-metric">
             <span>已解析 Chunks</span>
-            <strong>{summaryLoading ? '—' : (summary?.totalChunkCount ?? 0).toLocaleString()}</strong>
+            <strong>
+              {summaryLoading ? '—' : (summary?.totalChunkCount ?? 0).toLocaleString()}
+            </strong>
             <small>个</small>
           </div>
-          {summaryError ? <p className="error document-processing-summary-error">{summaryError}</p> : null}
+          {summaryError ? (
+            <p className="error document-processing-summary-error">{summaryError}</p>
+          ) : null}
         </div>
       </header>
 
@@ -148,7 +157,10 @@ export function KnowledgePage() {
 
       <div className="document-processing-workspace">
         <DocumentUploadPanel onUploaded={handleUploaded} />
-        <section className="panel document-processing-pipeline" aria-labelledby="processing-pipeline-title">
+        <section
+          className="panel document-processing-pipeline"
+          aria-labelledby="processing-pipeline-title"
+        >
           <div>
             <p className="eyebrow">任务处理流水线</p>
             <h3 id="processing-pipeline-title">从原始文档到可检索知识</h3>

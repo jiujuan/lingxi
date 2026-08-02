@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { listQaPairs, regenerateQaPairs, type ImportJob, type QaPair } from '../api/importJobApi';
 
@@ -12,29 +12,32 @@ export function QaPairList({ documentId, onJobUpdated }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const loadItems = useCallback(
+    async (nextDocumentId = documentId) => {
+      if (!nextDocumentId) {
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await listQaPairs(nextDocumentId);
+        setItems(result.data);
+      } catch (caught) {
+        setError(readError(caught));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [documentId],
+  );
+
   useEffect(() => {
     if (!documentId) {
       setItems([]);
       return;
     }
     void loadItems(documentId);
-  }, [documentId]);
-
-  async function loadItems(nextDocumentId = documentId) {
-    if (!nextDocumentId) {
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await listQaPairs(nextDocumentId);
-      setItems(result.data);
-    } catch (caught) {
-      setError(readError(caught));
-    } finally {
-      setLoading(false);
-    }
-  }
+  }, [documentId, loadItems]);
 
   async function regenerate() {
     if (!documentId || !window.confirm('确认重新生成该文档的 QA 对？')) {

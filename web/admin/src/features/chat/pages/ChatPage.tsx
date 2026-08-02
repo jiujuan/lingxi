@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import {
   createChatSession,
@@ -35,19 +35,7 @@ export function ChatPage() {
   const { streamingText, isStreaming, currentRunId, citations, setCitations, start, stop, reset } =
     useChatStream();
 
-  useEffect(() => {
-    void refreshSessions();
-  }, []);
-
-  useEffect(() => {
-    // Switching sessions cancels a stream still running for the previous one.
-    reset();
-    if (activeSessionId) {
-      void refreshMessages(activeSessionId);
-    }
-  }, [activeSessionId]);
-
-  async function refreshSessions() {
+  const refreshSessions = useCallback(async () => {
     setIsLoading(true);
     try {
       const result = await listChatSessions();
@@ -58,21 +46,36 @@ export function ChatPage() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, []);
 
-  async function refreshMessages(sessionId: string, preserveCitations = false) {
-    try {
-      const result = await listChatMessages(sessionId);
-      setMessages(result.data);
-      if (!preserveCitations) {
-        setCitations([]);
-        setExplanation(null);
+  const refreshMessages = useCallback(
+    async (sessionId: string, preserveCitations = false) => {
+      try {
+        const result = await listChatMessages(sessionId);
+        setMessages(result.data);
+        if (!preserveCitations) {
+          setCitations([]);
+          setExplanation(null);
+        }
+        setError(null);
+      } catch {
+        setError('消息加载失败');
       }
-      setError(null);
-    } catch {
-      setError('消息加载失败');
+    },
+    [setCitations],
+  );
+
+  useEffect(() => {
+    void refreshSessions();
+  }, [refreshSessions]);
+
+  useEffect(() => {
+    // Switching sessions cancels a stream still running for the previous one.
+    reset();
+    if (activeSessionId) {
+      void refreshMessages(activeSessionId);
     }
-  }
+  }, [activeSessionId, refreshMessages, reset]);
 
   async function createSession() {
     const session = await createChatSession('新会话');

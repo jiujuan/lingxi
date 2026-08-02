@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { errorMessage } from '../../../api/client';
 import {
@@ -60,9 +60,44 @@ export function DocumentListPage() {
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [bulkClassificationOpen, setBulkClassificationOpen] = useState(false);
 
+  const loadDocuments = useCallback(async (nextFilters: DocumentFilters) => {
+    setListLoading(true);
+    setListError(null);
+    try {
+      const result = await listDocuments(nextFilters);
+      setDocuments(result.data);
+      setPagination(result.pagination);
+      setSelectedDocumentIds((current) =>
+        current.filter((id) => result.data.some((document) => document.id === id)),
+      );
+      setSelectedId((current) => current || result.data[0]?.id || null);
+    } catch (caught) {
+      setListError(errorMessage(caught, '请求失败。'));
+    } finally {
+      setListLoading(false);
+    }
+  }, []);
+
+  const loadDetail = useCallback(async (documentId: string) => {
+    setDetailLoading(true);
+    setDetailError(null);
+    try {
+      const [detailResult, chunkResult] = await Promise.all([
+        getDocument(documentId),
+        listDocumentChunks(documentId),
+      ]);
+      setDetail(detailResult);
+      setChunks(chunkResult.data);
+    } catch (caught) {
+      setDetailError(errorMessage(caught, '请求失败。'));
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadDocuments(filters);
-  }, [filters]);
+  }, [filters, loadDocuments]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -71,7 +106,7 @@ export function DocumentListPage() {
       return;
     }
     void loadDetail(selectedId);
-  }, [selectedId]);
+  }, [loadDetail, selectedId]);
 
   // After a retry the job runs asynchronously; poll it so the list/detail
   // reflect the final state without a manual refresh.
@@ -93,47 +128,7 @@ export function DocumentListPage() {
         .catch(() => undefined);
     }, 2000);
     return () => window.clearInterval(timer);
-  }, [activeJob, filters]);
-
-  async function loadDocuments(nextFilters = filters) {
-    setListLoading(true);
-    setListError(null);
-    try {
-      const result = await listDocuments(nextFilters);
-      setDocuments(result.data);
-      setPagination(result.pagination);
-      setSelectedDocumentIds((current) =>
-        current.filter((id) => result.data.some((document) => document.id === id)),
-      );
-      if (!selectedId && result.data.length) {
-        setSelectedId(result.data[0].id);
-      }
-    } catch (caught) {
-      setListError(errorMessage(caught, '请求失败。'));
-    } finally {
-      setListLoading(false);
-    }
-  }
-
-  async function loadDetail(documentId = selectedId) {
-    if (!documentId) {
-      return;
-    }
-    setDetailLoading(true);
-    setDetailError(null);
-    try {
-      const [detailResult, chunkResult] = await Promise.all([
-        getDocument(documentId),
-        listDocumentChunks(documentId),
-      ]);
-      setDetail(detailResult);
-      setChunks(chunkResult.data);
-    } catch (caught) {
-      setDetailError(errorMessage(caught, '请求失败。'));
-    } finally {
-      setDetailLoading(false);
-    }
-  }
+  }, [activeJob, filters, loadDetail, loadDocuments]);
 
   async function handleRetry(document: KnowledgeDocument | KnowledgeDocumentDetail) {
     if (!document.latestJob?.retryable) {
@@ -244,7 +239,11 @@ export function DocumentListPage() {
           onEditPermissions={setPermissionTarget}
           onEditClassification={setClassificationTarget}
           onJobUpdated={setActiveJob}
-          onRefresh={() => void loadDetail()}
+          onRefresh={() => {
+            if (selectedId) {
+              void loadDetail(selectedId);
+            }
+          }}
           onRetry={(document) => void handleRetry(document)}
         />
       </section>
