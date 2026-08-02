@@ -13,6 +13,7 @@ from server.app.core.config import settings
 from server.app.core import metrics
 from server.app.core.secrets import decrypt_secret
 import server.app.db.base  # noqa: F401
+from server.app.integrations.model_providers.base import ProviderError
 from server.app.integrations.model_providers.registry import (
     ProviderFactory,
     build_provider_adapter,
@@ -568,6 +569,21 @@ class QaSplitService:
                 job, document, task_run, exc.code, exc.message, exc.retryable
             )
             return job, task_run.id
+        except ProviderError as exc:
+            # ProviderError is a normalized, safe error contract. Preserve its
+            # code and retryability so Celery does not waste retries on permanent
+            # provider failures (for example, 401/400), while transient failures
+            # such as timeouts can still retry.
+            logger.warning(
+                "qa split provider failure code=%s job_id=%s document_id=%s",
+                exc.code,
+                job.id,
+                document.id,
+            )
+            self._mark_failed(
+                job, document, task_run, exc.code, exc.message, exc.retryable
+            )
+            return job, task_run.id
         except Exception:
             logger.error(
                 "qa split failed code=%s job_id=%s document_id=%s",
@@ -699,8 +715,8 @@ class QaSplitService:
         """
 
         def generate(group: list[DocumentChunk]) -> str:
-            # ProviderError bubbles to the caller's generic handler
-            # (QA_SPLIT_INTERNAL_ERROR, retryable) so the task layer retries.
+            # ProviderError is normalized at the service boundary, preserving
+            # its code and retryability for the task layer.
             return adapter.generate_qa_pairs(build_qa_split_prompt(document, group))
 
         raw_outputs = run_ordered(

@@ -957,6 +957,46 @@ def test_invalid_json_does_not_persist_raw_model_output_in_failure_messages():
     assert secret_output not in json.dumps(task_run.error, ensure_ascii=False)
 
 
+@pytest.mark.parametrize(
+    ("code", "retryable"),
+    [
+        ("PROVIDER_CONNECTION_ERROR", True),
+        ("PROVIDER_UNAUTHORIZED", False),
+    ],
+)
+def test_normalized_provider_error_preserves_code_and_retryability(code, retryable):
+    from server.app.integrations.model_providers.base import ProviderError
+    from server.app.models.import_job import ImportJob
+    from server.app.models.logs import TaskRun
+    from server.app.services.qa_split_service import QaSplitService
+
+    session, identity = build_qa_session()
+    job_id, _document_id, _chunks = create_qa_ready_job(session, identity)
+    add_default_qa_model(session, identity["tenant"].id, {"items": []})
+
+    class _Adapter:
+        @staticmethod
+        def generate_qa_pairs(_prompt):
+            raise ProviderError(code, "模型供应商调用失败", retryable=retryable)
+
+    result = QaSplitService(
+        session,
+        provider_factory=lambda *_args, **_kwargs: _Adapter(),
+    ).split_import_job(job_id)
+
+    job = session.get(ImportJob, job_id)
+    task_run = session.scalar(select(TaskRun).where(TaskRun.resource_id == job_id))
+    assert result.status == "FAILED"
+    assert job.error_code == code
+    assert job.error_message == "模型供应商调用失败"
+    assert task_run.error == {
+        "code": code,
+        "message": "模型供应商调用失败",
+        "retryable": retryable,
+        "failedAt": task_run.error["failedAt"],
+    }
+
+
 def test_unexpected_qa_provider_error_does_not_leak_raw_exception_to_logs(caplog):
     from server.app.services import qa_split_service
     from server.app.services.qa_split_service import QaSplitService
