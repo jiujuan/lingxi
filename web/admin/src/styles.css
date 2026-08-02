@@ -2195,7 +2195,7 @@ a code {
 }
 
 .document-processing-workspace {
-  align-items: stretch;
+  align-items: start;
   display: grid;
   gap: 18px;
   grid-template-columns: minmax(320px, 0.88fr) minmax(420px, 1.12fr);
@@ -2223,7 +2223,8 @@ a code {
   }
 }
 
-.document-processing-uploader {
+.document-processing-uploader,
+.document-processing-pipeline {
   align-content: start;
 }
 
@@ -2292,8 +2293,9 @@ a code {
 }
 
 .task-pipeline {
+  align-content: start;
   display: grid;
-  gap: 14px;
+  gap: 10px;
 }
 
 .task-pipeline-summary {
@@ -2315,9 +2317,9 @@ a code {
 
 .task-pipeline-step {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   grid-template-columns: 28px minmax(0, 1fr);
-  min-height: 72px;
+  min-height: 64px;
   position: relative;
 }
 
@@ -2350,7 +2352,7 @@ a code {
 .task-pipeline-step > div {
   display: grid;
   gap: 3px;
-  padding-bottom: 14px;
+  padding-bottom: 10px;
 }
 
 .task-pipeline-step > div > span {
@@ -2421,8 +2423,20 @@ a code {
   gap: 5px;
 }
 
+.document-processing-list-actions {
+  left: -30px;
+  position: relative;
+}
+
 .document-processing-list-actions input {
+  height: 42px;
   min-width: 220px;
+}
+
+.document-processing-list-actions button {
+  box-sizing: border-box;
+  height: 42px;
+  width: 71px;
 }
 
 .document-processing-table {
@@ -3222,16 +3236,28 @@ a code {
   }
 
   .document-processing-shortcuts,
-  .document-processing-list-actions,
   .document-processing-pagination > div {
     align-items: stretch;
     flex-wrap: wrap;
     justify-content: flex-start;
   }
 
-  .document-processing-list-actions input {
-    min-width: 0;
+  .document-processing-list-actions {
+    align-items: center;
+    flex-wrap: nowrap;
     width: 100%;
+  }
+
+  .document-processing-list-actions input {
+    flex: 1 1 auto;
+    height: 42px;
+    min-width: 0;
+    width: auto;
+  }
+
+  .document-processing-list-actions button {
+    flex: 0 0 auto;
+    height: 42px;
   }
 
   .document-processing-table-head {
