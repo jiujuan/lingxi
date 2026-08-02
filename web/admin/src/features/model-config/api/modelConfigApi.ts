@@ -86,6 +86,7 @@ export function createModelConfig(payload: {
   capability: string;
   modelName: string;
   isDefault: boolean;
+  config?: Record<string, unknown>;
 }) {
   return apiRequest<ModelConfig>('/api/v1/model-configs', {
     method: 'POST',

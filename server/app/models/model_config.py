@@ -23,6 +23,10 @@ class ModelCapability(StrEnum):
     CHAT = "CHAT"
     EMBEDDING = "EMBEDDING"
     QA_SPLIT = "QA_SPLIT"
+    RERANK = "RERANK"
+    IMAGE = "IMAGE"
+    MULTIMODAL = "MULTIMODAL"
+    VIDEO = "VIDEO"
 
 
 class ModelConfigStatus(StrEnum):

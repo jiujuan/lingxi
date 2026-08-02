@@ -268,3 +268,24 @@ def test_model_config_delete_requires_write_permission():
         client.delete("/api/v1/model-configs/any-id", headers=employee_headers).status_code
         == 403
     )
+
+
+def test_model_config_accepts_extended_model_types():
+    client, _ = build_test_client()
+    headers = login_admin(client)
+    provider = _create_provider(client, headers, "Extended Type Provider")
+
+    for capability in ("RERANK", "IMAGE", "MULTIMODAL", "VIDEO"):
+        response = client.post(
+            "/api/v1/model-configs",
+            headers=headers,
+            json={
+                "providerId": provider["id"],
+                "capability": capability,
+                "modelName": f"{capability.lower()}-model",
+                "isDefault": True,
+            },
+        )
+
+        assert response.status_code == 201
+        assert response.json()["capability"] == capability
