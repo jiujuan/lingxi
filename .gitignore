@@ -10,3 +10,4 @@ web/admin/dist/
 # Local object-storage / runtime data
 .data/
 
+.superpowers/
