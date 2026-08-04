@@ -587,6 +587,60 @@ def test_retry_failed_import_job_uses_failed_stage_and_clears_error(monkeypatch)
     assert body["retryable"] is False
     assert queued == [ids["failed_job_id"]]
 
+
+def test_retry_failed_import_job_routes_chunking_and_indexing_to_their_workers(
+    monkeypatch,
+):
+    client, SessionLocal = build_test_client()
+    admin_headers = login_admin(client)
+    ids = seed_document_center_data(SessionLocal)
+    queued_parse: list[str] = []
+    queued_embedding: list[str] = []
+
+    from server.app.models.document import Document, DocumentStatus
+    from server.app.models.import_job import ImportJob, ImportJobStatus
+    from server.app.services import import_service
+
+    with SessionLocal() as session:
+        job = session.get(ImportJob, ids["failed_job_id"])
+        document = session.get(Document, ids["failed_document_id"])
+        assert job is not None
+        assert document is not None
+        job.retry_count = 0
+        job.status = ImportJobStatus.FAILED.value
+        job.stage = "CHUNKING"
+        document.status = DocumentStatus.FAILED
+        session.commit()
+
+    monkeypatch.setattr(import_service, "enqueue_parse_task", queued_parse.append)
+    chunking_retry = client.post(
+        f"/api/v1/import-jobs/{ids['failed_job_id']}/retries",
+        headers=admin_headers,
+    )
+    assert chunking_retry.status_code == 200
+    assert chunking_retry.json()["stage"] == "CHUNKING"
+    assert queued_parse == [ids["failed_job_id"]]
+
+    with SessionLocal() as session:
+        job = session.get(ImportJob, ids["failed_job_id"])
+        document = session.get(Document, ids["failed_document_id"])
+        assert job is not None
+        assert document is not None
+        job.status = ImportJobStatus.FAILED.value
+        job.stage = "INDEXING"
+        document.status = DocumentStatus.FAILED
+        session.commit()
+
+    monkeypatch.setattr(import_service, "enqueue_embedding_task", queued_embedding.append)
+    indexing_retry = client.post(
+        f"/api/v1/import-jobs/{ids['failed_job_id']}/retries",
+        headers=admin_headers,
+    )
+    assert indexing_retry.status_code == 200
+    assert indexing_retry.json()["stage"] == "INDEXING"
+    assert queued_embedding == [ids["failed_job_id"]]
+
+
 def test_document_summary_returns_visible_document_and_chunk_totals():
     client, SessionLocal = build_test_client()
     employee_headers = login_employee(client)

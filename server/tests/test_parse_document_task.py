@@ -466,6 +466,8 @@ def test_parse_document_service_persists_adaptive_parent_before_children_and_con
 
 
 def test_adaptive_parse_failure_rolls_back_staged_collection_and_keeps_old_active(tmp_path, monkeypatch):
+    from server.app.models.import_job import ImportJob
+    from server.app.models.logs import TaskRun
     from server.app.models.qa_pair import DocumentChunk
     from server.app.services.document_parse_service import DocumentParseService
 
@@ -496,6 +498,10 @@ def test_adaptive_parse_failure_rolls_back_staged_collection_and_keeps_old_activ
     rows = session.scalars(select(DocumentChunk).where(DocumentChunk.document_id == document_id)).all()
     assert [(row.content, row.status) for row in rows] == [("old active", "ACTIVE")]
     assert session.get(DocumentChunk, old.id).status == "ACTIVE"
+    failed_job = session.get(ImportJob, job_id)
+    failed_run = session.scalar(select(TaskRun).where(TaskRun.resource_id == job_id))
+    assert failed_job.stage == "CHUNKING"
+    assert failed_run.stage == "CHUNKING"
 
 
 def test_legacy_parse_mode_keeps_one_active_row_per_parser_block(tmp_path):

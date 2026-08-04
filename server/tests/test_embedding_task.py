@@ -174,6 +174,35 @@ def test_embedding_dimension_mismatch_records_failure_without_deleting_qa_pairs(
     assert task_run.error["code"] == "EMBEDDING_DIMENSION_MISMATCH"
 
 
+def test_embedding_indexing_failure_records_indexing_stage(monkeypatch):
+    from server.app.models.import_job import ImportJob
+    from server.app.models.logs import TaskRun
+    from server.app.services.embedding_service import EmbeddingService
+
+    session, identity = build_qa_session()
+    tenant_id = identity["tenant"].id
+    job_id, document_id, chunks = prepare_embedding_job(session, identity)
+    add_default_embedding_model(session, tenant_id, expected_dimension=4)
+    add_qa_pairs(session, tenant_id, document_id, job_id, [chunk.id for chunk in chunks])
+    service = EmbeddingService(
+        session,
+        provider_factory=lambda *_args, **_kwargs: _RecordingEmbeddingAdapter(),
+    )
+    monkeypatch.setattr(
+        service,
+        "_persist_targets",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("index write failed")),
+    )
+
+    result = service.embed_import_job(job_id)
+
+    job = session.get(ImportJob, job_id)
+    task_run = session.scalar(select(TaskRun).where(TaskRun.resource_id == job_id))
+    assert result.status == "FAILED"
+    assert job.stage == "INDEXING"
+    assert task_run.stage == "INDEXING"
+
+
 class _RecordingEmbeddingAdapter:
     def __init__(
         self,

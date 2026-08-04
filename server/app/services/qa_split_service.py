@@ -843,9 +843,10 @@ class QaSplitService:
         document.last_error_code = code
         document.last_error_message = message
         job.status = ImportJobStatus.FAILED.value
-        job.stage = "QA_SPLITTING"
+        job.stage = job.stage or "QA_SPLITTING"
         job.error_code = code
         job.error_message = message
+        task_run.stage = job.stage
         task_run.status = "FAILED"
         task_run.error = {
             "code": code,

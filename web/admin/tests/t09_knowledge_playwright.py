@@ -142,7 +142,7 @@ BASE_DOCUMENT = {
             "id": "task-ready",
             "taskType": "embed_qa_pairs_task",
             "queueName": "embedding",
-            "stage": "EMBEDDING",
+            "stage": "INDEXING",
             "status": "SUCCESS",
             "error": None,
             "requestId": "req_ready",
@@ -1014,9 +1014,10 @@ def verify_upload_flow(page: Page, api: KnowledgeApiMock) -> None:
     department_input.fill("dept-after-sales")
     page.locator("input[type=file]").set_input_files(str(upload_file))
     page.get_by_role("button", name="▷ 一键构建解析任务").click()
-    expect(page.locator(".task-pipeline-step.completed")).to_have_count(4)
+    expect(page.locator(".task-pipeline-step.completed")).to_have_count(6)
+    for title in ["文档解析", "知识切片", "QA文档生成", "向量化", "知识入库", "完成上架，可检索使用"]:
+        expect(page.get_by_text(title, exact=True)).to_be_visible()
     expect(page.get_by_text("完成上架，可检索使用")).to_be_visible()
-    expect(page.get_by_text("INDEXING")).to_have_count(0)
     expect(page.get_by_text("Refund SOP").first).to_be_visible()
 
     import_request = api.find_request("POST", "/api/v1/import-jobs")

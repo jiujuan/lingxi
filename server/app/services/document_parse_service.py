@@ -223,6 +223,12 @@ class DocumentParseService:
                     "或文档为空/仅有标题",
                     retryable=False,
                 )
+            job.status = ImportJobStatus.RUNNING.value
+            job.stage = "CHUNKING"
+            job.progress = max(job.progress, 30)
+            task_run.stage = "CHUNKING"
+            self.session.commit()
+
             chunk_count, artifact_key, replaced_object_keys = self._replace_parse_outputs(
                 job, document, parsed.markdown, parsed.blocks
             )
@@ -642,9 +648,10 @@ class DocumentParseService:
         document.last_error_code = code
         document.last_error_message = message
         job.status = ImportJobStatus.FAILED.value
-        job.stage = "PARSING"
+        job.stage = job.stage or "PARSING"
         job.error_code = code
         job.error_message = message
+        task_run.stage = job.stage
         task_run.status = "FAILED"
         task_run.error = {
             "code": code,

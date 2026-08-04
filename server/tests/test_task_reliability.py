@@ -403,7 +403,7 @@ def test_qa_worker_persists_retryable_failure_when_embedding_enqueue_fails(monke
         .order_by(TaskRun.created_at.desc(), TaskRun.id.desc())
     )
     assert persisted_job.status == ImportJobStatus.FAILED.value
-    assert persisted_job.stage == "QA_SPLITTING"
+    assert persisted_job.stage == "EMBEDDING"
     assert persisted_job.error_code == "EMBEDDING_ENQUEUE_FAILED"
     assert persisted_document.status == DocumentStatus.FAILED
     assert failed_run is not None

@@ -266,6 +266,9 @@ class EmbeddingService:
                 # Re-read after the lock. A parse/rechunk that committed while
                 # the provider ran must fail before either target group writes.
                 self._assert_bound_active_collection(document.id, run_config_hash)
+            job.stage = "INDEXING"
+            job.progress = max(job.progress, 90)
+            task_run.stage = "INDEXING"
             self._persist_targets(
                 qa_targets, qa_vectors, model_config, provider, expected_dimension, model_key
             )
@@ -707,9 +710,10 @@ class EmbeddingService:
         document.last_error_code = code
         document.last_error_message = message
         job.status = ImportJobStatus.FAILED.value
-        job.stage = "EMBEDDING"
+        job.stage = job.stage or "EMBEDDING"
         job.error_code = code
         job.error_message = message
+        task_run.stage = job.stage
         task_run.status = "FAILED"
         task_run.error = {
             "code": code,

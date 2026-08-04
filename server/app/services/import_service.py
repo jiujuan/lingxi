@@ -272,12 +272,24 @@ class ImportService:
         if document is None:
             raise not_found("导入任务关联文档不存在")
 
-        stage = job.stage if job.stage in {"PARSING", "QA_SPLITTING", "EMBEDDING"} else "PARSING"
-        progress_by_stage = {"PARSING": 20, "QA_SPLITTING": 45, "EMBEDDING": 75}
+        stage = (
+            job.stage
+            if job.stage in {"PARSING", "CHUNKING", "QA_SPLITTING", "EMBEDDING", "INDEXING"}
+            else "PARSING"
+        )
+        progress_by_stage = {
+            "PARSING": 20,
+            "CHUNKING": 30,
+            "QA_SPLITTING": 45,
+            "EMBEDDING": 75,
+            "INDEXING": 90,
+        }
         document_status_by_stage = {
             "PARSING": DocumentStatus.PARSING,
+            "CHUNKING": DocumentStatus.PARSING,
             "QA_SPLITTING": DocumentStatus.QA_SPLITTING,
             "EMBEDDING": DocumentStatus.EMBEDDING,
+            "INDEXING": DocumentStatus.EMBEDDING,
         }
 
         job.retry_count += 1
@@ -301,7 +313,7 @@ class ImportService:
 
         if stage == "QA_SPLITTING":
             self._enqueue_or_mark_failed(job, enqueue_qa_task)
-        elif stage == "EMBEDDING":
+        elif stage in {"EMBEDDING", "INDEXING"}:
             self._enqueue_or_mark_failed(job, enqueue_embedding_task)
         else:
             self._enqueue_or_mark_failed(job, enqueue_parse_task)

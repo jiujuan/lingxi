@@ -1,7 +1,9 @@
 const PIPELINE_STEPS = [
   { stage: 'PARSING', title: '文档解析', description: '提取原始文档的结构化内容。' },
-  { stage: 'QA_SPLITTING', title: '知识切分与 QA 问答生成', description: '切分知识片段并生成可追溯问答。' },
-  { stage: 'EMBEDDING', title: '向量化与知识入库', description: '生成向量并写入可检索知识库。' },
+  { stage: 'CHUNKING', title: '知识切片', description: '将解析内容整理为可复用的知识片段。' },
+  { stage: 'QA_SPLITTING', title: 'QA文档生成', description: '基于知识片段生成可追溯问答文档。' },
+  { stage: 'EMBEDDING', title: '向量化', description: '为知识片段和问答内容生成检索向量。' },
+  { stage: 'INDEXING', title: '知识入库', description: '将向量与知识内容写入可检索知识库。' },
   { stage: 'COMPLETED', title: '完成上架，可检索使用', description: '文档已完成处理并可用于问答检索。' },
 ] as const;
 

@@ -15,8 +15,10 @@ type Props = {
 const STATUS_LABELS: Record<string, string> = {
   UPLOADED: '等待解析',
   PARSING: '文档解析中',
-  QA_SPLITTING: '知识切分与 QA 生成中',
-  EMBEDDING: '向量入库中',
+  CHUNKING: '知识切片中',
+  QA_SPLITTING: 'QA 文档生成中',
+  EMBEDDING: '向量化中',
+  INDEXING: '知识入库中',
   READY: '已注入向量库',
   FAILED: '解析失败',
 };
