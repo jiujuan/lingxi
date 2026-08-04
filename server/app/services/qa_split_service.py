@@ -669,6 +669,7 @@ class QaSplitService:
             current_concurrency=initial,
             min_concurrency=minimum,
             max_concurrency=effective_max,
+            provider_type=provider.provider_type,
         )
 
     def split_import_job(self, job_id: str) -> ImportJob:
@@ -1019,6 +1020,8 @@ class QaSplitService:
         ]
 
         class PromptBatchAdapter:
+            provider_type = getattr(adapter, "provider_type", None)
+
             def generate_qa_batch(self, batch: QaBatch) -> str:
                 return adapter.generate_qa_pairs(
                     build_qa_split_prompt(document, list(batch.chunks))
@@ -1100,6 +1103,8 @@ class QaSplitService:
         """Generate one persisted batch while retaining leaf-call diagnostics."""
 
         class PromptBatchAdapter:
+            provider_type = getattr(adapter, "provider_type", None)
+
             def generate_qa_batch(self, prompt_batch: QaBatch) -> str:
                 return adapter.generate_qa_pairs(
                     build_qa_split_prompt(document, list(prompt_batch.chunks))
@@ -1180,6 +1185,27 @@ class QaSplitService:
             error_endpoint = None
             error_model_name = None
             timeout_phase = None
+        provider_type = (
+            getattr(error, "provider_type", None)
+            or getattr(provider, "provider_type", None)
+        )
+        metrics.observe_qa_split_batch(
+            provider_type=provider_type,
+            capability=ModelCapability.QA_SPLIT.value,
+            status="FAILED" if error is not None else "SUCCESS",
+            duration_ms=result.latency_ms,
+        )
+        if isinstance(error, ProviderError) and error.code in {
+            "PROVIDER_CONNECTION_TIMEOUT",
+            "PROVIDER_WRITE_TIMEOUT",
+            "PROVIDER_POOL_TIMEOUT",
+            "PROVIDER_INFERENCE_TIMEOUT",
+            "PROVIDER_OVERALL_TIMEOUT",
+        }:
+            metrics.observe_qa_split_timeout(
+                provider_type=provider_type,
+                timeout_phase=timeout_phase,
+            )
         raw_output = result.raw_output if isinstance(result.raw_output, str) else None
         input_char_count = sum(
             len(chunk.content or "") for chunk in batch.chunks

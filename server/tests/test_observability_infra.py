@@ -108,6 +108,74 @@ def test_chunking_and_retrieval_metrics_are_low_cardinality():
     assert "private-customer-question" not in text
 
 
+def test_qa_split_metrics_use_bounded_labels_and_reset():
+    from server.app.core import metrics
+
+    metrics.reset()
+    metrics.observe_qa_split_batch(
+        provider_type="document-tenant-123",
+        capability="document-capability",
+        status="unexpected-status",
+        duration_ms=321,
+    )
+    metrics.observe_qa_split_timeout(
+        provider_type="document-tenant-123",
+        timeout_phase="document-phase",
+    )
+    metrics.observe_qa_split_retry(
+        provider_type="document-tenant-123",
+        error_code="document-error-123",
+    )
+    metrics.observe_qa_split_batch_split(
+        provider_type="document-tenant-123",
+        reason="document-reason-123",
+    )
+    metrics.observe_qa_split_concurrency(
+        provider_type="document-tenant-123",
+        concurrency=2,
+    )
+    metrics.observe_embedding_batch_timeout(
+        provider_type="document-tenant-123",
+        timeout_phase="document-phase",
+    )
+    metrics.observe_qa_provenance_validation_failure(
+        "QA_PROVENANCE_NO_SPLITTABLE_CHUNKS"
+    )
+
+    text = metrics.render_prometheus()
+
+    for metric in (
+        "lingxi_qa_split_batch_total",
+        "lingxi_qa_split_batch_duration_ms",
+        "lingxi_qa_split_timeout_total",
+        "lingxi_qa_split_retry_total",
+        "lingxi_qa_split_batch_split_total",
+        "lingxi_qa_split_concurrency",
+        "lingxi_qa_split_provenance_failure_total",
+        "lingxi_embedding_batch_timeout_total",
+    ):
+        assert metric in text
+    assert 'provider_type="OTHER"' in text
+    assert 'capability="OTHER"' in text
+    assert 'status="OTHER"' in text
+    assert 'timeout_phase="OTHER"' in text
+    assert 'error_code="OTHER"' in text
+    assert 'reason="OTHER"' in text
+    assert (
+        'lingxi_qa_split_provenance_failure_total'
+        '{reason="QA_PROVENANCE_NO_SPLITTABLE_CHUNKS"} 1'
+        in text
+    )
+    assert "document-tenant-123" not in text
+    assert "document-error-123" not in text
+    assert "document-phase" not in text
+
+    metrics.reset()
+    reset_text = metrics.render_prometheus()
+    assert "lingxi_qa_split_batch_total{" not in reset_text
+    assert "lingxi_embedding_batch_timeout_total{" not in reset_text
+
+
 def test_json_log_formatter_includes_request_id():
     import json
     import logging

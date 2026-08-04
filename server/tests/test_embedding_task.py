@@ -147,6 +147,53 @@ def test_embedding_list_ignores_pending_qa_split_checkpoint_results():
     assert EmbeddingService(session)._list_qa_pairs(tenant_id, document_id) == []
 
 
+def test_embedding_timeout_metric_records_phase_without_changing_failure_semantics(
+    monkeypatch,
+):
+    import pytest
+    import types
+
+    from server.app.core import metrics
+    from server.app.integrations.model_providers.base import ProviderError
+    from server.app.services import embedding_service
+    from server.app.services.embedding_service import (
+        EmbeddingService,
+        EmbeddingServiceError,
+    )
+
+    metrics.reset()
+    monkeypatch.setattr(
+        embedding_service,
+        "settings",
+        types.SimpleNamespace(embedding_batch_max_retries=0),
+    )
+
+    class Adapter:
+        provider_type = "OLLAMA"
+        calls = 0
+
+        def embed_texts(self, _texts):
+            type(self).calls += 1
+            raise ProviderError(
+                "PROVIDER_INFERENCE_TIMEOUT",
+                "模型响应读取超时",
+                retryable=True,
+                provider_type=self.provider_type,
+                timeout_phase="read",
+            )
+
+    with pytest.raises(EmbeddingServiceError) as exc_info:
+        EmbeddingService(None)._embed_batch_with_retry(Adapter(), ["text"], 4)
+
+    assert exc_info.value.code == "PROVIDER_INFERENCE_TIMEOUT"
+    assert Adapter.calls == 1
+    assert (
+        'lingxi_embedding_batch_timeout_total'
+        '{provider_type="OLLAMA",timeout_phase="read"} 1'
+        in metrics.render_prometheus()
+    )
+
+
 def test_jieba_tokenizer_generates_search_text():
     from server.app.integrations.tokenizers.jieba_tokenizer import JiebaTokenizer
 

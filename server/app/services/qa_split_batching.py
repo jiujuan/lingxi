@@ -12,6 +12,7 @@ import time
 from typing import Sequence
 
 from server.app.integrations.model_providers.base import ProviderError
+from server.app.core import metrics
 from server.app.models.document import Document
 from server.app.models.qa_pair import DocumentChunk
 from server.app.services.chunking import TokenCounter, TokenLimitError, TokenizerUnavailableError
@@ -442,6 +443,10 @@ def execute_qa_batch_with_retry(
             total_latency_ms += max(1, int((time.perf_counter() - started_at) * 1000))
             code = _error_code(exc)
             if _is_retryable_qa_error(exc, code) and attempt < retries:
+                metrics.observe_qa_split_retry(
+                    provider_type=getattr(adapter, "provider_type", None),
+                    error_code=code,
+                )
                 time.sleep(_retry_delay_seconds(exc, attempt))
                 attempt += 1
                 continue
@@ -458,6 +463,10 @@ def execute_qa_batch_with_retry(
                 and len(batch.chunks) > 1
                 and batch.split_depth < split_depth_limit
             ):
+                metrics.observe_qa_split_batch_split(
+                    provider_type=getattr(adapter, "provider_type", None),
+                    reason=_split_reason(code),
+                )
                 left, right = split_qa_batch(batch)
                 return QaBatchResult(
                     batch=batch,
@@ -508,6 +517,14 @@ def _generate_qa_batch(adapter, batch: QaBatch) -> str:
 def _error_code(error: Exception) -> str | None:
     code = getattr(error, "code", None)
     return code if isinstance(code, str) else None
+
+
+def _split_reason(code: str | None) -> str:
+    if code == "PROVIDER_OUTPUT_TRUNCATED":
+        return "output_truncated"
+    if code in _SPLITTABLE_QA_CODES:
+        return "timeout"
+    return "other"
 
 
 def _is_retryable_qa_error(error: Exception, code: str | None) -> bool:

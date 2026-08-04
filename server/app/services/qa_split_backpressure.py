@@ -6,6 +6,7 @@ import threading
 import time
 from typing import TypeVar
 
+from server.app.core import metrics
 from server.app.services._batching import run_ordered
 
 T = TypeVar("T")
@@ -27,6 +28,7 @@ class BackpressureState:
     min_concurrency: int
     max_concurrency: int
     consecutive_successes: int = 0
+    provider_type: str | None = None
 
     def __post_init__(self) -> None:
         self.min_concurrency = max(1, int(self.min_concurrency))
@@ -34,6 +36,13 @@ class BackpressureState:
         self.current_concurrency = min(
             self.max_concurrency,
             max(self.min_concurrency, int(self.current_concurrency)),
+        )
+        self._observe_concurrency()
+
+    def _observe_concurrency(self) -> None:
+        metrics.observe_qa_split_concurrency(
+            provider_type=self.provider_type,
+            concurrency=self.current_concurrency,
         )
 
     def on_retryable_failure(self, code: str) -> int:
@@ -44,6 +53,7 @@ class BackpressureState:
             self.current_concurrency // 2,
         )
         self.consecutive_successes = 0
+        self._observe_concurrency()
         return self.current_concurrency
 
     def on_success(self) -> int:
@@ -54,6 +64,7 @@ class BackpressureState:
                 self.current_concurrency + 1,
             )
             self.consecutive_successes = 0
+            self._observe_concurrency()
         return self.current_concurrency
 
 
@@ -68,6 +79,7 @@ def get_backpressure_state(
     current_concurrency: int,
     min_concurrency: int,
     max_concurrency: int,
+    provider_type: str | None = None,
 ) -> BackpressureState:
     """Return a state isolated to one provider/model pair."""
 
@@ -79,9 +91,12 @@ def get_backpressure_state(
                 current_concurrency=current_concurrency,
                 min_concurrency=min_concurrency,
                 max_concurrency=max_concurrency,
+                provider_type=provider_type,
             )
             _states[key] = state
         else:
+            if provider_type is not None:
+                state.provider_type = provider_type
             state.min_concurrency = max(1, int(min_concurrency))
             state.max_concurrency = max(
                 state.min_concurrency, int(max_concurrency)
@@ -90,6 +105,7 @@ def get_backpressure_state(
                 state.max_concurrency,
                 max(state.min_concurrency, state.current_concurrency),
             )
+            state._observe_concurrency()
         return state
 
 

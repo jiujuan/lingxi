@@ -1368,6 +1368,99 @@ def test_qa_backpressure_defaults_ollama_to_one_and_caps_provider_override():
     assert cloud_state.max_concurrency == 4
 
 
+def test_qa_split_metrics_record_timeout_retry_split_and_batch_outcomes(monkeypatch):
+    import types
+
+    from server.app.core import metrics
+    from server.app.integrations.model_providers.base import ProviderError
+    from server.app.models.model_config import ModelProvider
+    from server.app.services import qa_split_backpressure
+    from server.app.services.qa_split_service import QaSplitService
+
+    monkeypatch.setattr(qa_split_backpressure.time, "sleep", lambda _seconds: None)
+    metrics.reset()
+    session, identity = build_qa_session()
+    _job_id, _document_id, chunks = create_qa_ready_job(session, identity)
+    model = add_default_qa_model(session, identity["tenant"].id, {"items": []})
+    provider = session.get(ModelProvider, model.provider_id)
+    assert provider is not None
+
+    class Adapter:
+        provider_type = "OPENAI_COMPATIBLE"
+        calls = 0
+
+        def generate_qa_pairs(self, _prompt):
+            type(self).calls += 1
+            if type(self).calls <= 2:
+                raise ProviderError(
+                    "PROVIDER_INFERENCE_TIMEOUT",
+                    "模型响应读取超时",
+                    retryable=True,
+                    provider_type=self.provider_type,
+                    timeout_phase="read",
+                )
+            chunk_index = type(self).calls - 3
+            return json.dumps(
+                {
+                    "items": [
+                        {
+                            "question": f"问题 {chunk_index}",
+                            "answer": f"答案 {chunk_index}",
+                            "quote": chunks[chunk_index].content,
+                            "pageNo": chunks[chunk_index].page_no,
+                            "chunkIndex": chunk_index,
+                        }
+                    ],
+                    "coveredChunkIndexes": [chunk_index],
+                    "skippedChunks": [],
+                }
+            )
+
+    service = QaSplitService(
+        session,
+        max_retries=1,
+        max_split_depth=1,
+        max_concurrency=1,
+    )
+    items = service._generate_qa_items(
+        Adapter(),
+        types.SimpleNamespace(title="Refund SOP"),
+        [chunks],
+        model_config=model,
+        provider=provider,
+        run_id="run-id-not-a-metric-label",
+    )
+
+    assert [item.chunk_index for item in items] == [0, 1]
+    rendered = metrics.render_prometheus()
+    assert (
+        'lingxi_qa_split_batch_total'
+        '{capability="QA_SPLIT",provider_type="OPENAI_COMPATIBLE",status="failed"} 1'
+        in rendered
+    )
+    assert (
+        'lingxi_qa_split_batch_total'
+        '{capability="QA_SPLIT",provider_type="OPENAI_COMPATIBLE",status="success"} 2'
+        in rendered
+    )
+    assert (
+        'lingxi_qa_split_retry_total'
+        '{error_code="PROVIDER_INFERENCE_TIMEOUT",provider_type="OPENAI_COMPATIBLE"} 1'
+        in rendered
+    )
+    assert (
+        'lingxi_qa_split_timeout_total'
+        '{provider_type="OPENAI_COMPATIBLE",timeout_phase="read"} 1'
+        in rendered
+    )
+    assert (
+        'lingxi_qa_split_batch_split_total'
+        '{provider_type="OPENAI_COMPATIBLE",reason="timeout"} 1'
+        in rendered
+    )
+    assert "run-id-not-a-metric-label" not in rendered
+
+
 def test_qa_split_resume_skips_successful_checkpoint_batches():
     from server.app.integrations.model_providers.base import ProviderError
     from server.app.models.qa_pair import QaPair

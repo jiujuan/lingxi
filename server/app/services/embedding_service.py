@@ -651,6 +651,20 @@ class EmbeddingService:
                 self._validate_vectors(vectors, expected_dimension, len(batch))
                 return vectors
             except ProviderError as exc:
+                if exc.code in {
+                    "PROVIDER_CONNECTION_TIMEOUT",
+                    "PROVIDER_WRITE_TIMEOUT",
+                    "PROVIDER_POOL_TIMEOUT",
+                    "PROVIDER_INFERENCE_TIMEOUT",
+                    "PROVIDER_OVERALL_TIMEOUT",
+                }:
+                    metrics.observe_embedding_batch_timeout(
+                        provider_type=(
+                            exc.provider_type
+                            or getattr(adapter, "provider_type", None)
+                        ),
+                        timeout_phase=exc.timeout_phase,
+                    )
                 if exc.retryable and attempt < max_retries:
                     attempt += 1
                     time.sleep(min(5.0, 0.5 * (2**attempt)))

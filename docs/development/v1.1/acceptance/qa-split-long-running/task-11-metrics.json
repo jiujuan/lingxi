@@ -1,0 +1,41 @@
+{
+  "task": "Task 11 - Prometheus metrics and tuning signals",
+  "status": "passed",
+  "verificationDate": "2026-08-04",
+  "assertions": [
+    "QA batch, duration, timeout, retry, split, concurrency, provenance failure, and embedding timeout metrics are rendered.",
+    "QA batch metrics record provider type, capability, and status while duration metrics preserve only provider type and capability.",
+    "Timeout phase, retry error code, split reason, provider type, capability, and status labels are constrained to finite allowlists and unknown values render as OTHER.",
+    "Document, tenant, run, batch, model, prompt, and other high-cardinality identifiers are not used as metric labels.",
+    "Existing provenance validation metrics remain available alongside the QA split provenance metric.",
+    "metrics.reset() clears the newly added QA split and embedding timeout series."
+  ],
+  "verification": {
+    "tests": {
+      "command": "pytest server/tests/test_observability_infra.py server/tests/test_qa_split_task.py server/tests/test_embedding_task.py -q",
+      "result": "85 passed, 1 skipped"
+    },
+    "ruff": {
+      "command": "ruff check server/app/core/metrics.py server/app/services/qa_split_batching.py server/app/services/qa_split_backpressure.py server/app/services/qa_split_service.py server/app/services/embedding_service.py server/tests/test_observability_infra.py server/tests/test_qa_split_task.py server/tests/test_embedding_task.py",
+      "result": "All checks passed"
+    },
+    "diffCheck": {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  },
+  "metricNames": [
+    "lingxi_qa_split_batch_total",
+    "lingxi_qa_split_batch_duration_ms",
+    "lingxi_qa_split_timeout_total",
+    "lingxi_qa_split_retry_total",
+    "lingxi_qa_split_batch_split_total",
+    "lingxi_qa_split_concurrency",
+    "lingxi_qa_split_provenance_failure_total",
+    "lingxi_embedding_batch_timeout_total"
+  ],
+  "safety": [
+    "Prometheus labels do not contain document IDs, tenant IDs, model names, run IDs, or batch IDs.",
+    "The evidence contains no API key, prompt text, model output, or PDF source text."
+  ]
+}
