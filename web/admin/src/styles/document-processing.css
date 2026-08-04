@@ -1,0 +1,358 @@
+
+/* Document parsing workbench: scoped styles avoid changing document management pages. */
+.document-processing-page {
+  gap: 18px;
+}
+
+.document-processing-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+}
+
+.document-processing-header h2,
+.document-processing-header p,
+.document-processing-header h3,
+.document-processing-list h3 {
+  margin: 0;
+}
+
+.document-processing-header > div:first-child {
+  display: grid;
+  gap: 7px;
+  max-width: 680px;
+}
+
+.document-processing-metrics {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(150px, 1fr));
+}
+
+.document-processing-metric {
+  background: #ffffff;
+  border: 1px solid #dfe7f2;
+  border-radius: 10px;
+  display: grid;
+  gap: 3px;
+  min-width: 154px;
+  padding: 14px 16px;
+}
+
+.document-processing-metric span,
+.document-processing-metric small {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.document-processing-metric strong {
+  color: #172033;
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.document-processing-summary-error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.document-processing-shortcuts {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.document-processing-workspace {
+  align-items: start;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(320px, 0.88fr) minmax(420px, 1.12fr);
+}
+
+.document-processing-uploader,
+.document-processing-pipeline,
+.document-processing-list {
+  border-color: #dfe7f2;
+  border-radius: 12px;
+}
+
+@media (max-width: 1080px) and (min-width: 861px) {
+  .document-processing-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .document-processing-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .document-processing-workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+.document-processing-uploader,
+.document-processing-pipeline {
+  align-content: start;
+}
+
+.document-processing-uploader h3,
+.document-processing-pipeline h3 {
+  margin: 0;
+}
+
+.document-processing-uploader > div:first-child,
+.document-processing-pipeline > div:first-child {
+  display: grid;
+  gap: 5px;
+}
+
+.document-processing-uploader .drop-zone {
+  align-content: center;
+  background: #f8fbff;
+  border-color: #9db9e8;
+  display: grid;
+  gap: 8px;
+  min-height: 136px;
+}
+
+.document-processing-uploader .drop-zone strong {
+  color: #1d4ed8;
+}
+
+.document-processing-uploader .drop-zone span {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.document-processing-uploader .drop-zone input {
+  max-width: 100%;
+}
+
+.document-processing-strategy {
+  background: #f8fafc;
+  border: 1px solid #e6edf6;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.document-processing-strategy span {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.document-processing-scope-fields {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.document-processing-submit {
+  background: #2563eb;
+  color: #ffffff;
+  font-weight: 700;
+  min-height: 42px;
+}
+
+.document-processing-submit:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.task-pipeline {
+  align-content: start;
+  display: grid;
+  gap: 10px;
+}
+
+.task-pipeline-summary {
+  background: #f8fafc;
+  border: 1px solid #e6edf6;
+  border-radius: 8px;
+  color: #526071;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.task-pipeline ol {
+  display: grid;
+  gap: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.task-pipeline-step {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 28px minmax(0, 1fr);
+  min-height: 64px;
+  position: relative;
+}
+
+.task-pipeline-step:not(:last-child)::after {
+  background: #dbe3ee;
+  content: '';
+  height: calc(100% - 28px);
+  left: 13px;
+  position: absolute;
+  top: 28px;
+  width: 2px;
+}
+
+.task-pipeline-marker {
+  align-items: center;
+  background: #e7edf5;
+  border: 1px solid #d3deea;
+  border-radius: 999px;
+  color: #64748b;
+  display: flex;
+  font-size: 13px;
+  font-weight: 700;
+  height: 28px;
+  justify-content: center;
+  position: relative;
+  width: 28px;
+  z-index: 1;
+}
+
+.task-pipeline-step > div {
+  display: grid;
+  gap: 3px;
+  padding-bottom: 10px;
+}
+
+.task-pipeline-step > div > span {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.task-pipeline-step small {
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.task-pipeline-step.active .task-pipeline-marker {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.task-pipeline-step.completed .task-pipeline-marker {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #15803d;
+}
+
+.task-pipeline-step.failed .task-pipeline-marker {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #b42318;
+}
+
+.task-pipeline-step.completed:not(:last-child)::after {
+  background: #86efac;
+}
+
+.task-pipeline-progress {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.task-pipeline-progress > span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.document-processing-list {
+  gap: 16px;
+}
+
+.document-processing-list-header,
+.document-processing-list-actions,
+.document-processing-pagination,
+.document-processing-pagination > div {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.document-processing-list-header,
+.document-processing-pagination {
+  justify-content: space-between;
+}
+
+.document-processing-list-header > div:first-child {
+  display: grid;
+  gap: 5px;
+}
+
+.document-processing-list-actions {
+  left: -30px;
+  position: relative;
+}
+
+.document-processing-list-actions input {
+  height: 42px;
+  min-width: 220px;
+}
+
+.document-processing-list-actions button {
+  box-sizing: border-box;
+  height: 42px;
+  width: 71px;
+}
+
+.document-processing-table {
+  border: 1px solid #e6edf6;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.document-processing-table-head,
+.document-processing-table-row {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(220px, 1.5fr) minmax(150px, 1fr) 110px 150px 94px;
+  min-width: 760px;
+  padding: 12px 14px;
+}
+
+.document-processing-table-head {
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.document-processing-table-row {
+  align-items: center;
+  border-top: 1px solid #edf1f7;
+  font-size: 13px;
+}
+
+.document-processing-document {
+  display: grid;
+  gap: 4px;
+}
+
+.document-processing-document span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.document-processing-list-state {
+  color: #64748b;
+  margin: 0;
+  padding: 18px;
+}
+
+.document-processing-pagination {
+  color: #64748b;
+  font-size: 13px;
+}

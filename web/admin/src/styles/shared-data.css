@@ -1,0 +1,39 @@
+
+.compact-detail {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.api-key-list {
+  display: grid;
+  gap: 10px;
+}
+
+.api-key-row {
+  grid-template-columns: minmax(220px, 1fr) 120px 100px auto;
+}
+
+.api-key-row p {
+  margin: 4px 0 0;
+}
+
+.api-log-row {
+  grid-template-columns: 72px minmax(180px, 1fr) 140px 80px 80px minmax(120px, auto);
+}
+
+.api-key-secret {
+  display: grid;
+  gap: 10px;
+}
+
+.api-key-secret code {
+  background: #f8fafc;
+  border: 1px solid #c7dcff;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+  padding: 12px;
+}
+
+.form-grid {
+  display: grid;
+  gap: 12px;
+}

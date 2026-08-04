@@ -1,0 +1,42 @@
+
+@media (max-width: 1280px) {
+  .role-management-page .filter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .role-management-list .management-list-head {
+    display: none;
+  }
+
+  .role-management-list .management-list-row {
+    align-items: start;
+    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-width: 0;
+    padding: 14px 16px;
+  }
+
+  .role-management-list .management-list-primary {
+    grid-column: 1;
+  }
+
+  .role-management-list .management-list-cell {
+    grid-column: 1 / -1;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .role-management-list .management-list-actions {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    justify-content: flex-start;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 680px) {
+  .role-management-list .management-list-row {
+    gap: 6px;
+    padding: 12px;
+  }
+}

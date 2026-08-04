@@ -1,0 +1,393 @@
+
+/* 文档管理：与产品稿一致的紧凑列表视图 */
+.document-management-header,
+.document-management-detail-header {
+  align-items: center;
+  display: flex;
+  gap: 20px;
+  justify-content: space-between;
+}
+
+.document-management-header h2,
+.document-management-detail-header h2 {
+  color: #101828;
+  font-size: 24px;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.document-management-header .eyebrow,
+.document-management-detail-header .eyebrow {
+  margin: 0 0 4px;
+}
+
+.document-management-header .muted,
+.document-management-detail-header .muted {
+  margin: 6px 0 0;
+}
+
+.document-management-list {
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.document-management-toolbar {
+  align-items: center;
+  border-bottom: 1px solid #edf1f7;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  padding: 0 20px;
+}
+
+.document-management-tabs {
+  align-items: stretch;
+  display: flex;
+  gap: 26px;
+  min-width: 0;
+}
+
+.document-management-tab {
+  background: transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: #667085;
+  font-size: 14px;
+  padding: 17px 2px 14px;
+  white-space: nowrap;
+}
+
+.document-management-tab:hover,
+.document-management-tab.active {
+  background: transparent;
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.document-management-tab.active {
+  border-bottom-color: #2563eb;
+  font-weight: 600;
+}
+
+.document-management-filters {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.document-management-search,
+.document-management-space-select {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #e4e9f2;
+  border-radius: 10px;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 12px;
+}
+
+.document-management-search {
+  width: 226px;
+}
+
+.document-management-search svg {
+  fill: none;
+  flex: 0 0 16px;
+  height: 16px;
+  stroke: #98a2b3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  width: 16px;
+}
+
+.document-management-search input,
+.document-management-space-select select {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  min-width: 0;
+  padding: 9px 0;
+}
+
+.document-management-space-select {
+  width: 164px;
+}
+
+.document-management-refresh {
+  background: #eef4ff;
+  color: #2563eb;
+  padding: 8px 12px;
+}
+
+.document-management-error,
+.document-management-loading {
+  margin: 14px 20px 0;
+}
+
+.document-management-table {
+  overflow-x: auto;
+}
+
+.document-management-table .management-list-head,
+.document-management-table .management-list-row {
+  grid-template-columns:
+    minmax(250px, 1.55fr) minmax(140px, 0.9fr) minmax(150px, 1fr) minmax(160px, 1fr)
+    76px 92px minmax(230px, auto);
+  min-width: 1100px;
+}
+
+.document-management-table .management-list-head {
+  padding-top: 0;
+}
+
+.document-management-row {
+  min-height: 76px;
+}
+
+.document-management-primary {
+  align-items: center;
+  background: transparent;
+  color: inherit;
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.document-management-primary:hover {
+  background: transparent;
+}
+
+.document-file-icon {
+  align-items: center;
+  border-radius: 10px;
+  display: inline-flex;
+  flex: 0 0 40px;
+  height: 40px;
+  justify-content: center;
+  width: 40px;
+}
+
+.document-file-icon svg {
+  fill: none;
+  height: 20px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+  width: 20px;
+}
+
+.document-file-icon-pdf {
+  background: #fff0f1;
+  color: #e45560;
+}
+
+.document-file-icon-word {
+  background: #edf3ff;
+  color: #2d6df6;
+}
+
+.document-file-icon-sheet {
+  background: #e8f8f1;
+  color: #10a77a;
+}
+
+.document-management-tags {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.document-management-tags span {
+  background: #f2f4f7;
+  border-radius: 6px;
+  color: #667085;
+  font-size: 12px;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.document-management-progress {
+  align-items: center;
+  color: #667085;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.document-management-progress-bar {
+  background: #eef0f4;
+  border-radius: 999px;
+  display: block;
+  height: 6px;
+  min-width: 90px;
+  overflow: hidden;
+  width: 120px;
+}
+
+.document-management-progress-bar span {
+  background: #2d6df6;
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  transition: width 180ms ease;
+}
+
+.document-management-version {
+  color: #55657d;
+}
+
+.document-management-table .status-tag {
+  justify-self: start;
+  width: fit-content;
+}
+
+.document-management-actions {
+  gap: 2px;
+  justify-content: flex-start;
+}
+
+.document-management-actions .management-list-action {
+  color: #3475e6;
+  padding: 6px 8px;
+}
+
+.document-management-actions .management-list-action:hover:not(:disabled),
+.document-management-actions .management-list-action.danger:hover:not(:disabled) {
+  background: #eaf2ff;
+  color: #2563eb;
+}
+
+.document-management-pagination {
+  border-top: 1px solid #edf1f7;
+  padding: 14px 20px;
+}
+
+.document-management-detail-page .detail-panel {
+  min-height: 420px;
+}
+
+.document-management-detail-header .button-row {
+  align-items: center;
+}
+
+@media (max-width: 1100px) {
+  .document-management-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+  }
+
+  .document-management-tabs {
+    gap: 14px;
+    overflow-x: auto;
+    padding: 0 16px;
+  }
+
+  .document-management-filters {
+    border-top: 1px solid #edf1f7;
+    padding: 12px 16px;
+  }
+
+  .document-management-search {
+    flex: 1;
+    width: auto;
+  }
+
+  .document-management-space-select {
+    width: 168px;
+  }
+}
+
+@media (max-width: 680px) {
+  .document-management-header,
+  .document-management-detail-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .document-management-header .secondary-link,
+  .document-management-detail-header .button-row {
+    width: 100%;
+  }
+
+  .document-management-detail-header .button-row > * {
+    flex: 1;
+    text-align: center;
+  }
+
+  .document-management-filters {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .document-management-space-select,
+  .document-management-refresh {
+    width: 100%;
+  }
+
+  .document-management-table .management-list-head {
+    display: none;
+  }
+
+  .document-management-table .management-list-row {
+    align-items: start;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-width: 0;
+    padding: 14px 16px;
+  }
+
+  .document-management-row > .management-list-cell,
+  .document-management-row > .document-management-tags,
+  .document-management-row > .document-management-progress,
+  .document-management-row > .document-management-version,
+  .document-management-row > .status-tag {
+    grid-column: 1 / -1;
+  }
+
+  .document-management-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .document-management-progress-bar {
+    flex: 1;
+  }
+
+  .document-management-pagination {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+}
+
+.role-management-list .management-list-head,
+.role-management-list .management-list-row {
+  grid-template-columns:
+    minmax(150px, 1.1fr) minmax(135px, 0.9fr) minmax(90px, 0.65fr)
+    minmax(80px, 0.55fr) minmax(72px, 0.5fr) minmax(150px, 0.85fr) minmax(200px, auto);
+}
+
+.role-management-list .management-list-primary .status-tag {
+  justify-self: start;
+  width: fit-content;
+}
+
+.role-form-todo {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  color: #1d4ed8;
+  font-size: 14px;
+  padding: 10px 12px;
+}

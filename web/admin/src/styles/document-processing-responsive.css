@@ -1,0 +1,60 @@
+
+@media (max-width: 860px) {
+  .document-processing-header,
+  .document-processing-list-header,
+  .document-processing-pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .document-processing-metrics,
+  .document-processing-workspace,
+  .document-processing-scope-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .document-processing-shortcuts,
+  .document-processing-pagination > div {
+    align-items: stretch;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .document-processing-list-actions {
+    align-items: center;
+    flex-wrap: nowrap;
+    width: 100%;
+  }
+
+  .document-processing-list-actions input {
+    flex: 1 1 auto;
+    height: 42px;
+    min-width: 0;
+    width: auto;
+  }
+
+  .document-processing-list-actions button {
+    flex: 0 0 auto;
+    height: 42px;
+  }
+
+  .document-processing-table-head {
+    display: none;
+  }
+
+  .document-processing-table-row {
+    align-items: start;
+    gap: 7px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-width: 0;
+  }
+
+  .document-processing-table-row > span {
+    grid-column: 1 / -1;
+  }
+
+  .document-processing-table-row > span:last-child {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
