@@ -2,7 +2,11 @@ from hashlib import sha256
 
 from sqlalchemy import select
 
-from server.tests.test_qa_split_task import build_qa_session, create_qa_ready_job
+from server.tests.test_qa_split_task import (
+    add_default_qa_model,
+    build_qa_session,
+    create_qa_ready_job,
+)
 
 
 def add_default_embedding_model(
@@ -89,6 +93,58 @@ def prepare_embedding_job(session, identity):
     job.progress = 65
     session.commit()
     return job_id, document_id, chunks
+
+
+def test_embedding_list_ignores_pending_qa_split_checkpoint_results():
+    from server.app.models.model_config import ModelProvider
+    from server.app.models.qa_split_run import QaSplitBatch, QaSplitRun
+    from server.app.services.embedding_service import EmbeddingService
+
+    session, identity = build_qa_session()
+    tenant_id = identity["tenant"].id
+    job_id, document_id, chunks = prepare_embedding_job(session, identity)
+    model = add_default_qa_model(session, tenant_id, {"items": []})
+    provider = session.get(ModelProvider, model.provider_id)
+    assert provider is not None
+    checkpoint = QaSplitRun(
+        tenant_id=tenant_id,
+        job_id=job_id,
+        document_id=document_id,
+        model_config_id=model.id,
+        provider_id=provider.id,
+        model_name=model.model_name,
+        prompt_version="qa-split-v1",
+        chunk_generation_hash="checkpoint-only",
+        status="RUNNING",
+        batch_count=1,
+    )
+    session.add(checkpoint)
+    session.flush()
+    session.add(
+        QaSplitBatch(
+            run_id=checkpoint.id,
+            batch_index="0",
+            chunk_indexes=[chunk.chunk_index for chunk in chunks],
+            input_hash="a" * 64,
+            estimated_input_tokens=12,
+            reserved_output_tokens=4,
+            status="SUCCESS",
+            result_payload={
+                "items": [
+                    {
+                        "question": "退款需要谁审批？",
+                        "answer": "退款需要主管审批。",
+                        "quote": "退款需要主管审批。",
+                        "pageNo": 1,
+                        "chunkIndex": 0,
+                    }
+                ]
+            },
+        )
+    )
+    session.commit()
+
+    assert EmbeddingService(session)._list_qa_pairs(tenant_id, document_id) == []
 
 
 def test_jieba_tokenizer_generates_search_text():

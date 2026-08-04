@@ -1356,3 +1356,150 @@ def test_qa_backpressure_defaults_ollama_to_one_and_caps_provider_override():
     assert ollama_state.current_concurrency == 1
     assert cloud_state.current_concurrency == 4
     assert cloud_state.max_concurrency == 4
+
+
+def test_qa_split_resume_skips_successful_checkpoint_batches():
+    from server.app.integrations.model_providers.base import ProviderError
+    from server.app.models.qa_pair import QaPair
+    from server.app.models.qa_split_run import QaSplitBatch, QaSplitRun
+    from server.app.services.qa_split_service import QaSplitService
+
+    session, identity = build_qa_session()
+    job_id, document_id, _chunks = create_qa_ready_job(session, identity)
+    add_default_qa_model(session, identity["tenant"].id, {"items": []})
+
+    class FirstAttemptAdapter:
+        calls: list[str] = []
+
+        def generate_qa_pairs(self, prompt: str) -> str:
+            type(self).calls.append(prompt)
+            if "chunkIndex=0" in prompt:
+                return json.dumps(
+                    _strict_qa_payload(
+                        items=[
+                            {
+                                "question": "退款需要谁审批？",
+                                "answer": "退款需要主管审批。",
+                                "quote": "退款需要主管审批。",
+                                "pageNo": 1,
+                                "chunkIndex": 0,
+                            }
+                        ],
+                        covered=[0],
+                        skipped=[],
+                    )
+                )
+            raise ProviderError(
+                "PROVIDER_CONNECTION_ERROR",
+                "模型供应商暂时不可用",
+                retryable=True,
+            )
+
+    first = QaSplitService(
+        session,
+        provider_factory=lambda *_args, **_kwargs: FirstAttemptAdapter(),
+        max_batch_chars=15,
+        max_retries=0,
+        max_split_depth=0,
+    ).split_import_job(job_id)
+
+    run = session.scalar(select(QaSplitRun).where(QaSplitRun.job_id == job_id))
+    assert first.status == "FAILED"
+    assert run is not None
+    assert [
+        batch.status
+        for batch in session.scalars(
+            select(QaSplitBatch)
+            .where(QaSplitBatch.run_id == run.id)
+            .order_by(QaSplitBatch.batch_index)
+        )
+    ] == ["SUCCESS", "FAILED"]
+    assert session.scalars(select(QaPair).where(QaPair.document_id == document_id)).all() == []
+
+    class ResumeAdapter:
+        calls: list[str] = []
+
+        def generate_qa_pairs(self, prompt: str) -> str:
+            type(self).calls.append(prompt)
+            assert "chunkIndex=0" not in prompt
+            return json.dumps(
+                _strict_qa_payload(
+                    items=[
+                        {
+                            "question": "已开票订单退款前要做什么？",
+                            "answer": "需要先红冲发票。",
+                            "quote": "已开票订单需先红冲发票。",
+                            "pageNo": 2,
+                            "chunkIndex": 1,
+                        }
+                    ],
+                    covered=[1],
+                    skipped=[],
+                )
+            )
+
+    completed = QaSplitService(
+        session,
+        provider_factory=lambda *_args, **_kwargs: ResumeAdapter(),
+        max_batch_chars=15,
+        max_retries=0,
+        max_split_depth=0,
+    ).split_import_job(job_id)
+
+    session.expire_all()
+    run = session.get(QaSplitRun, run.id)
+    pairs = session.scalars(
+        select(QaPair).where(QaPair.document_id == document_id).order_by(QaPair.pair_index)
+    ).all()
+    assert completed.stage == "EMBEDDING"
+    assert run is not None and run.status == "COMPLETED"
+    assert len(ResumeAdapter.calls) == 1
+    assert len(pairs) == 2
+
+
+def test_checkpoint_failure_keeps_existing_active_pairs_until_full_publish():
+    from server.app.integrations.model_providers.base import ProviderError
+    from server.app.models.qa_pair import QaPair
+    from server.app.services.qa_split_service import QaSplitService
+
+    session, identity = build_qa_session()
+    job_id, document_id, chunks = create_qa_ready_job(session, identity)
+    add_default_qa_model(session, identity["tenant"].id, {"items": []})
+    old_pair = QaPair(
+        tenant_id=identity["tenant"].id,
+        document_id=document_id,
+        chunk_id=chunks[0].id,
+        job_id=job_id,
+        pair_index=0,
+        question="旧问题",
+        answer="旧答案",
+        quote="退款需要主管审批。",
+        page_no=1,
+        search_text="",
+        status="ACTIVE",
+    )
+    session.add(old_pair)
+    session.commit()
+
+    class FailingAdapter:
+        def generate_qa_pairs(self, prompt: str) -> str:
+            raise ProviderError(
+                "PROVIDER_CONNECTION_ERROR",
+                "模型供应商暂时不可用",
+                retryable=True,
+            )
+
+    failed = QaSplitService(
+        session,
+        provider_factory=lambda *_args, **_kwargs: FailingAdapter(),
+        max_retries=0,
+        max_split_depth=0,
+    ).split_import_job(job_id)
+
+    pairs = session.scalars(
+        select(QaPair)
+        .where(QaPair.document_id == document_id)
+        .order_by(QaPair.pair_index)
+    ).all()
+    assert failed.status == "FAILED"
+    assert [(pair.question, pair.status) for pair in pairs] == [("旧问题", "ACTIVE")]

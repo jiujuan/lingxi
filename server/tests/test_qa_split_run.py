@@ -297,3 +297,135 @@ def test_0008_upgrade_tolerates_0001_create_all_registering_run_batch_models():
         assert MODEL_CALL_LOG_COLUMNS <= {
             column["name"] for column in inspector.get_columns("model_call_logs")
         }
+
+
+def test_checkpoint_resume_claims_only_batches_without_success():
+    from server.app.models.document import Document, DocumentStatus
+    from server.app.models.import_job import ImportJob, ImportJobStatus
+    from server.app.models.model_config import ModelConfig, ModelProvider
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.models.qa_split_run import QaSplitRun
+    from server.app.services.qa_split_batching import QaBatch, qa_batch_input_hash
+    from server.app.services.qa_split_run_service import QaSplitRunService
+
+    engine = sa.create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        provider = ModelProvider(
+            id="provider-1",
+            tenant_id="tenant-1",
+            provider_type="OPENAI_COMPATIBLE",
+            name="Provider",
+            status="ACTIVE",
+        )
+        model = ModelConfig(
+            id="model-1",
+            tenant_id="tenant-1",
+            provider_id=provider.id,
+            capability="QA_SPLIT",
+            model_name="qa-model",
+            is_default=True,
+            status="ACTIVE",
+        )
+        document = Document(
+            id="document-1",
+            tenant_id="tenant-1",
+            title="Run resume",
+            file_name="resume.md",
+            file_type="MARKDOWN",
+            mime_type="text/markdown",
+            file_size=1,
+            object_key="resume.md",
+            checksum="resume",
+            status=DocumentStatus.QA_SPLITTING,
+        )
+        job = ImportJob(
+            id="job-1",
+            tenant_id="tenant-1",
+            document_id=document.id,
+            status=ImportJobStatus.RUNNING.value,
+            stage="QA_SPLITTING",
+        )
+        chunks = [
+            DocumentChunk(
+                id="chunk-0",
+                tenant_id="tenant-1",
+                document_id=document.id,
+                job_id=job.id,
+                chunk_index=0,
+                content="first fact",
+                page_no=1,
+            ),
+            DocumentChunk(
+                id="chunk-1",
+                tenant_id="tenant-1",
+                document_id=document.id,
+                job_id=job.id,
+                chunk_index=1,
+                content="second fact",
+                page_no=2,
+            ),
+        ]
+        session.add_all((provider, model, document, job, *chunks))
+        session.commit()
+
+        batches = [
+            QaBatch(
+                batch_index=index,
+                chunks=(chunk,),
+                estimated_input_tokens=10,
+                reserved_output_tokens=4,
+                input_hash=qa_batch_input_hash([chunk]),
+            )
+            for index, chunk in enumerate(chunks)
+        ]
+        checkpoint = QaSplitRunService(session)
+        run = checkpoint.get_or_create_run(
+            job=job,
+            document=document,
+            model_config=model,
+            provider=provider,
+            batches=batches,
+            task_run_id=None,
+        )
+
+        first = checkpoint.claim_next_pending_batch(run.id)
+        assert first is not None
+        assert first.batch_index == "0"
+        checkpoint.save_success(
+            first.id,
+            [
+                type(
+                    "Item",
+                    (),
+                    {
+                        "question": "What is first?",
+                        "answer": "first fact",
+                        "quote": "first fact",
+                        "page_no": 1,
+                        "chunk_index": 0,
+                    },
+                )()
+            ],
+            latency_ms=12,
+        )
+        session.commit()
+
+        resumed = QaSplitRunService(session)
+        pending = resumed.claim_next_pending_batch(run.id)
+
+        assert pending is not None
+        assert pending.batch_index == "1"
+
+        model.model_name = "qa-model-v2"
+        replacement = resumed.get_or_create_run(
+            job=job,
+            document=document,
+            model_config=model,
+            provider=provider,
+            batches=batches,
+            task_run_id="task-run-2",
+        )
+        assert replacement.id != run.id
+        assert session.get(QaSplitRun, run.id).status == "CANCELLED"
+        assert replacement.status == "RUNNING"

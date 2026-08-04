@@ -47,6 +47,7 @@ from server.app.services.qa_split_batching import (
     qa_batch_input_hash,
 )
 from server.app.services.qa_prompt_builder import build_qa_split_prompt
+from server.app.services.qa_split_run_service import QaSplitRunService
 
 logger = logging.getLogger(__name__)
 
@@ -730,16 +731,64 @@ class QaSplitService:
                 provider_name=provider.name,
             )
             prompt_batches = self._group_qa_batches(document, chunks)
-            items = self._generate_qa_items(
-                adapter,
-                document,
-                prompt_batches,
+            checkpoint = QaSplitRunService(
+                self.session,
+                replace_qa_pairs=self._replace_qa_pairs,
+                bind_embedding_generation=self._bind_embedding_run_config_hash,
+                default_model_resolver=self._default_model,
+            )
+            run = checkpoint.get_or_create_run(
+                job=job,
+                document=document,
                 model_config=model_config,
                 provider=provider,
-                run_id=task_run.id,
+                batches=prompt_batches,
+                task_run_id=task_run.id,
             )
-            self._replace_qa_pairs(job, document, chunks, items)
-            self._bind_embedding_run_config_hash(job, chunks)
+            batches_by_path = {
+                ".".join(str(index) for index in batch.batch_index_path): batch
+                for batch in prompt_batches
+            }
+            while batch := checkpoint.claim_next_pending_batch(run.id):
+                prompt_batch = batches_by_path.get(batch.batch_index)
+                if prompt_batch is None:
+                    raise _provenance_error(
+                        QA_PROVENANCE_CONTRACT_INVALID,
+                        "QA checkpoint Batch 未找到对应的输入批次",
+                        retryable=False,
+                    )
+                try:
+                    batch_items, latency_ms = self._generate_checkpoint_batch(
+                        adapter,
+                        document,
+                        prompt_batch,
+                        model_config=model_config,
+                        provider=provider,
+                        run_id=task_run.id,
+                    )
+                except QaSplitValidationError as exc:
+                    checkpoint.save_failure(
+                        batch.id,
+                        code=exc.code,
+                        message=exc.message,
+                        retryable=exc.retryable,
+                        timeout_phase=None,
+                    )
+                    self.session.commit()
+                    raise
+                checkpoint.save_success(
+                    batch.id,
+                    batch_items,
+                    latency_ms=latency_ms,
+                )
+                self.session.commit()
+
+            items = checkpoint.publish_complete_run(
+                run.id,
+                job=job,
+                document=document,
+                chunks=chunks,
+            )
             log_qa_split_observability(
                 tenant_id=job.tenant_id,
                 document_id=document.id,
@@ -763,7 +812,10 @@ class QaSplitService:
             return job, task_run.id
         except QaSplitValidationError as exc:
             self._mark_failed(
-                job, document, task_run, exc.code, exc.message, exc.retryable
+                # Existing task delivery semantics do not replay a complete QA
+                # job after batch policy exhaustion. The checkpoint remains
+                # retryable and a later delivery resumes only that Batch.
+                job, document, task_run, exc.code, exc.message, False
             )
             return job, task_run.id
         except ProviderError as exc:
@@ -1030,6 +1082,64 @@ class QaSplitService:
                 )
             )
         return items
+
+    def _generate_checkpoint_batch(
+        self,
+        adapter,
+        document: Document,
+        batch: QaBatch,
+        *,
+        model_config: ModelConfig,
+        provider: ModelProvider,
+        run_id: str,
+    ) -> tuple[list[ValidatedQaItem], int]:
+        """Generate one persisted batch while retaining leaf-call diagnostics."""
+
+        class PromptBatchAdapter:
+            def generate_qa_batch(self, prompt_batch: QaBatch) -> str:
+                return adapter.generate_qa_pairs(
+                    build_qa_split_prompt(document, list(prompt_batch.chunks))
+                )
+
+        result = execute_qa_batch_with_retry(
+            PromptBatchAdapter(),
+            batch,
+            max_retries=self.max_retries,
+            max_split_depth=self.max_split_depth,
+        )
+        for leaf_result in _all_qa_batch_results(result):
+            self._record_qa_model_call(
+                leaf_result,
+                model_config=model_config,
+                provider=provider,
+                run_id=run_id,
+            )
+
+        leaf_results = sorted(
+            result.leaf_results(),
+            key=lambda leaf: (leaf.batch.batch_index, leaf.batch.batch_index_path),
+        )
+        for leaf_result in leaf_results:
+            if leaf_result.error is not None:
+                error = leaf_result.error
+                raise QaSplitValidationError(
+                    getattr(error, "message", None) or "QA Batch 调用失败",
+                    code=getattr(error, "code", None) or "QA_SPLIT_PROVIDER_ERROR",
+                    retryable=bool(getattr(error, "retryable", False)),
+                )
+
+        items: list[ValidatedQaItem] = []
+        for leaf_result in leaf_results:
+            items.extend(
+                validate_qa_split_output(
+                    leaf_result.raw_output or "",
+                    list(leaf_result.batch.chunks),
+                    allow_legacy_missing_chunk_index=(
+                        self.legacy_missing_chunk_index_compatibility
+                    ),
+                )
+            )
+        return items, sum(leaf_result.latency_ms for leaf_result in leaf_results)
 
     def _record_qa_model_call(
         self,

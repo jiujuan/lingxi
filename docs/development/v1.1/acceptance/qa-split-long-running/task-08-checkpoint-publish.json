@@ -1,0 +1,21 @@
+{
+  "task": "Task 8 - checkpoint recovery and atomic QA publish",
+  "status": "passed",
+  "assertions": [
+    "Successful checkpoint batches are not claimed again after a resumed QA split run.",
+    "A failed checkpoint batch does not publish or replace ACTIVE QA pairs.",
+    "All checkpoint batches must succeed before QaPair replacement and EMBEDDING transition.",
+    "Pending QA split checkpoint payloads are not returned by EmbeddingService QA-pair queries.",
+    "A QA model-name change cancels the incomplete run and creates a replacement run."
+  ],
+  "verification": {
+    "pytest": "82 passed, 1 skipped",
+    "pytestCommand": "pytest server/tests/test_qa_split_run.py server/tests/test_qa_split_task.py server/tests/test_embedding_task.py -q",
+    "ruffCommand": "ruff check server/app/services/qa_split_run_service.py server/app/schemas/qa_split_run.py server/app/services/qa_split_service.py server/app/tasks/qa_tasks.py server/app/services/embedding_service.py server/tests/test_qa_split_run.py server/tests/test_qa_split_task.py server/tests/test_embedding_task.py",
+    "diffCheckCommand": "git diff --check"
+  },
+  "notes": [
+    "Checkpoint payloads persist validated structured QA fields and hashes only.",
+    "Prompt bodies, API keys, raw provider output, and source document bodies are not stored in run or batch payloads."
+  ]
+}
