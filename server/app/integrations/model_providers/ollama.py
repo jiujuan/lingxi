@@ -163,6 +163,16 @@ class OllamaProvider(HttpProvider):
             "stream": stream,
         }
         max_tokens = self.config.get("maxTokens") or self.config.get("max_tokens")
-        if max_tokens:
-            payload["options"] = {"num_predict": int(max_tokens)}
+        num_predict = max_tokens or self.config.get("numPredict")
+        options: dict[str, int | float] = {}
+        if num_predict is not None:
+            options["num_predict"] = int(num_predict)
+        if self.config.get("numCtx") is not None:
+            options["num_ctx"] = int(self.config["numCtx"])
+        if self.config.get("temperature") is not None:
+            options["temperature"] = float(self.config["temperature"])
+        if options:
+            payload["options"] = options
+        if self.config.get("keepAlive") is not None:
+            payload["keep_alive"] = self.config["keepAlive"]
         return payload

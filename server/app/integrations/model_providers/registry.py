@@ -11,6 +11,97 @@ from server.app.integrations.model_providers.openai_compatible import (
 )
 
 
+ALLOWED_PROVIDER_OPTIONS: dict[str, frozenset[str]] = {
+    "OLLAMA": frozenset(
+        {"keepAlive", "numCtx", "numPredict", "temperature"}
+    ),
+    "OPENAI_COMPATIBLE": frozenset(
+        {
+            "responseFormat",
+            "reasoningEffort",
+            "thinking",
+            "chatPath",
+            "embeddingPath",
+        }
+    ),
+    "INTERNAL_GATEWAY": frozenset(
+        {
+            "responseFormat",
+            "reasoningEffort",
+            "thinking",
+            "chatPath",
+            "embeddingPath",
+        }
+    ),
+    "CLAUDE": frozenset({"anthropicVersion"}),
+}
+
+# These values are adapter/runtime controls rather than provider-specific
+# request options. They are kept so timeout, mock fixtures, and output limits
+# continue to work after provider option filtering.
+_COMMON_RUNTIME_KEYS = frozenset(
+    {
+        "modelName",
+        "model",
+        "maxTokens",
+        "max_tokens",
+        "maxRetries",
+        "timeoutMs",
+        "timeout_ms",
+        "connectTimeoutMs",
+        "connect_timeout_ms",
+        "writeTimeoutMs",
+        "write_timeout_ms",
+        "readIdleTimeoutMs",
+        "read_idle_timeout_ms",
+        "overallTimeoutMs",
+        "overall_timeout_ms",
+        "modelsPath",
+        "mock",
+        "chatResponse",
+        "qaSplitResponse",
+        "chatError",
+        "testMode",
+        "chatChunkSize",
+        "embeddingDimension",
+        "qaSplit",
+    }
+)
+
+
+def filter_provider_config(
+    provider_type: str, config: dict | None = None
+) -> dict:
+    """Return only safe adapter/runtime keys for a provider.
+
+    Configurations may use either the historical flat shape or the
+    ``providerOptions`` envelope used by the admin API. Unknown provider
+    options remain persisted for compatibility, but never reach a real
+    adapter's HTTP payload.
+    """
+
+    raw = dict(config or {})
+    normalized_type = str(provider_type).upper()
+    allowed = ALLOWED_PROVIDER_OPTIONS.get(normalized_type, frozenset())
+    filtered = {
+        key: value for key, value in raw.items() if key in _COMMON_RUNTIME_KEYS
+    }
+
+    nested = raw.get("providerOptions")
+    if isinstance(nested, dict):
+        scoped = nested.get(normalized_type)
+        if isinstance(scoped, dict):
+            for key, value in scoped.items():
+                if key in allowed:
+                    filtered[key] = value
+
+    for key, value in raw.items():
+        if key in allowed:
+            filtered[key] = value
+
+    return filtered
+
+
 class ProviderFactory(Protocol):
     """Callable that builds a provider adapter.
 
@@ -110,6 +201,6 @@ def build_provider_adapter(
     return provider_class(
         base_url=base_url,
         api_key=api_key,
-        config=merged,
+        config=filter_provider_config(provider_type, merged),
         provider_name=provider_name,
     )

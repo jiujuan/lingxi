@@ -139,6 +139,95 @@ def test_model_connection_test_binds_selected_model_and_capability():
     assert log.capability == "QA_SPLIT"
 
 
+def test_connection_test_filters_provider_options_before_adapter():
+    client, SessionLocal = build_test_client()
+    headers = login_admin(client)
+
+    provider = client.post(
+        "/api/v1/model-providers",
+        headers=headers,
+        json={
+            "providerType": "OLLAMA",
+            "name": "Filtered Ollama",
+            "baseUrl": "http://ollama.test",
+            "status": "ACTIVE",
+            "config": {
+                "providerOptions": {
+                    "OLLAMA": {
+                        "keepAlive": "10m",
+                        "unknownOption": "must-not-leak",
+                    }
+                },
+                "unknownProviderSetting": "must-not-leak",
+            },
+        },
+    ).json()
+    model = client.post(
+        "/api/v1/model-configs",
+        headers=headers,
+        json={
+            "providerId": provider["id"],
+            "capability": "QA_SPLIT",
+            "modelName": "gemma3",
+            "config": {
+                "providerOptions": {"OLLAMA": {"numPredict": 4096}},
+                "responseFormat": "json_object",
+            },
+        },
+    ).json()
+
+    from server.app.core.permissions import AccessContext
+    from server.app.integrations.model_providers.base import ConnectionTestResult
+    from server.app.services.model_config_service import ModelConfigService
+    from server.app.models.user import User
+
+    captured: dict = {}
+
+    def fake_factory(*args, **kwargs):
+        captured.update(kwargs["config"])
+
+        class FakeProvider:
+            def test_model_connection(self):
+                return ConnectionTestResult(
+                    success=True,
+                    status="SUCCESS",
+                    latency_ms=1,
+                    provider_name="Filtered Ollama",
+                    provider_type="OLLAMA",
+                    model_name="gemma3",
+                    endpoint="http://ollama.test/api/chat",
+                    timeout_ms=30000,
+                )
+
+        return FakeProvider()
+
+    with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.email == "admin@example.com"))
+        assert user is not None
+        context = AccessContext(
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            department_id=user.department_id,
+            role_ids=[],
+            permissions=set(),
+        )
+        result = ModelConfigService(
+            session, provider_factory=fake_factory
+        ).test_provider_connection(
+            context,
+            provider["id"],
+            model_config_id=model["id"],
+        )
+
+    assert result["success"] is True
+    assert captured["keepAlive"] == "10m"
+    assert captured["numPredict"] == 4096
+    assert "providerOptions" not in captured
+    assert "unknownOption" not in captured
+    assert "unknownProviderSetting" not in captured
+    assert "responseFormat" not in captured
+
+
 def test_model_config_timeout_fields_are_returned_and_legacy_timeout_remains_supported():
     client, _ = build_test_client()
     headers = login_admin(client)

@@ -10,6 +10,7 @@ from server.app.core.secrets import decrypt_secret, encrypt_secret, has_secret
 from server.app.integrations.model_providers.registry import (
     ProviderFactory,
     build_provider_adapter,
+    filter_provider_config,
 )
 from server.app.models.model_config import (
     ModelCallLog,
@@ -118,7 +119,15 @@ class ModelConfigService:
                     "指定模型不属于当前模型供应商",
                 )
         api_key = decrypt_secret(provider.encrypted_api_key)
-        adapter_config = {**(provider.config or {}), **((model_config.config or {}) if model_config else {})}
+        adapter_config = filter_provider_config(
+            provider.provider_type, provider.config
+        )
+        adapter_config.update(
+            filter_provider_config(
+                provider.provider_type,
+                model_config.config if model_config else None,
+            )
+        )
         adapter = self._build_adapter(
             provider.provider_type,
             base_url=provider.base_url,

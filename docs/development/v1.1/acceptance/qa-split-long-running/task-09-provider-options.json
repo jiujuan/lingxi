@@ -1,0 +1,36 @@
+{
+  "task": "Task 9 - provider option allowlists",
+  "status": "passed",
+  "assertions": [
+    "Ollama sends only keep_alive and allowlisted options num_predict, num_ctx, and temperature.",
+    "OpenAI-compatible sends response_format only when responseFormat=json_object is configured.",
+    "OpenAI-compatible preserves max_tokens and maps only allowlisted reasoning_effort and thinking options.",
+    "Claude requests contain no OpenAI-specific response_format, reasoning_effort, or thinking fields.",
+    "Unknown provider options and unrelated providerOptions sections are removed before real adapters are constructed.",
+    "ModelConfigService filters provider and model providerOptions independently so nested settings are not lost by shallow merging.",
+    "Ollama model connection uses the selected model and /api/chat endpoint.",
+    "finish_reason=length remains the terminal PROVIDER_OUTPUT_TRUNCATED error."
+  ],
+  "verification": {
+    "providerTests": {
+      "command": "pytest server/tests/test_model_providers_http.py server/tests/test_openai_compatible_api.py server/tests/test_model_config.py -q",
+      "result": "51 passed"
+    },
+    "qaRegression": {
+      "command": "pytest server/tests/test_qa_split_task.py server/tests/test_qa_split_run.py server/tests/test_embedding_task.py -q",
+      "result": "82 passed, 1 skipped"
+    },
+    "ruff": {
+      "command": "ruff check server/app/integrations/model_providers/registry.py server/app/integrations/model_providers/ollama.py server/app/integrations/model_providers/openai_compatible.py server/app/services/model_config_service.py server/tests/test_model_providers_http.py server/tests/test_model_config.py",
+      "result": "All checks passed"
+    },
+    "diffCheck": {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  },
+  "safety": [
+    "No API keys, prompts, source document text, or complete model outputs are stored in this evidence.",
+    "DeepSeek is covered through the OpenAI-compatible adapter and does not introduce a separate provider type."
+  ]
+}

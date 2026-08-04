@@ -57,7 +57,7 @@ def test_openai_compatible_complete_chat_and_embeddings(monkeypatch):
     assert any(path.endswith("/chat/completions") for path in seen)
 
 
-def test_openai_compatible_generate_qa_pairs_forces_json_object(monkeypatch):
+def test_openai_compatible_filters_options_and_controls_json_mode(monkeypatch):
     seen: list[dict] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -68,16 +68,72 @@ def test_openai_compatible_generate_qa_pairs_forces_json_object(monkeypatch):
 
     _patch_transport(monkeypatch, handler)
     provider = OpenAICompatibleProvider(
-        "https://api.example.com/v1", "sk-test", {"modelName": "gpt-x"}
+        "https://api.example.com/v1",
+        "sk-test",
+        {
+            "modelName": "gpt-x",
+            "maxTokens": 64,
+            "responseFormat": "json_object",
+            "reasoningEffort": "low",
+            "thinking": False,
+            "temperature": 0,
+            "unknownOption": "must-not-leak",
+        },
     )
 
-    # QA split constrains output to a strict JSON object (parity with Ollama).
     provider.generate_qa_pairs("hi")
     assert seen[-1]["response_format"] == {"type": "json_object"}
+    assert seen[-1]["reasoning_effort"] == "low"
+    assert seen[-1]["thinking"] is False
+    assert seen[-1]["max_tokens"] == 64
+    assert "temperature" not in seen[-1]
+    assert "unknownOption" not in seen[-1]
 
-    # Plain chat must not force JSON — it serves free-form conversation.
+    provider.config.pop("responseFormat")
     provider.complete_chat("hi")
     assert "response_format" not in seen[-1]
+
+
+def test_ollama_provider_whitelists_native_options(monkeypatch):
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "message": {
+                    "content": '{"items":[],"coveredChunkIndexes":[],"skippedChunks":[]}'
+                }
+            },
+        )
+
+    _patch_transport(monkeypatch, handler)
+    provider = OllamaProvider(
+        "http://localhost:11434",
+        None,
+        {
+            "modelName": "gemma3",
+            "keepAlive": "10m",
+            "numCtx": 8192,
+            "numPredict": 4096,
+            "temperature": 0,
+            "responseFormat": "json_object",
+            "unknownOption": "must-not-leak",
+        },
+    )
+
+    provider.generate_qa_pairs("hi")
+    body = seen[-1]
+    assert body["model"] == "gemma3"
+    assert body["keep_alive"] == "10m"
+    assert body["options"] == {
+        "num_predict": 4096,
+        "num_ctx": 8192,
+        "temperature": 0.0,
+    }
+    assert "response_format" not in body
+    assert "unknownOption" not in body
 
 
 def test_openai_compatible_stream_chat_parses_sse(monkeypatch):
@@ -275,10 +331,23 @@ def test_claude_uses_messages_api_and_rejects_embeddings(monkeypatch):
         assert request.url.path == "/v1/messages"
         assert request.headers["x-api-key"] == "ak-test"
         assert request.headers["anthropic-version"]
+        body = json.loads(request.content)
+        assert "response_format" not in body
+        assert "reasoning_effort" not in body
+        assert "thinking" not in body
         return httpx.Response(200, json={"content": [{"type": "text", "text": "claude"}]})
 
     _patch_transport(monkeypatch, handler)
-    provider = ClaudeProvider(None, "ak-test", {"modelName": "claude-x"})
+    provider = ClaudeProvider(
+        None,
+        "ak-test",
+        {
+            "modelName": "claude-x",
+            "responseFormat": "json_object",
+            "reasoningEffort": "low",
+            "thinking": True,
+        },
+    )
     assert provider.complete_chat("hi") == "claude"
 
     with pytest.raises(ProviderError) as excinfo:
@@ -486,3 +555,27 @@ def test_registry_explicit_model_settings_override_provider_config():
     assert adapter.model_name == "qa-model"
     assert adapter.timeout_ms == 30000
     assert adapter.config["maxTokens"] == 8
+
+
+def test_registry_filters_provider_options_before_real_adapter():
+    adapter = build_provider_adapter(
+        "OLLAMA",
+        "http://localhost:11434",
+        None,
+        {
+            "modelName": "gemma3",
+            "keepAlive": "10m",
+            "numCtx": 8192,
+            "unknownOption": "must-not-leak",
+            "providerOptions": {
+                "OLLAMA": {"numPredict": 4096},
+                "OPENAI_COMPATIBLE": {"responseFormat": "json_object"},
+            },
+        },
+    )
+
+    assert adapter.config["keepAlive"] == "10m"
+    assert adapter.config["numCtx"] == 8192
+    assert adapter.config["numPredict"] == 4096
+    assert "unknownOption" not in adapter.config
+    assert "providerOptions" not in adapter.config

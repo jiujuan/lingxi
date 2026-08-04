@@ -54,12 +54,9 @@ class OpenAICompatibleProvider(HttpProvider):
 
     def generate_qa_pairs(self, prompt: str) -> str:
         payload = self._chat_payload(prompt, stream=False)
-        # Constrain the model to a strict JSON object so a chatty model can't
-        # wrap the result in prose or ```json fences and break QA-split parsing.
-        # Mirrors the Ollama adapter's format="json"; the response_format field
-        # is honoured by OpenAI, DeepSeek, DashScope (Qwen) and Moonshot
-        # compatible endpoints.
-        payload["response_format"] = {"type": "json_object"}
+        response_format = self.config.get("responseFormat")
+        if response_format == "json_object":
+            payload["response_format"] = {"type": "json_object"}
         return self._post_chat(payload)
 
     def _post_chat(self, payload: dict) -> str:
@@ -114,11 +111,11 @@ class OpenAICompatibleProvider(HttpProvider):
             "stream": stream,
         }
         max_tokens = self.config.get("maxTokens") or self.config.get("max_tokens")
-        if max_tokens:
-            payload["max_tokens"] = int(max_tokens)
-        temperature = self.config.get("temperature")
-        if temperature is not None:
-            payload["temperature"] = float(temperature)
+        payload["max_tokens"] = int(max_tokens or 1024)
+        if self.config.get("reasoningEffort") is not None:
+            payload["reasoning_effort"] = self.config["reasoningEffort"]
+        if self.config.get("thinking") is not None:
+            payload["thinking"] = bool(self.config["thinking"])
         return payload
 
     def _extract_message(self, data: dict) -> str:
