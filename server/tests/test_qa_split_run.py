@@ -416,6 +416,8 @@ def test_checkpoint_resume_claims_only_batches_without_success():
 
         assert pending is not None
         assert pending.batch_index == "1"
+        assert session.get(Document, document.id).status == DocumentStatus.QA_SPLITTING
+        assert session.get(ImportJob, job.id).stage == "QA_SPLITTING"
 
         model.model_name = "qa-model-v2"
         replacement = resumed.get_or_create_run(

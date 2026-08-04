@@ -1,0 +1,31 @@
+{
+  "task": "Task 13 - Embedding publish boundary and regression protection",
+  "status": "passed",
+  "verificationDate": "2026-08-04",
+  "assertions": [
+    "Embedding rejects jobs whose QA Split stage is not EMBEDDING with EMBEDDING_QA_NOT_PUBLISHED and retryable=false.",
+    "A pending QA Split Run/Batch does not create an Embedding TaskRun, advance the ImportJob, or change the Document to READY.",
+    "Embedding reads only ACTIVE or EMBEDDING_FAILED QaPair rows; pending checkpoint result_payload is ignored.",
+    "An incomplete QA Split checkpoint keeps the document in QA_SPLITTING and the import job in QA_SPLITTING.",
+    "The QA worker does not enqueue Embedding while the QA stage is still pending.",
+    "Existing Embedding success, timeout, retry, count validation, dimension validation, and final transaction tests remain green."
+  ],
+  "verification": {
+    "tests": {
+      "command": "pytest server/tests/test_embedding_task.py server/tests/test_qa_split_run.py server/tests/test_task_reliability.py -q",
+      "result": "42 passed, 1 skipped"
+    },
+    "pythonCompile": {
+      "command": "python -m compileall -q server/app/services/embedding_service.py server/tests/test_embedding_task.py server/tests/test_qa_split_run.py server/tests/test_task_reliability.py",
+      "result": "passed"
+    },
+    "diffCheck": {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  },
+  "safety": [
+    "The Embedding gate runs before TaskRun creation and before any provider call.",
+    "The test fixtures and evidence contain no API key, prompt text, model output, or PDF source text."
+  ]
+}

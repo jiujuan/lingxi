@@ -147,6 +147,68 @@ def test_embedding_list_ignores_pending_qa_split_checkpoint_results():
     assert EmbeddingService(session)._list_qa_pairs(tenant_id, document_id) == []
 
 
+def test_embedding_rejects_qa_split_before_publish_without_advancing_job():
+    import pytest
+
+    from server.app.models.document import Document, DocumentStatus
+    from server.app.models.import_job import ImportJob, ImportJobStatus
+    from server.app.models.logs import TaskRun
+    from server.app.models.model_config import ModelProvider
+    from server.app.models.qa_split_run import QaSplitBatch, QaSplitRun
+    from server.app.services.embedding_service import (
+        EmbeddingService,
+        EmbeddingServiceError,
+    )
+
+    session, identity = build_qa_session()
+    tenant_id = identity["tenant"].id
+    job_id, document_id, chunks = create_qa_ready_job(session, identity)
+    model = add_default_qa_model(session, tenant_id, {"items": []})
+    provider = session.get(ModelProvider, model.provider_id)
+    assert provider is not None
+    run = QaSplitRun(
+        tenant_id=tenant_id,
+        job_id=job_id,
+        document_id=document_id,
+        model_config_id=model.id,
+        provider_id=provider.id,
+        model_name=model.model_name,
+        prompt_version="qa-split-v2",
+        chunk_generation_hash="pending-generation",
+        status="RUNNING",
+        batch_count=1,
+    )
+    session.add(run)
+    session.flush()
+    session.add(
+        QaSplitBatch(
+            run_id=run.id,
+            batch_index="0",
+            chunk_indexes=[chunk.chunk_index for chunk in chunks],
+            input_hash="a" * 64,
+            estimated_input_tokens=12,
+            reserved_output_tokens=4,
+            status="PENDING",
+        )
+    )
+    session.commit()
+
+    with pytest.raises(EmbeddingServiceError) as exc_info:
+        EmbeddingService(session).embed_import_job(job_id)
+
+    document = session.get(Document, document_id)
+    job = session.get(ImportJob, job_id)
+    task_runs = session.scalars(
+        select(TaskRun).where(TaskRun.resource_id == job_id)
+    ).all()
+    assert exc_info.value.code == "EMBEDDING_QA_NOT_PUBLISHED"
+    assert exc_info.value.retryable is False
+    assert job.status == ImportJobStatus.RUNNING.value
+    assert job.stage == "QA_SPLITTING"
+    assert document.status == DocumentStatus.QA_SPLITTING
+    assert task_runs == []
+
+
 def test_embedding_timeout_metric_records_phase_without_changing_failure_semantics(
     monkeypatch,
 ):

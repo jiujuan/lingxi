@@ -189,6 +189,8 @@ class EmbeddingService:
         if job.status == ImportJobStatus.COMPLETED.value:
             return job
 
+        self._assert_qa_split_published(job, document)
+
         task_run = TaskRun(
             tenant_id=job.tenant_id,
             task_type="embed_qa_pairs_task",
@@ -349,6 +351,17 @@ class EmbeddingService:
                 qa_targets,
             )
             return job
+
+    @staticmethod
+    def _assert_qa_split_published(job: ImportJob, document: Document) -> None:
+        """Prevent Embedding from advancing a job before QA is atomically published."""
+        del document
+        if job.stage != "EMBEDDING":
+            raise EmbeddingServiceError(
+                "EMBEDDING_QA_NOT_PUBLISHED",
+                "QA Split 尚未完成发布，不能开始 Embedding",
+                retryable=False,
+            )
 
     def _lock_document_for_embedding_commit(self, document_id: str) -> Document:
         """Acquire the parse-compatible Document lock for final persistence."""

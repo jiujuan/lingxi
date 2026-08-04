@@ -315,6 +315,48 @@ def test_qa_worker_enqueues_embedding_only_when_requested_after_success(monkeypa
     assert scheduled == ["job-qa-1"]
 
 
+def test_qa_worker_does_not_enqueue_embedding_while_qa_is_pending(monkeypatch):
+    from server.app.tasks import qa_tasks
+    from server.app.tasks._common import TaskOutcome
+
+    class _Job:
+        id = "job-qa-pending"
+        document_id = "document-qa-pending"
+        status = "RUNNING"
+        stage = "QA_SPLITTING"
+        error_code = None
+
+    class _Service:
+        @staticmethod
+        def split_import_job_for_task(job_id):
+            assert job_id == "job-qa-pending"
+            return _Job(), "qa-task-run-pending"
+
+    class _Session:
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, *_args):
+            return False
+
+    scheduled = []
+    monkeypatch.setattr(qa_tasks, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(qa_tasks, "build_qa_split_service", lambda _session: _Service())
+    monkeypatch.setattr(
+        qa_tasks,
+        "resolve_task_outcome",
+        lambda *_args, **_kwargs: TaskOutcome(failed=False),
+    )
+    monkeypatch.setattr(
+        qa_tasks, "enqueue_embedding_task", lambda job_id: scheduled.append(job_id)
+    )
+
+    task = qa_tasks.split_document_qa_task._get_current_object()
+    task.run("job-qa-pending", enqueue_embedding=True)
+
+    assert scheduled == []
+
+
 def test_qa_worker_persists_retryable_failure_when_embedding_enqueue_fails(monkeypatch):
     from sqlalchemy import select
 
