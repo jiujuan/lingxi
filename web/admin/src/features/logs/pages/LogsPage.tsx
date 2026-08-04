@@ -141,6 +141,20 @@ export function LogsPage() {
             />
           </label>
           <label>
+            batch_id
+            <input
+              onChange={(event) => updateFilter('batchId', event.target.value)}
+              value={filters.batchId}
+            />
+          </label>
+          <label>
+            timeout_phase
+            <input
+              onChange={(event) => updateFilter('timeoutPhase', event.target.value)}
+              value={filters.timeoutPhase}
+            />
+          </label>
+          <label>
             task_run_id
             <input
               onChange={(event) => updateFilter('taskRunId', event.target.value)}
@@ -492,6 +506,10 @@ function initialFilters(): LogFilters {
     ...emptyFilters(),
     requestId: params.get('requestId') || '',
     runId: params.get('runId') || '',
+    batchId: params.get('batchId') || '',
+    timeoutPhase: params.get('timeoutPhase') || '',
+    providerId: params.get('providerId') || '',
+    modelConfigId: params.get('modelConfigId') || '',
     taskRunId: params.get('taskRunId') || '',
   };
 }
@@ -500,6 +518,10 @@ function emptyFilters(): LogFilters {
   return {
     requestId: '',
     runId: '',
+    batchId: '',
+    timeoutPhase: '',
+    providerId: '',
+    modelConfigId: '',
     taskRunId: '',
     status: '',
     taskType: '',

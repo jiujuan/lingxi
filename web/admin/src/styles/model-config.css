@@ -413,6 +413,11 @@
   padding: 22px 24px 20px;
 }
 
+.model-config-edit-modal {
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
 .model-config-modal-title {
   align-items: center;
   display: flex;

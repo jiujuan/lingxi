@@ -26,6 +26,10 @@ export function listModelCallLogs(filters: LogFilters) {
     `/api/v1/logs/model-calls?${buildParams({
       requestId: filters.requestId,
       runId: filters.runId,
+      batchId: filters.batchId,
+      timeoutPhase: filters.timeoutPhase,
+      providerId: filters.providerId,
+      modelConfigId: filters.modelConfigId,
       status: filters.status,
       page: String(filters.page),
       pageSize: String(filters.pageSize),

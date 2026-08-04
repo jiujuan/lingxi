@@ -18,6 +18,10 @@ export type ModelConfig = {
   embeddingDimension: number | null;
   maxTokens: number | null;
   timeoutMs: number;
+  connectTimeoutMs: number | null;
+  writeTimeoutMs: number | null;
+  readIdleTimeoutMs: number | null;
+  overallTimeoutMs: number | null;
   isDefault: boolean;
   status: string;
   config: Record<string, unknown>;
@@ -99,6 +103,12 @@ export function createModelConfig(payload: {
   providerId: string;
   capability: string;
   modelName: string;
+  maxTokens?: number;
+  timeoutMs?: number;
+  connectTimeoutMs?: number;
+  writeTimeoutMs?: number;
+  readIdleTimeoutMs?: number;
+  overallTimeoutMs?: number;
   isDefault: boolean;
   config?: Record<string, unknown>;
 }) {
@@ -119,8 +129,13 @@ export type ModelConfigUpdatePayload = {
   embeddingDimension?: number;
   maxTokens?: number;
   timeoutMs?: number;
+  connectTimeoutMs?: number;
+  writeTimeoutMs?: number;
+  readIdleTimeoutMs?: number;
+  overallTimeoutMs?: number;
   isDefault?: boolean;
   status?: string;
+  config?: Record<string, unknown>;
 };
 
 export function updateModelConfig(configId: string, payload: ModelConfigUpdatePayload) {

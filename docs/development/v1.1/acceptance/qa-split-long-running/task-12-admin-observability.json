@@ -1,0 +1,46 @@
+{
+  "task": "Task 12 - Admin timeout configuration and observability",
+  "status": "passed",
+  "verificationDate": "2026-08-04",
+  "assertions": [
+    "The admin model edit form exposes connect, write, read-idle, and overall timeout fields.",
+    "The admin form rejects overallTimeoutMs values smaller than readIdleTimeoutMs without sending a PATCH request.",
+    "A valid update persists all four timeout values and QA Split maxInputTokens, reservedOutputTokens, maxRetries, and maxSplitDepth.",
+    "Connection test diagnostics display provider, model, endpoint, configured timeout, and the mapped 读取超时 phase.",
+    "Model-call logs expose run, batch, retry, split, token, endpoint, timeout, and error diagnostics.",
+    "The log detail drawer contains no prompt text or model output content.",
+    "The long model edit form remains usable in desktop and mobile viewports through bounded modal scrolling."
+  ],
+  "verification": {
+    "playwright": {
+      "command": "LINGXI_ADMIN_APP_URL=http://127.0.0.1:5174 python web/admin/tests/t19_qa_split_timeout_playwright.py",
+      "result": "T19 QA split timeout admin acceptance passed",
+      "screenshots": [
+        "docs/development/v1.1/acceptance/qa-split-long-running/t12-admin-desktop.png",
+        "docs/development/v1.1/acceptance/qa-split-long-running/t12-admin-mobile.png"
+      ]
+    },
+    "lint": {
+      "command": "npm run lint",
+      "workdir": "web/admin",
+      "result": "passed"
+    },
+    "build": {
+      "command": "npm run build",
+      "workdir": "web/admin",
+      "result": "passed"
+    },
+    "pythonCompile": {
+      "command": "python -m py_compile web/admin/tests/t19_qa_split_timeout_playwright.py",
+      "result": "passed"
+    },
+    "diffCheck": {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  },
+  "safety": [
+    "The browser mock and evidence contain no API key, prompt text, PDF source text, or full model output.",
+    "The log detail assertions verify that SECRET_PROMPT and a representative prompt string are absent."
+  ]
+}

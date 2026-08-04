@@ -73,8 +73,22 @@ function timeoutPhaseLabel(result: ConnectionTestResult) {
   if (result.errorCode === 'PROVIDER_CONNECTION_TIMEOUT' || result.timeoutPhase === 'connect') {
     return '连接超时';
   }
-  if (result.errorCode === 'PROVIDER_INFERENCE_TIMEOUT' || result.timeoutPhase === 'read') {
+  if (result.errorCode === 'PROVIDER_WRITE_TIMEOUT' || result.timeoutPhase === 'write') {
+    return '写入超时';
+  }
+  if (result.errorCode === 'PROVIDER_POOL_TIMEOUT' || result.timeoutPhase === 'pool') {
+    return '连接池超时';
+  }
+  if (
+    result.errorCode === 'PROVIDER_INFERENCE_TIMEOUT' ||
+    result.timeoutPhase === 'read' ||
+    result.timeoutPhase === 'read_idle' ||
+    result.timeoutPhase === 'first_byte'
+  ) {
     return '读取超时';
+  }
+  if (result.errorCode === 'PROVIDER_OVERALL_TIMEOUT' || result.timeoutPhase === 'overall') {
+    return '整体超时';
   }
   return result.timeoutPhase ?? '未标记';
 }
@@ -82,7 +96,10 @@ function timeoutPhaseLabel(result: ConnectionTestResult) {
 function isTimeoutResult(result: ConnectionTestResult) {
   return (
     result.errorCode === 'PROVIDER_CONNECTION_TIMEOUT' ||
-    result.errorCode === 'PROVIDER_INFERENCE_TIMEOUT'
+    result.errorCode === 'PROVIDER_WRITE_TIMEOUT' ||
+    result.errorCode === 'PROVIDER_POOL_TIMEOUT' ||
+    result.errorCode === 'PROVIDER_INFERENCE_TIMEOUT' ||
+    result.errorCode === 'PROVIDER_OVERALL_TIMEOUT'
   );
 }
 

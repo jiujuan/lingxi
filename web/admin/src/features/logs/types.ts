@@ -28,6 +28,17 @@ export type ModelCallLog = {
   status: string;
   latencyMs: number | null;
   tokenUsage: Record<string, unknown>;
+  batchId: string | null;
+  batchIndex: string | null;
+  retryCount: number;
+  splitDepth: number;
+  inputCharCount: number | null;
+  estimatedInputTokens: number | null;
+  outputCharCount: number | null;
+  estimatedOutputTokens: number | null;
+  timeoutPhase: string | null;
+  endpoint: string | null;
+  modelNameSnapshot: string | null;
   errorCode: string | null;
   errorMessage: string | null;
   requestId: string | null;
@@ -67,6 +78,10 @@ export type LogListResponse<T> = {
 export type LogFilters = {
   requestId: string;
   runId: string;
+  batchId: string;
+  timeoutPhase: string;
+  providerId: string;
+  modelConfigId: string;
   taskRunId: string;
   status: string;
   taskType: string;

@@ -9,7 +9,13 @@ export type CreateModelPayload = {
   capability: string;
   modelName: string;
   isDefault: boolean;
-  config: Record<string, string>;
+  maxTokens?: number;
+  timeoutMs: number;
+  connectTimeoutMs: number;
+  writeTimeoutMs: number;
+  readIdleTimeoutMs: number;
+  overallTimeoutMs: number;
+  config: Record<string, unknown>;
 };
 
 type Props = {
@@ -18,26 +24,72 @@ type Props = {
   onSubmit: (payload: CreateModelPayload) => Promise<void>;
 };
 
+function timeoutDefaults(providerType: string) {
+  if (providerType === 'OLLAMA') {
+    return {
+      connectTimeoutMs: 5000,
+      writeTimeoutMs: 30000,
+      readIdleTimeoutMs: 180000,
+      overallTimeoutMs: 240000,
+    };
+  }
+  return {
+    connectTimeoutMs: 10000,
+    writeTimeoutMs: 30000,
+    readIdleTimeoutMs: 120000,
+    overallTimeoutMs: 180000,
+  };
+}
+
 export function CreateModelModal({ provider, onClose, onSubmit }: Props) {
+  const defaults = timeoutDefaults(provider.providerType);
   const [displayName, setDisplayName] = useState('');
   const [modelName, setModelName] = useState('');
   const [modelType, setModelType] = useState('CHAT');
   const [capability, setCapability] = useState('CHAT');
+  const [maxTokens, setMaxTokens] = useState('4096');
+  const [connectTimeoutMs, setConnectTimeoutMs] = useState(defaults.connectTimeoutMs);
+  const [writeTimeoutMs, setWriteTimeoutMs] = useState(defaults.writeTimeoutMs);
+  const [readIdleTimeoutMs, setReadIdleTimeoutMs] = useState(defaults.readIdleTimeoutMs);
+  const [overallTimeoutMs, setOverallTimeoutMs] = useState(defaults.overallTimeoutMs);
+  const [maxInputTokens, setMaxInputTokens] = useState('4096');
+  const [reservedOutputTokens, setReservedOutputTokens] = useState('2048');
+  const [maxRetries, setMaxRetries] = useState('1');
+  const [maxSplitDepth, setMaxSplitDepth] = useState('1');
   const [isDefault, setIsDefault] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (overallTimeoutMs < readIdleTimeoutMs) {
+      setError('单次调用总超时不能小于首 Token/读取空闲超时。');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
+      const config: Record<string, unknown> = { displayName, modelType };
+      if (capability === 'QA_SPLIT') {
+        config.qaSplit = {
+          maxInputTokens: Number(maxInputTokens),
+          reservedOutputTokens: Number(reservedOutputTokens),
+          maxRetries: Number(maxRetries),
+          maxSplitDepth: Number(maxSplitDepth),
+        };
+      }
       await onSubmit({
         providerId: provider.id,
         capability,
         modelName,
         isDefault,
-        config: { displayName, modelType },
+        maxTokens: maxTokens ? Number(maxTokens) : undefined,
+        timeoutMs: overallTimeoutMs,
+        connectTimeoutMs,
+        writeTimeoutMs,
+        readIdleTimeoutMs,
+        overallTimeoutMs,
+        config,
       });
       onClose();
     } catch (err) {
@@ -107,6 +159,91 @@ export function CreateModelModal({ provider, onClose, onSubmit }: Props) {
               ))}
             </select>
           </label>
+          <label>
+            最大输出 Tokens
+            <input
+              min={1}
+              onChange={(event) => setMaxTokens(event.target.value)}
+              type="number"
+              value={maxTokens}
+            />
+          </label>
+          <label>
+            连接超时（毫秒）
+            <input
+              min={100}
+              onChange={(event) => setConnectTimeoutMs(Number(event.target.value))}
+              type="number"
+              value={connectTimeoutMs}
+            />
+          </label>
+          <label>
+            请求写入超时（毫秒）
+            <input
+              min={100}
+              onChange={(event) => setWriteTimeoutMs(Number(event.target.value))}
+              type="number"
+              value={writeTimeoutMs}
+            />
+          </label>
+          <label>
+            首 Token/读取空闲超时（毫秒）
+            <input
+              min={100}
+              onChange={(event) => setReadIdleTimeoutMs(Number(event.target.value))}
+              type="number"
+              value={readIdleTimeoutMs}
+            />
+          </label>
+          <label>
+            单次调用总超时（毫秒）
+            <input
+              min={100}
+              onChange={(event) => setOverallTimeoutMs(Number(event.target.value))}
+              type="number"
+              value={overallTimeoutMs}
+            />
+          </label>
+          {capability === 'QA_SPLIT' ? (
+            <>
+              <label>
+                QA 最大输入 Tokens
+                <input
+                  min={1}
+                  onChange={(event) => setMaxInputTokens(event.target.value)}
+                  type="number"
+                  value={maxInputTokens}
+                />
+              </label>
+              <label>
+                QA 输出预留 Tokens
+                <input
+                  min={1}
+                  onChange={(event) => setReservedOutputTokens(event.target.value)}
+                  type="number"
+                  value={reservedOutputTokens}
+                />
+              </label>
+              <label>
+                QA Batch retry 次数
+                <input
+                  min={0}
+                  onChange={(event) => setMaxRetries(event.target.value)}
+                  type="number"
+                  value={maxRetries}
+                />
+              </label>
+              <label>
+                QA 最大二分深度
+                <input
+                  min={0}
+                  onChange={(event) => setMaxSplitDepth(event.target.value)}
+                  type="number"
+                  value={maxSplitDepth}
+                />
+              </label>
+            </>
+          ) : null}
           <label className="checkbox-row model-config-default-option">
             <input
               checked={isDefault}

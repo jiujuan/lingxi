@@ -9,12 +9,42 @@ type Props = {
   onSubmit: (configId: string, payload: ModelConfigUpdatePayload) => Promise<void>;
 };
 
+function configuredNumber(config: Record<string, unknown>, key: string, fallback: number) {
+  const value = config[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
 export function ModelConfigEditModal({ config, onClose, onSubmit }: Props) {
   const [modelName, setModelName] = useState(config.modelName);
   const [timeoutMs, setTimeoutMs] = useState(config.timeoutMs);
+  const [connectTimeoutMs, setConnectTimeoutMs] = useState(
+    config.connectTimeoutMs ?? Math.min(config.timeoutMs, 10000),
+  );
+  const [writeTimeoutMs, setWriteTimeoutMs] = useState(
+    config.writeTimeoutMs ?? config.timeoutMs,
+  );
+  const [readIdleTimeoutMs, setReadIdleTimeoutMs] = useState(
+    config.readIdleTimeoutMs ?? config.timeoutMs,
+  );
+  const [overallTimeoutMs, setOverallTimeoutMs] = useState(
+    config.overallTimeoutMs ?? config.timeoutMs,
+  );
   const [maxTokens, setMaxTokens] = useState(config.maxTokens?.toString() ?? '');
   const [embeddingDimension, setEmbeddingDimension] = useState(
     config.embeddingDimension?.toString() ?? '',
+  );
+  const qaSplit = (config.config.qaSplit ?? {}) as Record<string, unknown>;
+  const [maxInputTokens, setMaxInputTokens] = useState(
+    String(configuredNumber(qaSplit, 'maxInputTokens', 4096)),
+  );
+  const [reservedOutputTokens, setReservedOutputTokens] = useState(
+    String(configuredNumber(qaSplit, 'reservedOutputTokens', 2048)),
+  );
+  const [maxRetries, setMaxRetries] = useState(
+    String(configuredNumber(qaSplit, 'maxRetries', 1)),
+  );
+  const [maxSplitDepth, setMaxSplitDepth] = useState(
+    String(configuredNumber(qaSplit, 'maxSplitDepth', 1)),
   );
   const [isDefault, setIsDefault] = useState(config.isDefault);
   const [status, setStatus] = useState(config.status);
@@ -22,11 +52,27 @@ export function ModelConfigEditModal({ config, onClose, onSubmit }: Props) {
   const [saving, setSaving] = useState(false);
 
   async function submit() {
+    if (
+      [connectTimeoutMs, writeTimeoutMs, readIdleTimeoutMs, overallTimeoutMs].some(
+        (value) => !Number.isInteger(value) || value < 100,
+      )
+    ) {
+      setError('四阶段超时都必须是不小于 100ms 的整数。');
+      return;
+    }
+    if (overallTimeoutMs < readIdleTimeoutMs) {
+      setError('单次调用总超时不能小于首 Token/读取空闲超时。');
+      return;
+    }
     setSaving(true);
     setError(null);
     const payload: ModelConfigUpdatePayload = {
       modelName,
       timeoutMs,
+      connectTimeoutMs,
+      writeTimeoutMs,
+      readIdleTimeoutMs,
+      overallTimeoutMs,
       isDefault,
       status,
     };
@@ -37,6 +83,18 @@ export function ModelConfigEditModal({ config, onClose, onSubmit }: Props) {
     }
     if (embeddingDimension) {
       payload.embeddingDimension = Number(embeddingDimension);
+    }
+    if (config.capability === 'QA_SPLIT') {
+      payload.config = {
+        ...config.config,
+        qaSplit: {
+          ...qaSplit,
+          maxInputTokens: Number(maxInputTokens),
+          reservedOutputTokens: Number(reservedOutputTokens),
+          maxRetries: Number(maxRetries),
+          maxSplitDepth: Number(maxSplitDepth),
+        },
+      };
     }
     try {
       await onSubmit(config.id, payload);
@@ -50,7 +108,11 @@ export function ModelConfigEditModal({ config, onClose, onSubmit }: Props) {
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section aria-label="编辑模型实例" className="modal-panel" role="dialog">
+      <section
+        aria-label="编辑模型实例"
+        className="modal-panel model-config-edit-modal"
+        role="dialog"
+      >
         <div className="toolbar-row compact">
           <h3>编辑模型实例</h3>
           <button className="secondary-button" onClick={onClose} type="button">
@@ -84,6 +146,42 @@ export function ModelConfigEditModal({ config, onClose, onSubmit }: Props) {
             />
           </label>
           <label>
+            连接超时（毫秒）
+            <input
+              min={100}
+              onChange={(event) => setConnectTimeoutMs(Number(event.target.value))}
+              type="number"
+              value={connectTimeoutMs}
+            />
+          </label>
+          <label>
+            请求写入超时（毫秒）
+            <input
+              min={100}
+              onChange={(event) => setWriteTimeoutMs(Number(event.target.value))}
+              type="number"
+              value={writeTimeoutMs}
+            />
+          </label>
+          <label>
+            首 Token/读取空闲超时（毫秒）
+            <input
+              min={100}
+              onChange={(event) => setReadIdleTimeoutMs(Number(event.target.value))}
+              type="number"
+              value={readIdleTimeoutMs}
+            />
+          </label>
+          <label>
+            单次调用总超时（毫秒）
+            <input
+              min={100}
+              onChange={(event) => setOverallTimeoutMs(Number(event.target.value))}
+              type="number"
+              value={overallTimeoutMs}
+            />
+          </label>
+          <label>
             最大 Tokens
             <input
               min={1}
@@ -104,6 +202,46 @@ export function ModelConfigEditModal({ config, onClose, onSubmit }: Props) {
                 value={embeddingDimension}
               />
             </label>
+          ) : null}
+          {config.capability === 'QA_SPLIT' ? (
+            <>
+              <label>
+                QA 最大输入 Tokens
+                <input
+                  min={1}
+                  onChange={(event) => setMaxInputTokens(event.target.value)}
+                  type="number"
+                  value={maxInputTokens}
+                />
+              </label>
+              <label>
+                QA 输出预留 Tokens
+                <input
+                  min={1}
+                  onChange={(event) => setReservedOutputTokens(event.target.value)}
+                  type="number"
+                  value={reservedOutputTokens}
+                />
+              </label>
+              <label>
+                QA Batch retry 次数
+                <input
+                  min={0}
+                  onChange={(event) => setMaxRetries(event.target.value)}
+                  type="number"
+                  value={maxRetries}
+                />
+              </label>
+              <label>
+                QA 最大二分深度
+                <input
+                  min={0}
+                  onChange={(event) => setMaxSplitDepth(event.target.value)}
+                  type="number"
+                  value={maxSplitDepth}
+                />
+              </label>
+            </>
           ) : null}
           <label>
             状态
