@@ -1,0 +1,31 @@
+{
+  "task": "Task 2",
+  "scope": "Provider connect/write/read/pool/overall timeout contract",
+  "testedAt": "2026-08-04",
+  "testCommand": "pytest server/tests/test_model_providers_http.py server/tests/test_qa_split_task.py -q",
+  "testResult": {
+    "passed": 72,
+    "failed": 0,
+    "errors": 0
+  },
+  "assertions": {
+    "timeoutCodes": {
+      "connect": "PROVIDER_CONNECTION_TIMEOUT",
+      "write": "PROVIDER_WRITE_TIMEOUT",
+      "read": "PROVIDER_INFERENCE_TIMEOUT",
+      "pool": "PROVIDER_POOL_TIMEOUT",
+      "overall": "PROVIDER_OVERALL_TIMEOUT"
+    },
+    "errorContextIncludesProviderModelEndpointAndPhase": true,
+    "overallDeadlineIsNotResetByRetry": true,
+    "qaAndEmbeddingPassFourPhaseTimeoutsToAdapters": true,
+    "legacyTimeoutMsRemainsSupported": true,
+    "mockProviderRemainsNetworkFree": true
+  },
+  "sensitiveData": {
+    "apiKeys": false,
+    "prompts": false,
+    "modelOutput": false,
+    "documentContent": false
+  }
+}

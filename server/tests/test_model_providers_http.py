@@ -221,7 +221,9 @@ def test_http_provider_transport_error_is_not_reported_as_timeout(monkeypatch):
     ("exception_type", "expected_code", "expected_phase"),
     [
         (httpx.ConnectTimeout, "PROVIDER_CONNECTION_TIMEOUT", "connect"),
+        (httpx.WriteTimeout, "PROVIDER_WRITE_TIMEOUT", "write"),
         (httpx.ReadTimeout, "PROVIDER_INFERENCE_TIMEOUT", "read"),
+        (httpx.PoolTimeout, "PROVIDER_POOL_TIMEOUT", "pool"),
     ],
 )
 def test_http_provider_timeout_error_contains_provider_model_endpoint_and_phase(
@@ -253,6 +255,32 @@ def test_http_provider_timeout_error_contains_provider_model_endpoint_and_phase(
     assert "gemma3" in error.message
     assert "Ollama" in error.message
     assert "30 秒" in error.message
+
+
+def test_overall_timeout_is_not_reset_by_retry(monkeypatch):
+    calls = {"n": 0}
+    clock = iter([0.0, 0.0, 0.0, 0.06, 0.06, 0.11])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    _patch_transport(monkeypatch, handler)
+    monkeypatch.setattr(base_module.time, "monotonic", lambda: next(clock))
+    provider = OllamaProvider(
+        "http://localhost:11434",
+        None,
+        {"modelName": "gemma3", "timeoutMs": 100, "maxRetries": 3},
+        provider_name="Gemma",
+    )
+
+    with pytest.raises(ProviderError) as excinfo:
+        provider.generate_qa_pairs("hi")
+
+    error = excinfo.value
+    assert error.code == "PROVIDER_OVERALL_TIMEOUT"
+    assert error.timeout_phase == "overall"
+    assert calls["n"] == 1
 
 
 def test_ollama_model_connection_uses_selected_model_chat_endpoint(monkeypatch):

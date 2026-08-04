@@ -6,6 +6,8 @@ import time
 
 import httpx
 
+from server.app.integrations.model_providers.timeouts import ProviderTimeouts
+
 
 @dataclass(frozen=True)
 class ConnectionTestResult:
@@ -86,7 +88,10 @@ class ProviderError(Exception):
             details.append(f"endpoint：{self.endpoint}")
         if self.timeout_ms is not None and self.code in {
             "PROVIDER_CONNECTION_TIMEOUT",
+            "PROVIDER_WRITE_TIMEOUT",
+            "PROVIDER_POOL_TIMEOUT",
             "PROVIDER_INFERENCE_TIMEOUT",
+            "PROVIDER_OVERALL_TIMEOUT",
         }:
             timeout_label = _timeout_label(self.code, self.timeout_phase)
             details.append(f"超时：{self.timeout_ms // 1000} 秒{timeout_label}")
@@ -106,8 +111,16 @@ def _display_provider_type(provider_type: str) -> str:
 
 
 def _timeout_label(code: str, timeout_phase: str | None) -> str:
-    if code == "PROVIDER_INFERENCE_TIMEOUT":
+    if code == "PROVIDER_WRITE_TIMEOUT":
+        return "写入超时"
+    if code == "PROVIDER_POOL_TIMEOUT":
+        return "连接池超时"
+    if code == "PROVIDER_OVERALL_TIMEOUT":
+        return "整体超时"
+    if code == "PROVIDER_INFERENCE_TIMEOUT" and timeout_phase == "read":
         return "读取超时"
+    if code == "PROVIDER_INFERENCE_TIMEOUT":
+        return "推理超时"
     if timeout_phase == "connect":
         return "连接超时"
     return "响应超时"
@@ -166,15 +179,22 @@ class BaseProvider(ChatProvider, EmbeddingProvider):
 
     @property
     def timeout_seconds(self) -> float:
-        raw = (
-            self.config.get("timeoutMs")
-            or self.config.get("timeout_ms")
-            or 30000
+        return self.timeouts.overall_seconds
+
+    @property
+    def timeouts(self) -> ProviderTimeouts:
+        return ProviderTimeouts.from_config(
+            legacy_timeout_ms=self.config.get("timeoutMs")
+            or self.config.get("timeout_ms"),
+            connect_timeout_ms=self.config.get("connectTimeoutMs")
+            or self.config.get("connect_timeout_ms"),
+            write_timeout_ms=self.config.get("writeTimeoutMs")
+            or self.config.get("write_timeout_ms"),
+            read_idle_timeout_ms=self.config.get("readIdleTimeoutMs")
+            or self.config.get("read_idle_timeout_ms"),
+            overall_timeout_ms=self.config.get("overallTimeoutMs")
+            or self.config.get("overall_timeout_ms"),
         )
-        try:
-            return max(1.0, float(raw) / 1000)
-        except (TypeError, ValueError):
-            return 30.0
 
     @property
     def max_retries(self) -> int:
@@ -185,7 +205,55 @@ class BaseProvider(ChatProvider, EmbeddingProvider):
 
     @property
     def timeout_ms(self) -> int:
-        return max(1, int(self.timeout_seconds * 1000))
+        return max(1, int(self.timeouts.overall_seconds * 1000))
+
+    def _remaining_deadline(self, started_at: float) -> float:
+        return self.timeouts.overall_seconds - (time.monotonic() - started_at)
+
+    def _httpx_timeout(self, started_at: float) -> httpx.Timeout:
+        remaining = max(0.1, self._remaining_deadline(started_at))
+        timeouts = self.timeouts
+        return httpx.Timeout(
+            connect=min(timeouts.connect_seconds, remaining),
+            write=min(timeouts.write_seconds, remaining),
+            read=min(timeouts.read_idle_seconds, remaining),
+            pool=min(timeouts.pool_seconds, remaining),
+        )
+
+    def _timeout_error(
+        self,
+        exc: httpx.TimeoutException,
+        *,
+        endpoint: str,
+        phase: str | None,
+    ) -> ProviderError:
+        if phase == "overall":
+            return ProviderError(
+                "PROVIDER_OVERALL_TIMEOUT",
+                "模型供应商整体调用超时",
+                retryable=False,
+                **self._provider_error_context(
+                    endpoint=endpoint, timeout_phase="overall"
+                ),
+            )
+        if isinstance(exc, httpx.ConnectTimeout):
+            code, timeout_phase = "PROVIDER_CONNECTION_TIMEOUT", "connect"
+        elif isinstance(exc, httpx.WriteTimeout):
+            code, timeout_phase = "PROVIDER_WRITE_TIMEOUT", "write"
+        elif isinstance(exc, httpx.PoolTimeout):
+            code, timeout_phase = "PROVIDER_POOL_TIMEOUT", "pool"
+        elif isinstance(exc, httpx.ReadTimeout):
+            code, timeout_phase = "PROVIDER_INFERENCE_TIMEOUT", "read"
+        else:
+            code, timeout_phase = "PROVIDER_CONNECTION_TIMEOUT", "connect"
+        return ProviderError(
+            code,
+            "模型供应商请求阶段超时",
+            retryable=True,
+            **self._provider_error_context(
+                endpoint=endpoint, timeout_phase=timeout_phase
+            ),
+        )
 
     def _provider_error_context(
         self,
@@ -275,10 +343,19 @@ class HttpProvider(BaseProvider):
         timeout_phase: str | None = None,
     ) -> dict:
         last_error: ProviderError | None = None
+        started_at = time.monotonic()
         for attempt in range(self.max_retries + 1):
             try:
+                if self._remaining_deadline(started_at) <= 0:
+                    raise self._timeout_error(
+                        httpx.ReadTimeout("overall deadline exceeded"),
+                        endpoint=url,
+                        phase="overall",
+                    )
                 self.last_endpoint = url
-                with httpx.Client(timeout=self.timeout_seconds) as client:
+                with httpx.Client(
+                    timeout=self._httpx_timeout(started_at)
+                ) as client:
                     response = client.request(
                         method, url, headers=headers, json=json_body
                     )
@@ -296,35 +373,36 @@ class HttpProvider(BaseProvider):
                     )
                 return response.json()
             except (httpx.TimeoutException, httpx.TransportError) as exc:
-                is_timeout = isinstance(exc, httpx.TimeoutException)
-                is_inference_timeout = (
-                    is_timeout
-                    and timeout_phase == "inference"
-                    and isinstance(exc, httpx.ReadTimeout)
-                )
-                if is_timeout:
-                    code = (
-                        "PROVIDER_INFERENCE_TIMEOUT"
-                        if is_inference_timeout
-                        else "PROVIDER_CONNECTION_TIMEOUT"
+                if isinstance(exc, httpx.TimeoutException):
+                    last_error = self._timeout_error(
+                        exc,
+                        endpoint=url,
+                        phase=(
+                            "overall"
+                            if self._remaining_deadline(started_at) <= 0
+                            else timeout_phase
+                        ),
                     )
-                    phase = "read" if is_inference_timeout else "connect"
                 else:
                     code = "PROVIDER_CONNECTION_ERROR"
-                    phase = None
-                last_error = ProviderError(
-                    code,
-                    (
-                        "模型供应商连接失败："
-                        if code == "PROVIDER_CONNECTION_TIMEOUT"
-                        else "模型推理响应失败："
+                    last_error = ProviderError(
+                        code,
+                        "模型供应商连接失败：" + str(exc),
+                        retryable=True,
+                        **self._provider_error_context(endpoint=url),
                     )
-                    + str(exc),
-                    retryable=True,
-                    **self._provider_error_context(
-                        endpoint=url, timeout_phase=phase
-                    ),
-                )
+                if (
+                    last_error.code == "PROVIDER_OVERALL_TIMEOUT"
+                    or attempt >= self.max_retries
+                    or self._remaining_deadline(started_at) <= 0
+                ):
+                    if self._remaining_deadline(started_at) <= 0:
+                        last_error = self._timeout_error(
+                            httpx.ReadTimeout("overall deadline exceeded"),
+                            endpoint=url,
+                            phase="overall",
+                        )
+                    raise last_error from exc
                 if attempt < self.max_retries:
                     self._sleep_backoff(attempt)
                     continue
@@ -342,9 +420,16 @@ class HttpProvider(BaseProvider):
         json_body: dict | None = None,
         timeout_phase: str | None = None,
     ) -> Iterator[str]:
+        started_at = time.monotonic()
         try:
+            if self._remaining_deadline(started_at) <= 0:
+                raise self._timeout_error(
+                    httpx.ReadTimeout("overall deadline exceeded"),
+                    endpoint=url,
+                    phase="overall",
+                )
             self.last_endpoint = url
-            with httpx.Client(timeout=self.timeout_seconds) as client:
+            with httpx.Client(timeout=self._httpx_timeout(started_at)) as client:
                 with client.stream(
                     "POST", url, headers=headers, json=json_body
                 ) as response:
@@ -378,17 +463,29 @@ class HttpProvider(BaseProvider):
                 code = "PROVIDER_CONNECTION_ERROR"
                 phase = None
             raise ProviderError(
-                code,
                 (
-                    "模型供应商流式连接失败："
-                    if code == "PROVIDER_CONNECTION_TIMEOUT"
-                    else "模型推理流式响应失败："
+                    "PROVIDER_OVERALL_TIMEOUT"
+                    if self._remaining_deadline(started_at) <= 0
+                    else code
+                ),
+                (
+                    "模型供应商整体调用超时"
+                    if self._remaining_deadline(started_at) <= 0
+                    else (
+                        "模型供应商流式连接失败："
+                        if code == "PROVIDER_CONNECTION_TIMEOUT"
+                        else "模型推理流式响应失败："
+                    )
                 )
-                + str(exc),
+                + ("" if self._remaining_deadline(started_at) <= 0 else str(exc)),
                 retryable=True,
                 **self._provider_error_context(
                     endpoint=url,
-                    timeout_phase=phase,
+                    timeout_phase=(
+                        "overall"
+                        if self._remaining_deadline(started_at) <= 0
+                        else phase
+                    ),
                 ),
             ) from exc
 

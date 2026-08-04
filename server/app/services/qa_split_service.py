@@ -577,6 +577,10 @@ class QaSplitService:
                 {**(provider.config or {}), **(model_config.config or {})},
                 model_name=model_config.model_name,
                 timeout_ms=model_config.timeout_ms,
+                connect_timeout_ms=model_config.connect_timeout_ms,
+                write_timeout_ms=model_config.write_timeout_ms,
+                read_idle_timeout_ms=model_config.read_idle_timeout_ms,
+                overall_timeout_ms=model_config.overall_timeout_ms,
                 max_tokens=model_config.max_tokens,
                 provider_name=provider.name,
             )

@@ -28,6 +28,10 @@ class ProviderFactory(Protocol):
         *,
         model_name: str | None = None,
         timeout_ms: int | None = None,
+        connect_timeout_ms: int | None = None,
+        write_timeout_ms: int | None = None,
+        read_idle_timeout_ms: int | None = None,
+        overall_timeout_ms: int | None = None,
         max_tokens: int | None = None,
         provider_name: str | None = None,
     ) -> BaseProvider: ...
@@ -69,6 +73,10 @@ def build_provider_adapter(
     *,
     model_name: str | None = None,
     timeout_ms: int | None = None,
+    connect_timeout_ms: int | None = None,
+    write_timeout_ms: int | None = None,
+    read_idle_timeout_ms: int | None = None,
+    overall_timeout_ms: int | None = None,
     max_tokens: int | None = None,
     provider_name: str | None = None,
 ) -> BaseProvider:
@@ -77,6 +85,14 @@ def build_provider_adapter(
         merged["modelName"] = model_name
     if timeout_ms is not None:
         merged["timeoutMs"] = timeout_ms
+    if connect_timeout_ms is not None:
+        merged["connectTimeoutMs"] = connect_timeout_ms
+    if write_timeout_ms is not None:
+        merged["writeTimeoutMs"] = write_timeout_ms
+    if read_idle_timeout_ms is not None:
+        merged["readIdleTimeoutMs"] = read_idle_timeout_ms
+    if overall_timeout_ms is not None:
+        merged["overallTimeoutMs"] = overall_timeout_ms
     if max_tokens is not None:
         merged["maxTokens"] = max_tokens
 

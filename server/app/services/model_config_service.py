@@ -126,6 +126,18 @@ class ModelConfigService:
             config=adapter_config,
             model_name=model_config.model_name if model_config else None,
             timeout_ms=model_config.timeout_ms if model_config else None,
+            connect_timeout_ms=(
+                model_config.connect_timeout_ms if model_config else None
+            ),
+            write_timeout_ms=(
+                model_config.write_timeout_ms if model_config else None
+            ),
+            read_idle_timeout_ms=(
+                model_config.read_idle_timeout_ms if model_config else None
+            ),
+            overall_timeout_ms=(
+                model_config.overall_timeout_ms if model_config else None
+            ),
             max_tokens=model_config.max_tokens if model_config else None,
             provider_name=provider.name,
         )
