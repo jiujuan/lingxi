@@ -255,6 +255,22 @@ class BaseProvider(ChatProvider, EmbeddingProvider):
             ),
         )
 
+    def _stream_timeout_error(self, *, endpoint: str, phase: str) -> ProviderError:
+        if phase == "overall":
+            return self._timeout_error(
+                httpx.ReadTimeout("overall deadline exceeded"),
+                endpoint=endpoint,
+                phase="overall",
+            )
+        return ProviderError(
+            "PROVIDER_INFERENCE_TIMEOUT",
+            "模型供应商流式读取超时",
+            retryable=True,
+            **self._provider_error_context(
+                endpoint=endpoint, timeout_phase=phase
+            ),
+        )
+
     def _provider_error_context(
         self,
         *,
@@ -421,6 +437,8 @@ class HttpProvider(BaseProvider):
         timeout_phase: str | None = None,
     ) -> Iterator[str]:
         started_at = time.monotonic()
+        first_byte_seen = False
+        last_non_empty_at = started_at
         try:
             if self._remaining_deadline(started_at) <= 0:
                 raise self._timeout_error(
@@ -440,6 +458,28 @@ class HttpProvider(BaseProvider):
                         )
                     for line in response.iter_lines():
                         if line:
+                            now = time.monotonic()
+                            if self._remaining_deadline(started_at) <= 0:
+                                raise self._stream_timeout_error(
+                                    endpoint=url, phase="overall"
+                                )
+                            if not first_byte_seen:
+                                if (
+                                    now - started_at
+                                    > self.timeouts.first_byte_seconds
+                                ):
+                                    raise self._stream_timeout_error(
+                                        endpoint=url, phase="first_byte"
+                                    )
+                                first_byte_seen = True
+                            elif (
+                                now - last_non_empty_at
+                                > self.timeouts.read_idle_seconds
+                            ):
+                                raise self._stream_timeout_error(
+                                    endpoint=url, phase="read_idle"
+                                )
+                            last_non_empty_at = now
                             yield line
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             is_connect_timeout = isinstance(

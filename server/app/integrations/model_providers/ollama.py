@@ -97,6 +97,15 @@ class OllamaProvider(HttpProvider):
             json_body=payload,
             timeout_phase="inference",
         )
+        if isinstance(data, dict) and data.get("done_reason") == "length":
+            raise ProviderError(
+                "PROVIDER_OUTPUT_TRUNCATED",
+                "模型输出因达到 token 上限而截断",
+                retryable=False,
+                **self._provider_error_context(
+                    endpoint=self._endpoint("/api/chat")
+                ),
+            )
         message = data.get("message") if isinstance(data, dict) else None
         content = (message or {}).get("content")
         if not isinstance(content, str):

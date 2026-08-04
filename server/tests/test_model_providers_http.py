@@ -97,6 +97,131 @@ def test_openai_compatible_stream_chat_parses_sse(monkeypatch):
     assert "".join(provider.stream_chat("hi")) == "你好"
 
 
+def test_stream_first_byte_and_read_idle_timeout_phases(monkeypatch):
+    class FakeResponse:
+        status_code = 200
+
+        def __init__(self, lines):
+            self._lines = lines
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def iter_lines(self):
+            return iter(self._lines)
+
+        def read(self):
+            return b""
+
+    class FakeClient:
+        def __init__(self, lines):
+            self._lines = lines
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def stream(self, method, url, *, headers, json):
+            return FakeResponse(self._lines)
+
+    first_byte_clock = iter([0.0, 0.0, 0.0, 2.0, 2.0])
+    monkeypatch.setattr(
+        base_module.time, "monotonic", lambda: next(first_byte_clock)
+    )
+    monkeypatch.setattr(
+        base_module.httpx,
+        "Client",
+        lambda **kwargs: FakeClient(
+            ['data: {"choices":[{"delta":{"content":"a"}}]}']
+        ),
+    )
+    provider = OpenAICompatibleProvider(
+        "https://api.example.com/v1",
+        "sk-test",
+        {
+            "modelName": "gpt-x",
+            "readIdleTimeoutMs": 1000,
+            "overallTimeoutMs": 10000,
+        },
+    )
+    with pytest.raises(ProviderError) as first_byte_exc:
+        list(provider.stream_chat("hi"))
+    assert first_byte_exc.value.code == "PROVIDER_INFERENCE_TIMEOUT"
+    assert first_byte_exc.value.timeout_phase == "first_byte"
+
+    read_idle_clock = iter([0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0])
+    monkeypatch.setattr(
+        base_module.time, "monotonic", lambda: next(read_idle_clock)
+    )
+    monkeypatch.setattr(
+        base_module.httpx,
+        "Client",
+        lambda **kwargs: FakeClient(
+            [
+                'data: {"choices":[{"delta":{"content":"a"}}]}',
+                'data: {"choices":[{"delta":{"content":"b"}}]}',
+            ]
+        ),
+    )
+    with pytest.raises(ProviderError) as read_idle_exc:
+        list(provider.stream_chat("hi"))
+    assert read_idle_exc.value.code == "PROVIDER_INFERENCE_TIMEOUT"
+    assert read_idle_exc.value.timeout_phase == "read_idle"
+
+
+def test_openai_compatible_finish_reason_length_is_terminal(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "length",
+                        "message": {"content": "截断"},
+                    }
+                ]
+            },
+        )
+
+    _patch_transport(monkeypatch, handler)
+    provider = OpenAICompatibleProvider(
+        "https://api.example.com/v1", "sk-test", {"modelName": "deepseek-chat"}
+    )
+
+    with pytest.raises(ProviderError) as excinfo:
+        provider.complete_chat("hi")
+
+    assert excinfo.value.code == "PROVIDER_OUTPUT_TRUNCATED"
+    assert excinfo.value.retryable is False
+
+
+def test_ollama_done_reason_length_is_terminal(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "done_reason": "length",
+                "message": {"content": "截断"},
+            },
+        )
+
+    _patch_transport(monkeypatch, handler)
+    provider = OllamaProvider(
+        "http://localhost:11434", None, {"modelName": "gemma3"}
+    )
+
+    with pytest.raises(ProviderError) as excinfo:
+        provider.complete_chat("hi")
+
+    assert excinfo.value.code == "PROVIDER_OUTPUT_TRUNCATED"
+    assert excinfo.value.retryable is False
+
+
 def test_ollama_chat_uses_native_shape(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/chat"

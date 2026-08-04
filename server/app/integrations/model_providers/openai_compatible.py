@@ -121,8 +121,7 @@ class OpenAICompatibleProvider(HttpProvider):
             payload["temperature"] = float(temperature)
         return payload
 
-    @staticmethod
-    def _extract_message(data: dict) -> str:
+    def _extract_message(self, data: dict) -> str:
         choices = data.get("choices") if isinstance(data, dict) else None
         if not choices:
             raise ProviderError(
@@ -130,6 +129,16 @@ class OpenAICompatibleProvider(HttpProvider):
                 "模型响应缺少 choices",
                 **self._provider_error_context(
                     endpoint=self._endpoint(self._chat_path),
+                ),
+            )
+        finish_reason = choices[0].get("finish_reason")
+        if finish_reason == "length":
+            raise ProviderError(
+                "PROVIDER_OUTPUT_TRUNCATED",
+                "模型输出因达到 token 上限而截断",
+                retryable=False,
+                **self._provider_error_context(
+                    endpoint=self._endpoint(self._chat_path)
                 ),
             )
         message = choices[0].get("message") or {}

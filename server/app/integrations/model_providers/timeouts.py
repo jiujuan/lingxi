@@ -16,6 +16,7 @@ class ProviderTimeouts:
     read_idle_seconds: float
     pool_seconds: float
     overall_seconds: float
+    first_byte_seconds: float
 
     @classmethod
     def from_config(
@@ -26,6 +27,7 @@ class ProviderTimeouts:
         write_timeout_ms: int | None,
         read_idle_timeout_ms: int | None,
         overall_timeout_ms: int | None,
+        first_byte_timeout_ms: int | None = None,
     ) -> "ProviderTimeouts":
         legacy = legacy_timeout_ms or 30000
         return cls(
@@ -36,4 +38,10 @@ class ProviderTimeouts:
             read_idle_seconds=_seconds(read_idle_timeout_ms, int(legacy)),
             pool_seconds=_seconds(connect_timeout_ms, min(int(legacy), 10000)),
             overall_seconds=_seconds(overall_timeout_ms, int(legacy)),
+            first_byte_seconds=_seconds(
+                first_byte_timeout_ms
+                if first_byte_timeout_ms is not None
+                else read_idle_timeout_ms,
+                int(legacy),
+            ),
         )

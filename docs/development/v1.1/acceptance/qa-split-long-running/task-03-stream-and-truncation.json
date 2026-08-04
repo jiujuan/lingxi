@@ -1,0 +1,31 @@
+{
+  "task": "Task 3",
+  "scope": "Streaming first-byte/read-idle diagnostics and output truncation handling",
+  "testedAt": "2026-08-04",
+  "testCommand": "pytest server/tests/test_model_providers_http.py server/tests/test_openai_compatible_api.py -q",
+  "testResult": {
+    "passed": 27,
+    "failed": 0,
+    "errors": 0
+  },
+  "assertions": {
+    "firstByteTimeoutPhase": "first_byte",
+    "readIdleTimeoutPhase": "read_idle",
+    "normalSseStillConcatenates": true,
+    "openAiFinishReasonLength": {
+      "code": "PROVIDER_OUTPUT_TRUNCATED",
+      "retryable": false
+    },
+    "ollamaDoneReasonLength": {
+      "code": "PROVIDER_OUTPUT_TRUNCATED",
+      "retryable": false
+    },
+    "doneMarkerRemainsCompatible": true
+  },
+  "sensitiveData": {
+    "apiKeys": false,
+    "prompts": false,
+    "modelOutput": false,
+    "documentContent": false
+  }
+}
