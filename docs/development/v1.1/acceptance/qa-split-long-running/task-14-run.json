@@ -1,0 +1,101 @@
+{
+  "task": "Task 14 - Long PDF end-to-end acceptance, runbook, and evidence archive",
+  "status": "passed",
+  "verificationDate": "2026-08-04",
+  "scope": {
+    "pipeline": "upload fixture -> parse -> QA Split -> embedding -> READY",
+    "providerEvidence": "deterministic injected fixture providers",
+    "realProviderEvidence": "not claimed; Ollama Gemma and DeepSeek require external services and credentials"
+  },
+  "fixtures": [
+    {
+      "name": "slow-success",
+      "providerType": "OPENAI_COMPATIBLE",
+      "modelName": "fixture-qa-slow",
+      "chunkCount": 2,
+      "simulatedReadDelayMs": 30,
+      "maxRetries": 0,
+      "maxSplitDepth": 1,
+      "expectedFinalDocumentStatus": "READY",
+      "expectedImportJobStatus": "COMPLETED",
+      "assertions": [
+        "one successful QA model call is persisted",
+        "the successful call has non-zero latency",
+        "embedding completes after QA publish"
+      ]
+    },
+    {
+      "name": "timeout-split-recovery",
+      "providerType": "OPENAI_COMPATIBLE",
+      "modelName": "fixture-qa-split",
+      "chunkCount": 6,
+      "timeout": {
+        "errorCode": "PROVIDER_INFERENCE_TIMEOUT",
+        "retryable": true,
+        "timeoutPhase": "read",
+        "timeoutMs": 240000
+      },
+      "batch": {
+        "initialChunkIndexes": [0, 1, 2, 3, 4, 5],
+        "successfulSplitChunkIndexes": [[0, 1, 2], [3, 4, 5]]
+      },
+      "maxRetries": 0,
+      "maxSplitDepth": 1,
+      "expectedFinalDocumentStatus": "READY",
+      "expectedImportJobStatus": "COMPLETED",
+      "expectedQaPairCount": 6,
+      "expectedBatchLogIndexes": ["0", "0.0", "0.1"]
+    },
+    {
+      "name": "invalid-items-terminal",
+      "providerType": "OPENAI_COMPATIBLE",
+      "modelName": "fixture-invalid-output",
+      "providerResponseShape": {
+        "items": {}
+      },
+      "maxRetries": 2,
+      "maxSplitDepth": 1,
+      "expectedProviderCallCount": 1,
+      "expectedErrorCode": "QA_PROVENANCE_CONTRACT_INVALID",
+      "expectedFinalDocumentStatus": "FAILED",
+      "existingActiveQaPreserved": true
+    }
+  ],
+  "verification": {
+    "e2e": {
+      "command": "pytest server/tests/e2e/test_v1_1_release_e2e.py -q",
+      "result": "5 passed"
+    },
+    "playwright": {
+      "command": "$env:LINGXI_ACCEPTANCE_SCREENSHOT_PREFIX='task-14-screenshot'; python web/admin/tests/t19_qa_split_timeout_playwright.py",
+      "result": "T19 QA split timeout admin acceptance passed",
+      "screenshots": [
+        "docs/development/v1.1/acceptance/qa-split-long-running/task-14-screenshot-desktop.png",
+        "docs/development/v1.1/acceptance/qa-split-long-running/task-14-screenshot-mobile.png"
+      ]
+    },
+    "pythonCompile": {
+      "command": "python -m py_compile server/tests/e2e/test_v1_1_release_e2e.py web/admin/tests/t19_qa_split_timeout_playwright.py",
+      "result": "passed"
+    },
+    "adminLint": {
+      "command": "npm run lint",
+      "workdir": "web/admin",
+      "result": "passed"
+    },
+    "adminBuild": {
+      "command": "npm run build",
+      "workdir": "web/admin",
+      "result": "passed"
+    },
+    "diffCheck": {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  },
+  "safety": [
+    "The fixture providers, tests, and evidence contain no API key, full prompt, full model output, or PDF source text.",
+    "The QA publish boundary is exercised before embedding is allowed to reach READY.",
+    "Terminal provenance contract errors are not retried and do not replace existing ACTIVE QA pairs."
+  ]
+}

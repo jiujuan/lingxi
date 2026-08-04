@@ -1,0 +1,70 @@
+{
+  "task": "Task 14 - Redacted QA Split ModelCallLog evidence",
+  "status": "passed",
+  "verificationDate": "2026-08-04",
+  "source": "server/tests/e2e/test_v1_1_release_e2e.py",
+  "records": [
+    {
+      "scenario": "slow-success",
+      "providerType": "OPENAI_COMPATIBLE",
+      "capability": "QA_SPLIT",
+      "modelNameSnapshot": "fixture-qa-slow",
+      "status": "SUCCESS",
+      "batchIndex": "0",
+      "retryCount": 0,
+      "splitDepth": 0,
+      "timeoutPhase": null,
+      "latencyMs": ">=20",
+      "tokenUsage": {},
+      "endpoint": "fixture://qa-split/chat/completions"
+    },
+    {
+      "scenario": "timeout-split-recovery",
+      "providerType": "OPENAI_COMPATIBLE",
+      "capability": "QA_SPLIT",
+      "modelNameSnapshot": "fixture-qa-split",
+      "status": "FAILED",
+      "batchIndex": "0",
+      "retryCount": 0,
+      "splitDepth": 0,
+      "timeoutPhase": "read",
+      "errorCode": "PROVIDER_INFERENCE_TIMEOUT",
+      "errorMessage": "fixture read-idle timeout",
+      "tokenUsage": {},
+      "endpoint": "fixture://qa-split/chat/completions"
+    },
+    {
+      "scenario": "timeout-split-recovery",
+      "providerType": "OPENAI_COMPATIBLE",
+      "capability": "QA_SPLIT",
+      "modelNameSnapshot": "fixture-qa-split",
+      "status": "SUCCESS",
+      "batchIndex": "0.0",
+      "retryCount": 0,
+      "splitDepth": 1,
+      "timeoutPhase": null,
+      "tokenUsage": {},
+      "endpoint": "fixture://qa-split/chat/completions"
+    },
+    {
+      "scenario": "timeout-split-recovery",
+      "providerType": "OPENAI_COMPATIBLE",
+      "capability": "QA_SPLIT",
+      "modelNameSnapshot": "fixture-qa-split",
+      "status": "SUCCESS",
+      "batchIndex": "0.1",
+      "retryCount": 0,
+      "splitDepth": 1,
+      "timeoutPhase": null,
+      "tokenUsage": {},
+      "endpoint": "fixture://qa-split/chat/completions"
+    }
+  ],
+  "redaction": [
+    "No API key",
+    "No complete prompt",
+    "No complete model output",
+    "No PDF source text",
+    "No high-cardinality request identifiers"
+  ]
+}

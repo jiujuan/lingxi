@@ -9,6 +9,9 @@ from playwright.sync_api import Page, Route, expect, sync_playwright
 ROOT = Path(__file__).resolve().parents[3]
 APP_URL = os.environ.get("LINGXI_ADMIN_APP_URL", "http://127.0.0.1:5174")
 SCREENSHOT_DIR = ROOT / "docs" / "development" / "v1.1" / "acceptance" / "qa-split-long-running"
+SCREENSHOT_PREFIX = os.environ.get(
+    "LINGXI_ACCEPTANCE_SCREENSHOT_PREFIX", "t12-admin"
+)
 
 AUTH_USER = {
     "id": "playwright-admin",
@@ -294,7 +297,10 @@ def verify_page(page: Page, suffix: str) -> list[str]:
     verify_model_config(page, suffix)
     verify_model_logs(page, suffix)
     SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
-    page.screenshot(path=str(SCREENSHOT_DIR / f"t12-admin-{suffix}.png"), full_page=True)
+    page.screenshot(
+        path=str(SCREENSHOT_DIR / f"{SCREENSHOT_PREFIX}-{suffix}.png"),
+        full_page=True,
+    )
     return console_errors
 
 
