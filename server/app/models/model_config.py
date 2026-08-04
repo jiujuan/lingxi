@@ -63,6 +63,10 @@ class ModelConfig(IdMixin, TimestampMixin, Base):
     embedding_dimension: Mapped[int | None] = mapped_column(Integer)
     max_tokens: Mapped[int | None] = mapped_column(Integer)
     timeout_ms: Mapped[int] = mapped_column(Integer, default=30000)
+    connect_timeout_ms: Mapped[int | None] = mapped_column(Integer)
+    write_timeout_ms: Mapped[int | None] = mapped_column(Integer)
+    read_idle_timeout_ms: Mapped[int | None] = mapped_column(Integer)
+    overall_timeout_ms: Mapped[int | None] = mapped_column(Integer)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(
         String(40), default=ModelConfigStatus.ACTIVE.value, nullable=False

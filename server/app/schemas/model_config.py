@@ -69,7 +69,19 @@ class ModelConfigCreateRequest(BaseModel):
     model_name: str = Field(alias="modelName", min_length=1, max_length=160)
     embedding_dimension: int | None = Field(default=None, alias="embeddingDimension")
     max_tokens: int | None = Field(default=None, alias="maxTokens")
-    timeout_ms: int = Field(default=30000, alias="timeoutMs")
+    timeout_ms: int | bool = Field(default=30000, alias="timeoutMs")
+    connect_timeout_ms: int | bool | None = Field(
+        default=None, alias="connectTimeoutMs"
+    )
+    write_timeout_ms: int | bool | None = Field(
+        default=None, alias="writeTimeoutMs"
+    )
+    read_idle_timeout_ms: int | bool | None = Field(
+        default=None, alias="readIdleTimeoutMs"
+    )
+    overall_timeout_ms: int | bool | None = Field(
+        default=None, alias="overallTimeoutMs"
+    )
     is_default: bool = Field(default=False, alias="isDefault")
     status: str = "ACTIVE"
     config: dict = Field(default_factory=dict)
@@ -81,7 +93,19 @@ class ModelConfigUpdateRequest(BaseModel):
     model_name: str | None = Field(default=None, alias="modelName")
     embedding_dimension: int | None = Field(default=None, alias="embeddingDimension")
     max_tokens: int | None = Field(default=None, alias="maxTokens")
-    timeout_ms: int | None = Field(default=None, alias="timeoutMs")
+    timeout_ms: int | bool | None = Field(default=None, alias="timeoutMs")
+    connect_timeout_ms: int | bool | None = Field(
+        default=None, alias="connectTimeoutMs"
+    )
+    write_timeout_ms: int | bool | None = Field(
+        default=None, alias="writeTimeoutMs"
+    )
+    read_idle_timeout_ms: int | bool | None = Field(
+        default=None, alias="readIdleTimeoutMs"
+    )
+    overall_timeout_ms: int | bool | None = Field(
+        default=None, alias="overallTimeoutMs"
+    )
     is_default: bool | None = Field(default=None, alias="isDefault")
     status: str | None = None
     config: dict | None = None
@@ -97,6 +121,10 @@ class ModelConfigResponse(BaseModel):
     embedding_dimension: int | None = Field(alias="embeddingDimension")
     max_tokens: int | None = Field(alias="maxTokens")
     timeout_ms: int = Field(alias="timeoutMs")
+    connect_timeout_ms: int | None = Field(alias="connectTimeoutMs")
+    write_timeout_ms: int | None = Field(alias="writeTimeoutMs")
+    read_idle_timeout_ms: int | None = Field(alias="readIdleTimeoutMs")
+    overall_timeout_ms: int | None = Field(alias="overallTimeoutMs")
     is_default: bool = Field(alias="isDefault")
     status: str
     config: dict

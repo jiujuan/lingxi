@@ -1,0 +1,31 @@
+{
+  "task": "Task 1",
+  "scope": "QA Split model timeout and runtime configuration contract",
+  "testedAt": "2026-08-04",
+  "testCommand": "pytest server/tests/test_config.py server/tests/test_model_config.py -q",
+  "testResult": {
+    "passed": 55,
+    "failed": 0,
+    "errors": 0
+  },
+  "assertions": {
+    "legacyTimeoutMsCreateReadUpdate": true,
+    "fourPhaseTimeoutFieldsReturned": [
+      "timeoutMs",
+      "connectTimeoutMs",
+      "writeTimeoutMs",
+      "readIdleTimeoutMs",
+      "overallTimeoutMs"
+    ],
+    "invalidTimeoutsRejected": true,
+    "overallMustNotBeBelowReadIdle": true,
+    "booleanTimeoutValuesRejected": true,
+    "qaSplitDefaultsAndEnvironmentOverridesVerified": true
+  },
+  "sensitiveData": {
+    "apiKeys": false,
+    "prompts": false,
+    "modelOutput": false,
+    "documentContent": false
+  }
+}

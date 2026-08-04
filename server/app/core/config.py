@@ -393,6 +393,24 @@ class Settings:
     qa_split_max_batch_chars: int = field(
         default_factory=lambda: int(os.getenv("QA_SPLIT_MAX_BATCH_CHARS", "6000"))
     )
+    qa_split_max_input_tokens: int = field(
+        default_factory=lambda: int(os.getenv("QA_SPLIT_MAX_INPUT_TOKENS", "4096"))
+    )
+    qa_split_reserved_output_tokens: int = field(
+        default_factory=lambda: int(os.getenv("QA_SPLIT_RESERVED_OUTPUT_TOKENS", "2048"))
+    )
+    qa_split_max_retries: int = field(
+        default_factory=lambda: int(os.getenv("QA_SPLIT_MAX_RETRIES", "1"))
+    )
+    qa_split_max_split_depth: int = field(
+        default_factory=lambda: int(os.getenv("QA_SPLIT_MAX_SPLIT_DEPTH", "1"))
+    )
+    qa_split_initial_concurrency: int = field(
+        default_factory=lambda: int(os.getenv("QA_SPLIT_INITIAL_CONCURRENCY", "1"))
+    )
+    qa_split_min_concurrency: int = field(
+        default_factory=lambda: int(os.getenv("QA_SPLIT_MIN_CONCURRENCY", "1"))
+    )
     qa_split_max_concurrency: int = field(
         default_factory=lambda: int(os.getenv("QA_SPLIT_MAX_CONCURRENCY", "4"))
     )

@@ -187,13 +187,24 @@ class ModelConfigService:
         model_name: str,
         embedding_dimension: int | None,
         max_tokens: int | None,
-        timeout_ms: int,
+        timeout_ms: int | bool,
+        connect_timeout_ms: int | bool | None,
+        write_timeout_ms: int | bool | None,
+        read_idle_timeout_ms: int | bool | None,
+        overall_timeout_ms: int | bool | None,
         is_default: bool,
         status: str,
         config: dict | None,
     ) -> ModelConfig:
         self._validate_capability(capability)
         self._validate_config_status(status)
+        self._validate_timeouts(
+            timeout_ms=timeout_ms,
+            connect_timeout_ms=connect_timeout_ms,
+            write_timeout_ms=write_timeout_ms,
+            read_idle_timeout_ms=read_idle_timeout_ms,
+            overall_timeout_ms=overall_timeout_ms,
+        )
         self._get_provider(context.tenant_id, provider_id)
         if is_default:
             self.configs.clear_default(context.tenant_id, capability)
@@ -205,6 +216,10 @@ class ModelConfigService:
             embedding_dimension=embedding_dimension,
             max_tokens=max_tokens,
             timeout_ms=timeout_ms,
+            connect_timeout_ms=connect_timeout_ms,
+            write_timeout_ms=write_timeout_ms,
+            read_idle_timeout_ms=read_idle_timeout_ms,
+            overall_timeout_ms=overall_timeout_ms,
             is_default=is_default,
             status=status,
             config=config or {},
@@ -221,12 +236,46 @@ class ModelConfigService:
         model_name: str | None = None,
         embedding_dimension: int | None = None,
         max_tokens: int | None = None,
-        timeout_ms: int | None = None,
+        timeout_ms: int | bool | None = None,
+        connect_timeout_ms: int | bool | None = None,
+        write_timeout_ms: int | bool | None = None,
+        read_idle_timeout_ms: int | bool | None = None,
+        overall_timeout_ms: int | bool | None = None,
         is_default: bool | None = None,
         status: str | None = None,
         config: dict | None = None,
     ) -> ModelConfig:
         model_config = self._get_model_config(context.tenant_id, config_id)
+        effective_timeout_ms = (
+            timeout_ms if timeout_ms is not None else model_config.timeout_ms
+        )
+        effective_connect_timeout_ms = (
+            connect_timeout_ms
+            if connect_timeout_ms is not None
+            else model_config.connect_timeout_ms
+        )
+        effective_write_timeout_ms = (
+            write_timeout_ms
+            if write_timeout_ms is not None
+            else model_config.write_timeout_ms
+        )
+        effective_read_idle_timeout_ms = (
+            read_idle_timeout_ms
+            if read_idle_timeout_ms is not None
+            else model_config.read_idle_timeout_ms
+        )
+        effective_overall_timeout_ms = (
+            overall_timeout_ms
+            if overall_timeout_ms is not None
+            else model_config.overall_timeout_ms
+        )
+        self._validate_timeouts(
+            timeout_ms=effective_timeout_ms,
+            connect_timeout_ms=effective_connect_timeout_ms,
+            write_timeout_ms=effective_write_timeout_ms,
+            read_idle_timeout_ms=effective_read_idle_timeout_ms,
+            overall_timeout_ms=effective_overall_timeout_ms,
+        )
         if model_name is not None:
             model_config.model_name = model_name.strip()
         if embedding_dimension is not None:
@@ -235,6 +284,14 @@ class ModelConfigService:
             model_config.max_tokens = max_tokens
         if timeout_ms is not None:
             model_config.timeout_ms = timeout_ms
+        if connect_timeout_ms is not None:
+            model_config.connect_timeout_ms = connect_timeout_ms
+        if write_timeout_ms is not None:
+            model_config.write_timeout_ms = write_timeout_ms
+        if read_idle_timeout_ms is not None:
+            model_config.read_idle_timeout_ms = read_idle_timeout_ms
+        if overall_timeout_ms is not None:
+            model_config.overall_timeout_ms = overall_timeout_ms
         if status is not None:
             self._validate_config_status(status)
             model_config.status = status
@@ -289,6 +346,10 @@ class ModelConfigService:
             "embedding_dimension": model_config.embedding_dimension,
             "max_tokens": model_config.max_tokens,
             "timeout_ms": model_config.timeout_ms,
+            "connect_timeout_ms": model_config.connect_timeout_ms,
+            "write_timeout_ms": model_config.write_timeout_ms,
+            "read_idle_timeout_ms": model_config.read_idle_timeout_ms,
+            "overall_timeout_ms": model_config.overall_timeout_ms,
             "is_default": model_config.is_default,
             "status": model_config.status,
             "config": model_config.config or {},
@@ -325,3 +386,37 @@ class ModelConfigService:
     def _validate_capability(capability: str) -> None:
         if capability not in {item.value for item in ModelCapability}:
             raise bad_request("INVALID_MODEL_CAPABILITY", "模型能力不支持")
+
+    @staticmethod
+    def _validate_timeouts(
+        *,
+        timeout_ms: int | bool | None,
+        connect_timeout_ms: int | bool | None,
+        write_timeout_ms: int | bool | None,
+        read_idle_timeout_ms: int | bool | None,
+        overall_timeout_ms: int | bool | None,
+    ) -> None:
+        values = {
+            "timeoutMs": timeout_ms,
+            "connectTimeoutMs": connect_timeout_ms,
+            "writeTimeoutMs": write_timeout_ms,
+            "readIdleTimeoutMs": read_idle_timeout_ms,
+            "overallTimeoutMs": overall_timeout_ms,
+        }
+        for name, value in values.items():
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 100
+            ):
+                raise bad_request(
+                    "INVALID_MODEL_TIMEOUT",
+                    f"{name} 必须不小于 100ms",
+                )
+        if (
+            overall_timeout_ms is not None
+            and read_idle_timeout_ms is not None
+            and overall_timeout_ms < read_idle_timeout_ms
+        ):
+            raise bad_request(
+                "INVALID_MODEL_TIMEOUT",
+                "overallTimeoutMs 不能小于 readIdleTimeoutMs",
+            )

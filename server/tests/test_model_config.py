@@ -1,3 +1,4 @@
+import pytest
 from sqlalchemy import select
 
 from server.tests.test_auth_rbac import build_test_client
@@ -136,6 +137,138 @@ def test_model_connection_test_binds_selected_model_and_capability():
     assert log.provider_id == provider["id"]
     assert log.model_config_id == model["id"]
     assert log.capability == "QA_SPLIT"
+
+
+def test_model_config_timeout_fields_are_returned_and_legacy_timeout_remains_supported():
+    client, _ = build_test_client()
+    headers = login_admin(client)
+    provider = _create_provider(client, headers, "Timeout Provider")
+
+    response = client.post(
+        "/api/v1/model-configs",
+        headers=headers,
+        json={
+            "providerId": provider["id"],
+            "capability": "QA_SPLIT",
+            "modelName": "qa-timeout-model",
+            "timeoutMs": 180000,
+            "connectTimeoutMs": 5000,
+            "writeTimeoutMs": 30000,
+            "readIdleTimeoutMs": 180000,
+            "overallTimeoutMs": 240000,
+            "maxTokens": 4096,
+            "config": {
+                "qaSplit": {
+                    "maxInputTokens": 4096,
+                    "reservedOutputTokens": 2048,
+                    "maxRetries": 1,
+                    "maxSplitDepth": 1,
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["timeoutMs"] == 180000
+    assert body["connectTimeoutMs"] == 5000
+    assert body["writeTimeoutMs"] == 30000
+    assert body["readIdleTimeoutMs"] == 180000
+    assert body["overallTimeoutMs"] == 240000
+
+    listed = client.get("/api/v1/model-configs?capability=QA_SPLIT", headers=headers)
+    assert listed.status_code == 200
+    assert listed.json()["data"][0]["readIdleTimeoutMs"] == 180000
+
+    updated = client.patch(
+        f"/api/v1/model-configs/{body['id']}",
+        headers=headers,
+        json={"connectTimeoutMs": 7000, "overallTimeoutMs": 300000},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["connectTimeoutMs"] == 7000
+    assert updated.json()["overallTimeoutMs"] == 300000
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"timeoutMs": 99},
+        {"connectTimeoutMs": 99},
+        {"writeTimeoutMs": 99},
+        {"readIdleTimeoutMs": 99},
+        {"overallTimeoutMs": 99},
+        {"timeoutMs": True},
+        {"connectTimeoutMs": True},
+        {"writeTimeoutMs": True},
+        {"readIdleTimeoutMs": True},
+        {"overallTimeoutMs": True},
+    ],
+)
+def test_model_config_rejects_invalid_timeout_values(payload):
+    client, _ = build_test_client()
+    headers = login_admin(client)
+    provider = _create_provider(client, headers, "Invalid Timeout Provider")
+    response = client.post(
+        "/api/v1/model-configs",
+        headers=headers,
+        json={
+            "providerId": provider["id"],
+            "capability": "QA_SPLIT",
+            "modelName": "invalid-timeout-model",
+            "isDefault": True,
+            **payload,
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "INVALID_MODEL_TIMEOUT"
+
+
+def test_model_config_rejects_overall_timeout_below_read_idle_timeout():
+    client, _ = build_test_client()
+    headers = login_admin(client)
+    provider = _create_provider(client, headers, "Invalid Relation Provider")
+
+    response = client.post(
+        "/api/v1/model-configs",
+        headers=headers,
+        json={
+            "providerId": provider["id"],
+            "capability": "QA_SPLIT",
+            "modelName": "invalid-relation-model",
+            "readIdleTimeoutMs": 180000,
+            "overallTimeoutMs": 120000,
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "INVALID_MODEL_TIMEOUT"
+
+
+def test_model_config_create_with_only_legacy_timeout_keeps_new_fields_compatible():
+    client, _ = build_test_client()
+    headers = login_admin(client)
+    provider = _create_provider(client, headers, "Legacy Timeout Provider")
+
+    response = client.post(
+        "/api/v1/model-configs",
+        headers=headers,
+        json={
+            "providerId": provider["id"],
+            "capability": "QA_SPLIT",
+            "modelName": "legacy-timeout-model",
+            "timeoutMs": 180000,
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["timeoutMs"] == 180000
+    assert {
+        "connectTimeoutMs",
+        "writeTimeoutMs",
+        "readIdleTimeoutMs",
+        "overallTimeoutMs",
+    } <= body.keys()
 
 
 def test_default_model_is_unique_per_capability():

@@ -215,6 +215,45 @@ def test_settings_upload_and_mineru_defaults_when_unset(monkeypatch):
     assert settings.embedding_vector_dimension == 1024
 
 
+def test_qa_split_settings_read_defaults_and_environment_overrides(monkeypatch):
+    for name in (
+        "QA_SPLIT_MAX_INPUT_TOKENS",
+        "QA_SPLIT_RESERVED_OUTPUT_TOKENS",
+        "QA_SPLIT_MAX_RETRIES",
+        "QA_SPLIT_MAX_SPLIT_DEPTH",
+        "QA_SPLIT_INITIAL_CONCURRENCY",
+        "QA_SPLIT_MIN_CONCURRENCY",
+        "QA_SPLIT_MAX_CONCURRENCY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    defaults = Settings()
+    assert defaults.qa_split_max_input_tokens == 4096
+    assert defaults.qa_split_reserved_output_tokens == 2048
+    assert defaults.qa_split_max_retries == 1
+    assert defaults.qa_split_max_split_depth == 1
+    assert defaults.qa_split_initial_concurrency == 1
+    assert defaults.qa_split_min_concurrency == 1
+    assert defaults.qa_split_max_concurrency == 4
+
+    monkeypatch.setenv("QA_SPLIT_MAX_INPUT_TOKENS", "8192")
+    monkeypatch.setenv("QA_SPLIT_RESERVED_OUTPUT_TOKENS", "1024")
+    monkeypatch.setenv("QA_SPLIT_MAX_RETRIES", "3")
+    monkeypatch.setenv("QA_SPLIT_MAX_SPLIT_DEPTH", "2")
+    monkeypatch.setenv("QA_SPLIT_INITIAL_CONCURRENCY", "2")
+    monkeypatch.setenv("QA_SPLIT_MIN_CONCURRENCY", "1")
+    monkeypatch.setenv("QA_SPLIT_MAX_CONCURRENCY", "6")
+
+    overridden = Settings()
+    assert overridden.qa_split_max_input_tokens == 8192
+    assert overridden.qa_split_reserved_output_tokens == 1024
+    assert overridden.qa_split_max_retries == 3
+    assert overridden.qa_split_max_split_depth == 2
+    assert overridden.qa_split_initial_concurrency == 2
+    assert overridden.qa_split_min_concurrency == 1
+    assert overridden.qa_split_max_concurrency == 6
+
+
 def test_empty_secret_encryption_key_uses_independent_dev_default(monkeypatch):
     # The encryption key no longer falls back to JWT_SECRET_KEY: an unset value
     # resolves to its own dev default so the two secrets stay independent.
