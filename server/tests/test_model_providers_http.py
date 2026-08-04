@@ -158,6 +158,95 @@ def test_http_provider_maps_auth_error_and_does_not_retry(monkeypatch):
     assert calls["n"] == 1  # 401 is terminal, no retry
 
 
+def test_http_provider_transport_error_is_not_reported_as_timeout(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    _patch_transport(monkeypatch, handler)
+    provider = OllamaProvider(
+        "http://localhost:11434",
+        None,
+        {"modelName": "gemma3", "timeoutMs": 30000, "maxRetries": 0},
+        provider_name="Gemma",
+    )
+
+    with pytest.raises(ProviderError) as excinfo:
+        provider.generate_qa_pairs("hi")
+
+    error = excinfo.value
+    assert error.code == "PROVIDER_CONNECTION_ERROR"
+    assert error.timeout_phase is None
+    assert "30 秒" not in error.message
+
+
+@pytest.mark.parametrize(
+    ("exception_type", "expected_code", "expected_phase"),
+    [
+        (httpx.ConnectTimeout, "PROVIDER_CONNECTION_TIMEOUT", "connect"),
+        (httpx.ReadTimeout, "PROVIDER_INFERENCE_TIMEOUT", "read"),
+    ],
+)
+def test_http_provider_timeout_error_contains_provider_model_endpoint_and_phase(
+    monkeypatch, exception_type, expected_code, expected_phase
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise exception_type("timed out", request=request)
+
+    _patch_transport(monkeypatch, handler)
+    provider = OllamaProvider(
+        "http://localhost:11434",
+        None,
+        {"modelName": "gemma3", "timeoutMs": 30000, "maxRetries": 0},
+        provider_name="Gemma",
+    )
+
+    with pytest.raises(ProviderError) as excinfo:
+        provider.generate_qa_pairs("hi")
+
+    error = excinfo.value
+    assert error.code == expected_code
+    assert error.provider_name == "Gemma"
+    assert error.provider_type == "OLLAMA"
+    assert error.model_name == "gemma3"
+    assert error.endpoint == "http://localhost:11434/api/chat"
+    assert error.timeout_ms == 30000
+    assert error.timeout_phase == expected_phase
+    assert "Gemma" in error.message
+    assert "gemma3" in error.message
+    assert "Ollama" in error.message
+    assert "30 秒" in error.message
+
+
+def test_ollama_model_connection_uses_selected_model_chat_endpoint(monkeypatch):
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/chat"
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json={"message": {"content": "ok"}})
+
+    _patch_transport(monkeypatch, handler)
+    provider = OllamaProvider(
+        "http://localhost:11434",
+        None,
+        {"modelName": "gemma3", "maxTokens": 8},
+        provider_name="Gemma",
+    )
+
+    result = provider.test_model_connection()
+
+    assert result.success is True
+    assert result.endpoint == "http://localhost:11434/api/chat"
+    assert seen == [
+        {
+            "model": "gemma3",
+            "messages": [{"role": "user", "content": "连接测试：请只回复 OK。"}],
+            "stream": False,
+            "options": {"num_predict": 8},
+        }
+    ]
+
+
 def test_registry_dispatches_mock_vs_real():
     # mock:// scheme -> deterministic mock
     assert isinstance(
@@ -190,3 +279,19 @@ def test_registry_injects_model_name_and_timeout():
     )
     assert adapter.model_name == "qwen"
     assert adapter.timeout_seconds == 12.0
+
+
+def test_registry_explicit_model_settings_override_provider_config():
+    adapter = build_provider_adapter(
+        "OLLAMA",
+        "http://localhost:11434",
+        None,
+        {"modelName": "provider-model", "timeoutMs": 1000, "maxTokens": 4},
+        model_name="qa-model",
+        timeout_ms=30000,
+        max_tokens=8,
+    )
+
+    assert adapter.model_name == "qa-model"
+    assert adapter.timeout_ms == 30000
+    assert adapter.config["maxTokens"] == 8

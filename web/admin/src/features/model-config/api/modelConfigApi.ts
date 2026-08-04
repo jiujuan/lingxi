@@ -29,6 +29,13 @@ export type ConnectionTestResult = {
   latencyMs: number;
   errorCode: string | null;
   errorMessage: string | null;
+  providerName: string | null;
+  providerType: string | null;
+  modelConfigId: string | null;
+  modelName: string | null;
+  endpoint: string | null;
+  timeoutMs: number | null;
+  timeoutPhase: string | null;
 };
 
 export function listModelProviders() {
@@ -48,10 +55,17 @@ export function createModelProvider(payload: {
   });
 }
 
-export function testModelProvider(providerId: string) {
+export function testModelProvider(providerId: string, modelConfigId?: string) {
   return apiRequest<ConnectionTestResult>(
     `/api/v1/model-providers/${providerId}/connection-tests`,
-    { method: 'POST' },
+    {
+      method: 'POST',
+      ...(modelConfigId
+        ? {
+            body: JSON.stringify({ modelConfigId }),
+          }
+        : {}),
+    },
   );
 }
 

@@ -997,6 +997,88 @@ def test_normalized_provider_error_preserves_code_and_retryability(code, retryab
     }
 
 
+def test_qa_split_writes_successful_model_call_logs_for_each_batch():
+    from server.app.models.model_config import ModelCallLog
+    from server.app.services.qa_split_service import QaSplitService
+
+    session, identity = build_qa_session()
+    job_id, _document_id, _chunks = create_qa_ready_job(session, identity)
+    model = add_default_qa_model(
+        session,
+        identity["tenant"].id,
+        {
+            "items": [
+                {
+                    "question": "退款需要谁审批？",
+                    "answer": "需要主管审批。",
+                    "quote": "退款需要主管审批。",
+                    "pageNo": 1,
+                    "chunkIndex": 0,
+                }
+            ],
+            "coveredChunkIndexes": [0],
+            "skippedChunks": [
+                {"chunkIndex": 1, "reason": "没有独立问答价值"}
+            ],
+        },
+    )
+    session.commit()
+
+    result = QaSplitService(session).split_import_job(job_id)
+
+    assert result.stage == "EMBEDDING"
+    logs = session.query(ModelCallLog).all()
+    assert len(logs) == 1
+    assert logs[0].provider_id == model.provider_id
+    assert logs[0].model_config_id == model.id
+    assert logs[0].run_id is not None
+    assert logs[0].capability == "QA_SPLIT"
+    assert logs[0].status == "SUCCESS"
+    assert logs[0].latency_ms is not None
+    assert logs[0].error_code is None
+
+
+def test_qa_split_writes_failed_model_call_log_with_provider_diagnostics():
+    from server.app.integrations.model_providers.base import ProviderError
+    from server.app.models.model_config import ModelCallLog
+    from server.app.services.qa_split_service import QaSplitService
+
+    session, identity = build_qa_session()
+    job_id, _document_id, _chunks = create_qa_ready_job(session, identity)
+    model = add_default_qa_model(session, identity["tenant"].id, {"items": []})
+
+    class _Adapter:
+        @staticmethod
+        def generate_qa_pairs(_prompt):
+            raise ProviderError(
+                "PROVIDER_INFERENCE_TIMEOUT",
+                "模型供应商响应超时",
+                retryable=True,
+                provider_name="Gemma",
+                provider_type="OLLAMA",
+                model_name="gemma3",
+                endpoint="http://localhost:11434/api/chat",
+                timeout_ms=30000,
+                timeout_phase="read",
+            )
+
+    result = QaSplitService(
+        session,
+        provider_factory=lambda *_args, **_kwargs: _Adapter(),
+    ).split_import_job(job_id)
+
+    assert result.status == "FAILED"
+    log = session.query(ModelCallLog).one()
+    assert log.provider_id == model.provider_id
+    assert log.model_config_id == model.id
+    assert log.capability == "QA_SPLIT"
+    assert log.status == "FAILED"
+    assert log.error_code == "PROVIDER_INFERENCE_TIMEOUT"
+    assert "Gemma" in (log.error_message or "")
+    assert "gemma3" in (log.error_message or "")
+    assert "localhost:11434/api/chat" in (log.error_message or "")
+
+
 def test_unexpected_qa_provider_error_does_not_leak_raw_exception_to_logs(caplog):
     from server.app.services import qa_split_service
     from server.app.services.qa_split_service import QaSplitService

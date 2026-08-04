@@ -102,27 +102,54 @@ class ModelConfigService:
         self.session.commit()
 
     def test_provider_connection(
-        self, context: AccessContext, provider_id: str
+        self,
+        context: AccessContext,
+        provider_id: str,
+        *,
+        model_config_id: str | None = None,
     ) -> dict:
         provider = self._get_provider(context.tenant_id, provider_id)
+        model_config = None
+        if model_config_id is not None:
+            model_config = self._get_model_config(context.tenant_id, model_config_id)
+            if model_config.provider_id != provider.id:
+                raise bad_request(
+                    "MODEL_PROVIDER_MISMATCH",
+                    "指定模型不属于当前模型供应商",
+                )
         api_key = decrypt_secret(provider.encrypted_api_key)
+        adapter_config = {**(provider.config or {}), **((model_config.config or {}) if model_config else {})}
         adapter = self._build_adapter(
             provider.provider_type,
             base_url=provider.base_url,
             api_key=api_key,
-            config=provider.config,
+            config=adapter_config,
+            model_name=model_config.model_name if model_config else None,
+            timeout_ms=model_config.timeout_ms if model_config else None,
+            max_tokens=model_config.max_tokens if model_config else None,
+            provider_name=provider.name,
         )
 
         started = perf_counter()
-        result = adapter.test_connection()
+        result = (
+            adapter.test_model_connection()
+            if model_config is not None
+            else adapter.test_connection()
+        )
         latency_ms = max(1, int((perf_counter() - started) * 1000))
         latency_ms = max(latency_ms, result.latency_ms)
+        capability = model_config.capability if model_config is not None else ModelCapability.CHAT.value
+        model_name = (
+            model_config.model_name
+            if model_config is not None
+            else result.model_name
+        )
 
         log = ModelCallLog(
             tenant_id=context.tenant_id,
             provider_id=provider.id,
-            model_config_id=None,
-            capability=ModelCapability.CHAT.value,
+            model_config_id=model_config.id if model_config is not None else None,
+            capability=capability,
             status=result.status,
             latency_ms=latency_ms,
             token_usage={},
@@ -138,6 +165,17 @@ class ModelConfigService:
             "latency_ms": latency_ms,
             "error_code": result.error_code,
             "error_message": result.error_message,
+            "provider_name": provider.name,
+            "provider_type": provider.provider_type,
+            "model_config_id": model_config.id if model_config is not None else None,
+            "model_name": model_name,
+            "endpoint": result.endpoint or provider.base_url,
+            "timeout_ms": (
+                model_config.timeout_ms
+                if model_config is not None
+                else result.timeout_ms
+            ),
+            "timeout_phase": result.timeout_phase,
         }
 
     def create_model_config(

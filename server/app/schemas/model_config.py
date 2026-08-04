@@ -38,6 +38,12 @@ class ModelProviderListResponse(BaseModel):
     data: list[ModelProviderResponse]
 
 
+class ConnectionTestRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    model_config_id: str | None = Field(default=None, alias="modelConfigId")
+
+
 class ConnectionTestResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -46,6 +52,13 @@ class ConnectionTestResponse(BaseModel):
     latency_ms: int = Field(alias="latencyMs")
     error_code: str | None = Field(alias="errorCode")
     error_message: str | None = Field(alias="errorMessage")
+    provider_name: str | None = Field(default=None, alias="providerName")
+    provider_type: str | None = Field(default=None, alias="providerType")
+    model_config_id: str | None = Field(default=None, alias="modelConfigId")
+    model_name: str | None = Field(default=None, alias="modelName")
+    endpoint: str | None = None
+    timeout_ms: int | None = Field(default=None, alias="timeoutMs")
+    timeout_phase: str | None = Field(default=None, alias="timeoutPhase")
 
 
 class ModelConfigCreateRequest(BaseModel):

@@ -17,6 +17,7 @@ class OpenAICompatibleProvider(HttpProvider):
     """
 
     provider_name = "openai_compatible"
+    provider_type = "OPENAI_COMPATIBLE"
 
     @property
     def _chat_path(self) -> str:
@@ -36,14 +37,17 @@ class OpenAICompatibleProvider(HttpProvider):
                 "GET", self._endpoint(self._models_path), headers=self._headers()
             )
         except ProviderError as exc:
-            return ConnectionTestResult(
-                success=False,
-                status="FAILED",
-                latency_ms=1,
-                error_code=exc.code,
-                error_message=exc.message,
-            )
-        return ConnectionTestResult(success=True, status="SUCCESS", latency_ms=1)
+            return ConnectionTestResult.from_provider_error(exc)
+        return ConnectionTestResult(
+            success=True,
+            status="SUCCESS",
+            latency_ms=1,
+            provider_name=self.provider_display_name,
+            provider_type=self.provider_type,
+            model_name=self.model_name,
+            endpoint=self.last_endpoint,
+            timeout_ms=self.timeout_ms,
+        )
 
     def complete_chat(self, prompt: str) -> str:
         return self._post_chat(self._chat_payload(prompt, stream=False))
@@ -64,13 +68,17 @@ class OpenAICompatibleProvider(HttpProvider):
             self._endpoint(self._chat_path),
             headers=self._headers(),
             json_body=payload,
+            timeout_phase="inference",
         )
         return self._extract_message(data)
 
     def stream_chat(self, prompt: str) -> Iterator[str]:
         payload = self._chat_payload(prompt, stream=True)
         for line in self._stream_lines(
-            self._endpoint(self._chat_path), headers=self._headers(), json_body=payload
+            self._endpoint(self._chat_path),
+            headers=self._headers(),
+            json_body=payload,
+            timeout_phase="inference",
         ):
             for delta in self._parse_sse_deltas(line):
                 if delta:
@@ -85,10 +93,17 @@ class OpenAICompatibleProvider(HttpProvider):
             self._endpoint(self._embedding_path),
             headers=self._headers(),
             json_body=payload,
+            timeout_phase="inference",
         )
         items = data.get("data") if isinstance(data, dict) else None
         if not isinstance(items, list) or len(items) != len(texts):
-            raise ProviderError("PROVIDER_BAD_RESPONSE", "Embedding 响应结构不合法")
+            raise ProviderError(
+                "PROVIDER_BAD_RESPONSE",
+                "Embedding 响应结构不合法",
+                **self._provider_error_context(
+                    endpoint=self._endpoint(self._embedding_path),
+                ),
+            )
         ordered = sorted(items, key=lambda item: item.get("index", 0))
         return [list(item.get("embedding") or []) for item in ordered]
 
@@ -110,11 +125,23 @@ class OpenAICompatibleProvider(HttpProvider):
     def _extract_message(data: dict) -> str:
         choices = data.get("choices") if isinstance(data, dict) else None
         if not choices:
-            raise ProviderError("PROVIDER_BAD_RESPONSE", "模型响应缺少 choices")
+            raise ProviderError(
+                "PROVIDER_BAD_RESPONSE",
+                "模型响应缺少 choices",
+                **self._provider_error_context(
+                    endpoint=self._endpoint(self._chat_path),
+                ),
+            )
         message = choices[0].get("message") or {}
         content = message.get("content")
         if not isinstance(content, str):
-            raise ProviderError("PROVIDER_BAD_RESPONSE", "模型响应缺少文本内容")
+            raise ProviderError(
+                "PROVIDER_BAD_RESPONSE",
+                "模型响应缺少文本内容",
+                **self._provider_error_context(
+                    endpoint=self._endpoint(self._chat_path),
+                ),
+            )
         return content
 
     @staticmethod

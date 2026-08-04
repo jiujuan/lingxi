@@ -48,6 +48,44 @@ function providerColor(provider: ModelProvider, index: number) {
     : providerPalette[index % providerPalette.length];
 }
 
+function preferredConnectionModel(configs: ModelConfig[], providerId: string) {
+  const providerModels = configs.filter(
+    (config) => config.providerId === providerId && config.capability === 'QA_SPLIT',
+  );
+  return (
+    providerModels.find((config) => config.status === 'ACTIVE' && config.isDefault) ??
+    providerModels.find((config) => config.status === 'ACTIVE') ??
+    null
+  );
+}
+
+function providerTypeLabel(providerType: string | null) {
+  const labels: Record<string, string> = {
+    CLAUDE: 'Claude',
+    INTERNAL_GATEWAY: 'Internal Gateway',
+    OLLAMA: 'Ollama',
+    OPENAI_COMPATIBLE: 'OpenAI Compatible',
+  };
+  return providerType ? labels[providerType] ?? providerType : '未知';
+}
+
+function timeoutPhaseLabel(result: ConnectionTestResult) {
+  if (result.errorCode === 'PROVIDER_CONNECTION_TIMEOUT' || result.timeoutPhase === 'connect') {
+    return '连接超时';
+  }
+  if (result.errorCode === 'PROVIDER_INFERENCE_TIMEOUT' || result.timeoutPhase === 'read') {
+    return '读取超时';
+  }
+  return result.timeoutPhase ?? '未标记';
+}
+
+function isTimeoutResult(result: ConnectionTestResult) {
+  return (
+    result.errorCode === 'PROVIDER_CONNECTION_TIMEOUT' ||
+    result.errorCode === 'PROVIDER_INFERENCE_TIMEOUT'
+  );
+}
+
 export function ModelConfigPage() {
   const queryClient = useQueryClient();
   const providersQuery = useQuery({
@@ -84,6 +122,10 @@ export function ModelConfigPage() {
     [configs, selectedProviderId],
   );
 
+  function connectionModelId(providerId: string) {
+    return preferredConnectionModel(configs, providerId)?.id;
+  }
+
   function invalidate() {
     void queryClient.invalidateQueries({ queryKey: queryKeys.modelProviders() });
     void queryClient.invalidateQueries({ queryKey: queryKeys.modelConfigs() });
@@ -107,7 +149,7 @@ export function ModelConfigPage() {
   });
 
   const testMutation = useMutation({
-    mutationFn: (providerId: string) => testModelProvider(providerId),
+    mutationFn: (providerId: string) => testModelProvider(providerId, connectionModelId(providerId)),
     onSuccess: (result) => setConnectionResult(result),
     onError: (err) => setNotice(errorMessage(err, '连接测试失败。')),
   });
@@ -299,10 +341,50 @@ export function ModelConfigPage() {
                 </label>
               </div>
               {connectionResult ? (
-                <p className={connectionResult.success ? 'success-text' : 'error'}>
-                  {connectionResult.status} · {connectionResult.latencyMs}ms
-                  {connectionResult.errorMessage ? ` · ${connectionResult.errorMessage}` : ''}
-                </p>
+                <div
+                  aria-live="polite"
+                  className={`model-connection-result ${
+                    connectionResult.success ? 'success' : 'failure'
+                  }`}
+                >
+                  <p className={connectionResult.success ? 'success-text' : 'error'}>
+                    {connectionResult.status} · {connectionResult.latencyMs}ms
+                  </p>
+                  {connectionResult.errorMessage ? (
+                    <p className="model-connection-message">{connectionResult.errorMessage}</p>
+                  ) : null}
+                  <dl className="model-connection-diagnostics">
+                    <div>
+                      <dt>供应商</dt>
+                      <dd>{connectionResult.providerName ?? selectedProvider.name}</dd>
+                    </div>
+                    <div>
+                      <dt>模型</dt>
+                      <dd>{connectionResult.modelName ?? '未指定模型'}</dd>
+                    </div>
+                    <div>
+                      <dt>类型</dt>
+                      <dd>{providerTypeLabel(connectionResult.providerType)}</dd>
+                    </div>
+                    <div>
+                      <dt>endpoint</dt>
+                      <dd title={connectionResult.endpoint ?? undefined}>
+                        {connectionResult.endpoint ?? '未返回'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>超时</dt>
+                      <dd>
+                        {connectionResult.timeoutMs
+                          ? `${Math.round(connectionResult.timeoutMs / 1000)} 秒`
+                          : '未配置'}
+                        {connectionResult.timeoutMs && isTimeoutResult(connectionResult)
+                          ? ` · ${timeoutPhaseLabel(connectionResult)}`
+                          : ''}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
               ) : null}
 
               <div className="available-models-heading">

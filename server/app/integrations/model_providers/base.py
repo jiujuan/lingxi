@@ -14,6 +14,30 @@ class ConnectionTestResult:
     latency_ms: int
     error_code: str | None = None
     error_message: str | None = None
+    provider_name: str | None = None
+    provider_type: str | None = None
+    model_name: str | None = None
+    endpoint: str | None = None
+    timeout_ms: int | None = None
+    timeout_phase: str | None = None
+
+    @classmethod
+    def from_provider_error(
+        cls, error: "ProviderError", *, latency_ms: int = 1
+    ) -> "ConnectionTestResult":
+        return cls(
+            success=False,
+            status="FAILED",
+            latency_ms=latency_ms,
+            error_code=error.code,
+            error_message=error.message,
+            provider_name=error.provider_name,
+            provider_type=error.provider_type,
+            model_name=error.model_name,
+            endpoint=error.endpoint,
+            timeout_ms=error.timeout_ms,
+            timeout_phase=error.timeout_phase,
+        )
 
 
 class ProviderError(Exception):
@@ -30,16 +54,70 @@ class ProviderError(Exception):
         *,
         retryable: bool = False,
         status_code: int | None = None,
+        provider_name: str | None = None,
+        provider_type: str | None = None,
+        model_name: str | None = None,
+        endpoint: str | None = None,
+        timeout_ms: int | None = None,
+        timeout_phase: str | None = None,
     ) -> None:
-        super().__init__(message)
+        self.base_message = message
         self.code = code
-        self.message = message
         self.retryable = retryable
         self.status_code = status_code
+        self.provider_name = provider_name
+        self.provider_type = provider_type
+        self.model_name = model_name
+        self.endpoint = endpoint
+        self.timeout_ms = timeout_ms
+        self.timeout_phase = timeout_phase
+        self.message = self._format_message()
+        super().__init__(self.message)
+
+    def _format_message(self) -> str:
+        details: list[str] = []
+        if self.provider_name:
+            details.append(f"供应商：{self.provider_name}")
+        if self.model_name:
+            details.append(f"模型：{self.model_name}")
+        if self.provider_type:
+            details.append(f"类型：{_display_provider_type(self.provider_type)}")
+        if self.endpoint:
+            details.append(f"endpoint：{self.endpoint}")
+        if self.timeout_ms is not None and self.code in {
+            "PROVIDER_CONNECTION_TIMEOUT",
+            "PROVIDER_INFERENCE_TIMEOUT",
+        }:
+            timeout_label = _timeout_label(self.code, self.timeout_phase)
+            details.append(f"超时：{self.timeout_ms // 1000} 秒{timeout_label}")
+        if not details:
+            return self.base_message
+        return f"{self.base_message}（{'; '.join(details)}）"
+
+
+def _display_provider_type(provider_type: str) -> str:
+    labels = {
+        "OPENAI_COMPATIBLE": "OpenAI Compatible",
+        "INTERNAL_GATEWAY": "Internal Gateway",
+        "OLLAMA": "Ollama",
+        "CLAUDE": "Claude",
+    }
+    return labels.get(provider_type, provider_type)
+
+
+def _timeout_label(code: str, timeout_phase: str | None) -> str:
+    if code == "PROVIDER_INFERENCE_TIMEOUT":
+        return "读取超时"
+    if timeout_phase == "connect":
+        return "连接超时"
+    return "响应超时"
 
 
 class ChatProvider:
     def test_connection(self) -> ConnectionTestResult:
+        raise NotImplementedError
+
+    def test_model_connection(self) -> ConnectionTestResult:
         raise NotImplementedError
 
     def generate_qa_pairs(self, prompt: str) -> str:
@@ -66,16 +144,21 @@ class BaseProvider(ChatProvider, EmbeddingProvider):
     """Shared configuration surface for every provider adapter."""
 
     provider_name = "base"
+    provider_type = "BASE"
 
     def __init__(
         self,
         base_url: str | None,
         api_key: str | None,
         config: dict | None = None,
+        *,
+        provider_name: str | None = None,
     ) -> None:
         self.base_url = base_url
         self.api_key = api_key
         self.config = config or {}
+        self.provider_display_name = provider_name or self.provider_name
+        self.last_endpoint: str | None = None
 
     @property
     def model_name(self) -> str | None:
@@ -100,6 +183,59 @@ class BaseProvider(ChatProvider, EmbeddingProvider):
         except (TypeError, ValueError):
             return 2
 
+    @property
+    def timeout_ms(self) -> int:
+        return max(1, int(self.timeout_seconds * 1000))
+
+    def _provider_error_context(
+        self,
+        *,
+        endpoint: str | None = None,
+        timeout_phase: str | None = None,
+    ) -> dict:
+        return {
+            "provider_name": self.provider_display_name,
+            "provider_type": self.provider_type,
+            "model_name": self.model_name,
+            "endpoint": endpoint,
+            "timeout_ms": self.timeout_ms,
+            "timeout_phase": timeout_phase,
+        }
+
+    def test_model_connection(self) -> ConnectionTestResult:
+        started = time.perf_counter()
+        try:
+            self.complete_chat("连接测试：请只回复 OK。")
+        except ProviderError as exc:
+            latency_ms = max(1, int((time.perf_counter() - started) * 1000))
+            return ConnectionTestResult.from_provider_error(
+                exc, latency_ms=latency_ms
+            )
+        except Exception as exc:
+            latency_ms = max(1, int((time.perf_counter() - started) * 1000))
+            return ConnectionTestResult(
+                success=False,
+                status="FAILED",
+                latency_ms=latency_ms,
+                error_code="PROVIDER_CONNECTION_ERROR",
+                error_message=f"模型供应商连接失败：{exc}",
+                provider_name=self.provider_display_name,
+                provider_type=self.provider_type,
+                model_name=self.model_name,
+                endpoint=self.last_endpoint,
+                timeout_ms=self.timeout_ms,
+            )
+        return ConnectionTestResult(
+            success=True,
+            status="SUCCESS",
+            latency_ms=max(1, int((time.perf_counter() - started) * 1000)),
+            provider_name=self.provider_display_name,
+            provider_type=self.provider_type,
+            model_name=self.model_name,
+            endpoint=self.last_endpoint,
+            timeout_ms=self.timeout_ms,
+        )
+
 
 class HttpProvider(BaseProvider):
     """Base class for providers that call a real HTTP model API.
@@ -115,7 +251,9 @@ class HttpProvider(BaseProvider):
         base = (self.base_url or "").rstrip("/")
         if not base:
             raise ProviderError(
-                "MISSING_PROVIDER_CONFIG", "模型供应商未配置 base_url"
+                "MISSING_PROVIDER_CONFIG",
+                "模型供应商未配置 base_url",
+                **self._provider_error_context(),
             )
         if not path:
             return base
@@ -134,28 +272,58 @@ class HttpProvider(BaseProvider):
         *,
         headers: dict[str, str] | None = None,
         json_body: dict | None = None,
+        timeout_phase: str | None = None,
     ) -> dict:
         last_error: ProviderError | None = None
         for attempt in range(self.max_retries + 1):
             try:
+                self.last_endpoint = url
                 with httpx.Client(timeout=self.timeout_seconds) as client:
                     response = client.request(
                         method, url, headers=headers, json=json_body
                     )
                 if response.status_code in self._RETRYABLE_STATUS:
-                    last_error = self._status_error(response)
+                    last_error = self._status_error(
+                        response, url=url, timeout_phase=timeout_phase
+                    )
                     if attempt < self.max_retries:
                         self._sleep_backoff(attempt)
                         continue
                     raise last_error
                 if response.status_code >= 400:
-                    raise self._status_error(response)
+                    raise self._status_error(
+                        response, url=url, timeout_phase=timeout_phase
+                    )
                 return response.json()
             except (httpx.TimeoutException, httpx.TransportError) as exc:
+                is_timeout = isinstance(exc, httpx.TimeoutException)
+                is_inference_timeout = (
+                    is_timeout
+                    and timeout_phase == "inference"
+                    and isinstance(exc, httpx.ReadTimeout)
+                )
+                if is_timeout:
+                    code = (
+                        "PROVIDER_INFERENCE_TIMEOUT"
+                        if is_inference_timeout
+                        else "PROVIDER_CONNECTION_TIMEOUT"
+                    )
+                    phase = "read" if is_inference_timeout else "connect"
+                else:
+                    code = "PROVIDER_CONNECTION_ERROR"
+                    phase = None
                 last_error = ProviderError(
-                    "PROVIDER_CONNECTION_ERROR",
-                    f"模型供应商连接失败：{exc}",
+                    code,
+                    (
+                        "模型供应商连接失败："
+                        if code == "PROVIDER_CONNECTION_TIMEOUT"
+                        else "模型推理响应失败："
+                    )
+                    + str(exc),
                     retryable=True,
+                    **self._provider_error_context(
+                        endpoint=url, timeout_phase=phase
+                    ),
                 )
                 if attempt < self.max_retries:
                     self._sleep_backoff(attempt)
@@ -172,26 +340,65 @@ class HttpProvider(BaseProvider):
         *,
         headers: dict[str, str] | None = None,
         json_body: dict | None = None,
+        timeout_phase: str | None = None,
     ) -> Iterator[str]:
         try:
+            self.last_endpoint = url
             with httpx.Client(timeout=self.timeout_seconds) as client:
                 with client.stream(
                     "POST", url, headers=headers, json=json_body
                 ) as response:
                     if response.status_code >= 400:
                         response.read()
-                        raise self._status_error(response)
+                        raise self._status_error(
+                            response, url=url, timeout_phase=timeout_phase
+                        )
                     for line in response.iter_lines():
                         if line:
                             yield line
         except (httpx.TimeoutException, httpx.TransportError) as exc:
+            is_connect_timeout = isinstance(
+                exc,
+                (httpx.ConnectTimeout, httpx.PoolTimeout, httpx.WriteTimeout),
+            )
+            is_timeout = isinstance(exc, httpx.TimeoutException)
+            is_inference_timeout = (
+                is_timeout
+                and timeout_phase == "inference"
+                and isinstance(exc, httpx.ReadTimeout)
+            )
+            if is_timeout:
+                code = (
+                    "PROVIDER_INFERENCE_TIMEOUT"
+                    if is_inference_timeout
+                    else "PROVIDER_CONNECTION_TIMEOUT"
+                )
+                phase = "read" if is_inference_timeout else "connect"
+            else:
+                code = "PROVIDER_CONNECTION_ERROR"
+                phase = None
             raise ProviderError(
-                "PROVIDER_CONNECTION_ERROR",
-                f"模型供应商流式连接失败：{exc}",
+                code,
+                (
+                    "模型供应商流式连接失败："
+                    if code == "PROVIDER_CONNECTION_TIMEOUT"
+                    else "模型推理流式响应失败："
+                )
+                + str(exc),
                 retryable=True,
+                **self._provider_error_context(
+                    endpoint=url,
+                    timeout_phase=phase,
+                ),
             ) from exc
 
-    def _status_error(self, response: httpx.Response) -> ProviderError:
+    def _status_error(
+        self,
+        response: httpx.Response,
+        *,
+        url: str | None = None,
+        timeout_phase: str | None = None,
+    ) -> ProviderError:
         retryable = response.status_code in self._RETRYABLE_STATUS
         code = "PROVIDER_SERVER_ERROR" if response.status_code >= 500 else "PROVIDER_REQUEST_ERROR"
         if response.status_code in (401, 403):
@@ -200,7 +407,11 @@ class HttpProvider(BaseProvider):
             code = "PROVIDER_RATE_LIMITED"
         message = self._extract_error_message(response)
         return ProviderError(
-            code, message, retryable=retryable, status_code=response.status_code
+            code,
+            message,
+            retryable=retryable,
+            status_code=response.status_code,
+            **self._provider_error_context(endpoint=url),
         )
 
     @staticmethod
@@ -226,7 +437,9 @@ class HttpProvider(BaseProvider):
     def _require_model(self) -> str:
         if not self.model_name:
             raise ProviderError(
-                "MISSING_PROVIDER_CONFIG", "模型供应商未配置 model 名称"
+                "MISSING_PROVIDER_CONFIG",
+                "模型供应商未配置 model 名称",
+                **self._provider_error_context(),
             )
         return self.model_name
 
@@ -240,6 +453,7 @@ class MockProvider(BaseProvider):
     """
 
     provider_name = "mock"
+    provider_type = "MOCK"
 
     def test_connection(self) -> ConnectionTestResult:
         if self.base_url == "mock://success":

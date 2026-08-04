@@ -3515,6 +3515,56 @@ a code {
   font-weight: 400;
 }
 
+.model-connection-result {
+  border-left: 3px solid #d7dee9;
+  display: grid;
+  gap: 8px;
+  padding: 2px 0 2px 13px;
+}
+
+.model-connection-result.success {
+  border-left-color: #0aa37f;
+}
+
+.model-connection-result.failure {
+  border-left-color: #ef4b55;
+}
+
+.model-connection-result p {
+  margin: 0;
+}
+
+.model-connection-message {
+  color: #455572;
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.model-connection-diagnostics {
+  display: grid;
+  gap: 8px 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.model-connection-diagnostics div {
+  min-width: 0;
+}
+
+.model-connection-diagnostics dt {
+  color: #8a98af;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+.model-connection-diagnostics dd {
+  color: #455572;
+  font-size: 13px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .available-models-heading {
   border-top: 1px solid #edf1f7;
   padding-top: 19px;

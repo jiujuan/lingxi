@@ -16,6 +16,7 @@ class ClaudeProvider(HttpProvider):
     """
 
     provider_name = "claude"
+    provider_type = "CLAUDE"
     _DEFAULT_BASE_URL = "https://api.anthropic.com"
     _DEFAULT_VERSION = "2023-06-01"
 
@@ -36,14 +37,17 @@ class ClaudeProvider(HttpProvider):
         try:
             self._request_json("GET", self._endpoint("/v1/models"), headers=self._headers())
         except ProviderError as exc:
-            return ConnectionTestResult(
-                success=False,
-                status="FAILED",
-                latency_ms=1,
-                error_code=exc.code,
-                error_message=exc.message,
-            )
-        return ConnectionTestResult(success=True, status="SUCCESS", latency_ms=1)
+            return ConnectionTestResult.from_provider_error(exc)
+        return ConnectionTestResult(
+            success=True,
+            status="SUCCESS",
+            latency_ms=1,
+            provider_name=self.provider_display_name,
+            provider_type=self.provider_type,
+            model_name=self.model_name,
+            endpoint=self.last_endpoint,
+            timeout_ms=self.timeout_ms,
+        )
 
     def complete_chat(self, prompt: str) -> str:
         data = self._request_json(
@@ -51,17 +55,30 @@ class ClaudeProvider(HttpProvider):
             self._endpoint("/v1/messages"),
             headers=self._headers(),
             json_body=self._message_payload(prompt, stream=False),
+            timeout_phase="inference",
         )
         blocks = data.get("content") if isinstance(data, dict) else None
         if not isinstance(blocks, list):
-            raise ProviderError("PROVIDER_BAD_RESPONSE", "Claude 响应缺少 content")
+            raise ProviderError(
+                "PROVIDER_BAD_RESPONSE",
+                "Claude 响应缺少 content",
+                **self._provider_error_context(
+                    endpoint=self._endpoint("/v1/messages"),
+                ),
+            )
         text = "".join(
             block.get("text", "")
             for block in blocks
             if isinstance(block, dict) and block.get("type") == "text"
         )
         if not text:
-            raise ProviderError("PROVIDER_BAD_RESPONSE", "Claude 响应缺少文本内容")
+            raise ProviderError(
+                "PROVIDER_BAD_RESPONSE",
+                "Claude 响应缺少文本内容",
+                **self._provider_error_context(
+                    endpoint=self._endpoint("/v1/messages"),
+                ),
+            )
         return text
 
     def generate_qa_pairs(self, prompt: str) -> str:
@@ -72,6 +89,7 @@ class ClaudeProvider(HttpProvider):
             self._endpoint("/v1/messages"),
             headers=self._headers(),
             json_body=self._message_payload(prompt, stream=True),
+            timeout_phase="inference",
         ):
             if not line.startswith("data:"):
                 continue
@@ -91,6 +109,7 @@ class ClaudeProvider(HttpProvider):
         raise ProviderError(
             "PROVIDER_EMBEDDING_UNSUPPORTED",
             "Claude 不提供 Embedding 接口，请为 Embedding 能力配置其它供应商",
+            **self._provider_error_context(),
         )
 
     def _message_payload(self, prompt: str, *, stream: bool) -> dict:

@@ -11,3 +11,4 @@ class InternalGatewayProvider(OpenAICompatibleProvider):
     """
 
     provider_name = "internal_gateway"
+    provider_type = "INTERNAL_GATEWAY"

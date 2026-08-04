@@ -1018,8 +1018,36 @@
         "title": "ClassificationPathResponse",
         "type": "object"
       },
+      "ConnectionTestRequest": {
+        "properties": {
+          "modelConfigId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modelconfigid"
+          }
+        },
+        "title": "ConnectionTestRequest",
+        "type": "object"
+      },
       "ConnectionTestResponse": {
         "properties": {
+          "endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint"
+          },
           "errorCode": {
             "anyOf": [
               {
@@ -1046,6 +1074,50 @@
             "title": "Latencyms",
             "type": "integer"
           },
+          "modelConfigId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modelconfigid"
+          },
+          "modelName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modelname"
+          },
+          "providerName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providername"
+          },
+          "providerType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providertype"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -1053,6 +1125,28 @@
           "success": {
             "title": "Success",
             "type": "boolean"
+          },
+          "timeoutMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeoutms"
+          },
+          "timeoutPhase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeoutphase"
           }
         },
         "required": [
@@ -9061,6 +9155,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ConnectionTestRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {

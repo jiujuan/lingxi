@@ -1528,18 +1528,37 @@ export interface components {
             /** Spacename */
             spaceName?: string | null;
         };
+        /** ConnectionTestRequest */
+        ConnectionTestRequest: {
+            /** Modelconfigid */
+            modelConfigId?: string | null;
+        };
         /** ConnectionTestResponse */
         ConnectionTestResponse: {
+            /** Endpoint */
+            endpoint?: string | null;
             /** Errorcode */
             errorCode: string | null;
             /** Errormessage */
             errorMessage: string | null;
             /** Latencyms */
             latencyMs: number;
+            /** Modelconfigid */
+            modelConfigId?: string | null;
+            /** Modelname */
+            modelName?: string | null;
+            /** Providername */
+            providerName?: string | null;
+            /** Providertype */
+            providerType?: string | null;
             /** Status */
             status: string;
             /** Success */
             success: boolean;
+            /** Timeoutms */
+            timeoutMs?: number | null;
+            /** Timeoutphase */
+            timeoutPhase?: string | null;
         };
         /** DashboardMetricResponse */
         DashboardMetricResponse: {
@@ -4961,7 +4980,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ConnectionTestRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

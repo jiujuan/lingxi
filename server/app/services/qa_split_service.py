@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 import json
 import logging
 import re
+from time import perf_counter
 import unicodedata
 
 from sqlalchemy import delete, select
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 from server.app.core.errors import not_found
 from server.app.core.config import settings
 from server.app.core import metrics
+from server.app.core.ids import current_request_id
 from server.app.core.secrets import decrypt_secret
 import server.app.db.base  # noqa: F401
 from server.app.integrations.model_providers.base import ProviderError
@@ -21,7 +23,12 @@ from server.app.integrations.model_providers.registry import (
 from server.app.models.document import Document, DocumentStatus
 from server.app.models.import_job import ImportJob, ImportJobStatus
 from server.app.models.logs import TaskRun
-from server.app.models.model_config import ModelCapability, ModelConfig, ModelProvider
+from server.app.models.model_config import (
+    ModelCallLog,
+    ModelCapability,
+    ModelConfig,
+    ModelProvider,
+)
 from server.app.models.qa_pair import DocumentChunk, QaPair
 from server.app.services._batching import run_ordered
 from server.app.services.import_service import enqueue_embedding_task  # re-exported
@@ -73,6 +80,13 @@ class QaSplitValidationError(Exception):
         self.code = code
         self.message = message
         self.retryable = retryable
+
+
+@dataclass(frozen=True)
+class _QaBatchResult:
+    raw_output: str | None
+    error: Exception | None
+    latency_ms: int
 
 
 def _extract_json_text(raw_output: str) -> str:
@@ -538,9 +552,18 @@ class QaSplitService:
                 {**(provider.config or {}), **(model_config.config or {})},
                 model_name=model_config.model_name,
                 timeout_ms=model_config.timeout_ms,
+                max_tokens=model_config.max_tokens,
+                provider_name=provider.name,
             )
             prompt_batches = self._group_chunks(chunks)
-            items = self._generate_qa_items(adapter, document, prompt_batches)
+            items = self._generate_qa_items(
+                adapter,
+                document,
+                prompt_batches,
+                model_config=model_config,
+                provider=provider,
+                run_id=task_run.id,
+            )
             self._replace_qa_pairs(job, document, chunks, items)
             self._bind_embedding_run_config_hash(job, chunks)
             log_qa_split_observability(
@@ -706,6 +729,10 @@ class QaSplitService:
         adapter,
         document: Document,
         groups: list[list[DocumentChunk]],
+        *,
+        model_config: ModelConfig | None = None,
+        provider: ModelProvider | None = None,
+        run_id: str | None = None,
     ) -> list[ValidatedQaItem]:
         """Run QA split per chunk-group (bounded concurrency) and merge results.
 
@@ -714,19 +741,43 @@ class QaSplitService:
         back to the correct source chunk in order.
         """
 
-        def generate(group: list[DocumentChunk]) -> str:
-            # ProviderError is normalized at the service boundary, preserving
-            # its code and retryability for the task layer.
-            return adapter.generate_qa_pairs(build_qa_split_prompt(document, group))
+        def generate(group: list[DocumentChunk]) -> _QaBatchResult:
+            started = perf_counter()
+            try:
+                raw_output = adapter.generate_qa_pairs(
+                    build_qa_split_prompt(document, group)
+                )
+            except Exception as exc:
+                return _QaBatchResult(
+                    raw_output=None,
+                    error=exc,
+                    latency_ms=max(1, int((perf_counter() - started) * 1000)),
+                )
+            return _QaBatchResult(
+                raw_output=raw_output,
+                error=None,
+                latency_ms=max(1, int((perf_counter() - started) * 1000)),
+            )
 
-        raw_outputs = run_ordered(
+        batch_results = run_ordered(
             groups, generate, settings.qa_split_max_concurrency
         )
+        for result in batch_results:
+            self._record_qa_model_call(
+                result,
+                model_config=model_config,
+                provider=provider,
+                run_id=run_id,
+            )
+        for result in batch_results:
+            if result.error is not None:
+                raise result.error
+
         items: list[ValidatedQaItem] = []
-        for group, raw in zip(groups, raw_outputs, strict=True):
+        for group, result in zip(groups, batch_results, strict=True):
             items.extend(
                 validate_qa_split_output(
-                    raw,
+                    result.raw_output or "",
                     group,
                     allow_legacy_missing_chunk_index=(
                         self.legacy_missing_chunk_index_compatibility
@@ -734,6 +785,42 @@ class QaSplitService:
                 )
             )
         return items
+
+    def _record_qa_model_call(
+        self,
+        result: _QaBatchResult,
+        *,
+        model_config: ModelConfig | None,
+        provider: ModelProvider | None,
+        run_id: str | None,
+    ) -> None:
+        if model_config is None or provider is None:
+            return
+        error = result.error
+        if isinstance(error, ProviderError):
+            error_code = error.code
+            error_message = error.message
+        elif error is not None:
+            error_code = "QA_SPLIT_PROVIDER_ERROR"
+            error_message = "QA Split 模型调用失败"
+        else:
+            error_code = None
+            error_message = None
+        self.session.add(
+            ModelCallLog(
+                tenant_id=model_config.tenant_id,
+                provider_id=provider.id,
+                model_config_id=model_config.id,
+                run_id=run_id,
+                capability=ModelCapability.QA_SPLIT.value,
+                status="FAILED" if error is not None else "SUCCESS",
+                latency_ms=result.latency_ms,
+                token_usage={},
+                error_code=error_code,
+                error_message=error_message,
+                request_id=current_request_id(),
+            )
+        )
 
     @staticmethod
     def _bind_embedding_run_config_hash(

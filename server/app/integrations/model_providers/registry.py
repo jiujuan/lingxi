@@ -28,6 +28,8 @@ class ProviderFactory(Protocol):
         *,
         model_name: str | None = None,
         timeout_ms: int | None = None,
+        max_tokens: int | None = None,
+        provider_name: str | None = None,
     ) -> BaseProvider: ...
 
 
@@ -67,17 +69,31 @@ def build_provider_adapter(
     *,
     model_name: str | None = None,
     timeout_ms: int | None = None,
+    max_tokens: int | None = None,
+    provider_name: str | None = None,
 ) -> BaseProvider:
     merged: dict = dict(config or {})
-    if model_name is not None and "modelName" not in merged:
+    if model_name is not None:
         merged["modelName"] = model_name
-    if timeout_ms is not None and "timeoutMs" not in merged:
+    if timeout_ms is not None:
         merged["timeoutMs"] = timeout_ms
+    if max_tokens is not None:
+        merged["maxTokens"] = max_tokens
 
     if _is_mock_mode(base_url, merged):
-        return MockProvider(base_url=base_url, api_key=api_key, config=merged)
+        return MockProvider(
+            base_url=base_url,
+            api_key=api_key,
+            config=merged,
+            provider_name=provider_name,
+        )
 
     provider_class = PROVIDER_TYPES.get(provider_type)
     if provider_class is None:
         raise ValueError(f"Unsupported provider type: {provider_type}")
-    return provider_class(base_url=base_url, api_key=api_key, config=merged)
+    return provider_class(
+        base_url=base_url,
+        api_key=api_key,
+        config=merged,
+        provider_name=provider_name,
+    )

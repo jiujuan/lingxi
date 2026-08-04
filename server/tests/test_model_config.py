@@ -88,6 +88,56 @@ def test_model_provider_connection_test_writes_masked_call_log():
     assert logs[0].error_message is None
 
 
+def test_model_connection_test_binds_selected_model_and_capability():
+    client, SessionLocal = build_test_client()
+    headers = login_admin(client)
+
+    provider = client.post(
+        "/api/v1/model-providers",
+        headers=headers,
+        json={
+            "providerType": "OLLAMA",
+            "name": "Gemma",
+            "baseUrl": "mock://success",
+            "status": "ACTIVE",
+        },
+    ).json()
+    model = client.post(
+        "/api/v1/model-configs",
+        headers=headers,
+        json={
+            "providerId": provider["id"],
+            "capability": "QA_SPLIT",
+            "modelName": "gemma3",
+            "timeoutMs": 30000,
+            "isDefault": True,
+        },
+    ).json()
+
+    response = client.post(
+        f"/api/v1/model-providers/{provider['id']}/connection-tests",
+        headers=headers,
+        json={"modelConfigId": model["id"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert response.json()["modelName"] == "gemma3"
+    assert response.json()["providerName"] == "Gemma"
+    assert response.json()["providerType"] == "OLLAMA"
+    assert response.json()["modelConfigId"] == model["id"]
+
+    from server.app.models.model_config import ModelCallLog
+
+    with SessionLocal() as session:
+        log = session.scalar(select(ModelCallLog))
+
+    assert log is not None
+    assert log.provider_id == provider["id"]
+    assert log.model_config_id == model["id"]
+    assert log.capability == "QA_SPLIT"
+
+
 def test_default_model_is_unique_per_capability():
     client, _ = build_test_client()
     headers = login_admin(client)
