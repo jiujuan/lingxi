@@ -107,6 +107,44 @@ def test_ollama_chat_uses_native_shape(monkeypatch):
     assert provider.complete_chat("hi") == "ollama 回答"
 
 
+def test_ollama_generate_qa_pairs_uses_structured_output_schema(monkeypatch):
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "message": {
+                    "content": (
+                        '{"items":[],"coveredChunkIndexes":[],"skippedChunks":[]}'
+                    )
+                }
+            },
+        )
+
+    _patch_transport(monkeypatch, handler)
+    provider = OllamaProvider(
+        "http://localhost:11434", None, {"modelName": "gemma3"}
+    )
+
+    provider.generate_qa_pairs("hi")
+
+    output_format = seen[-1]["format"]
+    assert output_format["type"] == "object"
+    assert set(output_format["required"]) == {
+        "items",
+        "coveredChunkIndexes",
+        "skippedChunks",
+    }
+    assert output_format["properties"]["items"]["type"] == "array"
+    assert (
+        output_format["properties"]["items"]["items"]["required"]
+        == ["question", "answer", "quote", "pageNo", "chunkIndex"]
+    )
+    assert seen[-1]["options"]["temperature"] == 0
+
+
 def test_claude_uses_messages_api_and_rejects_embeddings(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1/messages"

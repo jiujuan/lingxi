@@ -135,6 +135,19 @@ def test_qa_split_validator_rejects_invalid_json_and_missing_fields():
             raise AssertionError("invalid QA output should fail validation")
 
 
+def test_qa_split_validator_reports_missing_or_wrong_items_shape():
+    from server.app.services.qa_split_service import (
+        QaSplitValidationError,
+        validate_qa_split_output,
+    )
+
+    with pytest.raises(QaSplitValidationError, match="缺少 items 数组"):
+        validate_qa_split_output("{}")
+
+    with pytest.raises(QaSplitValidationError, match="实际类型为 object"):
+        validate_qa_split_output('{"items":{}}')
+
+
 @pytest.mark.parametrize(
     ("payload", "reason"),
     [
@@ -421,7 +434,9 @@ def test_qa_prompt_requires_complete_batch_coverage_contract():
 
     assert '"coveredChunkIndexes"' in prompt
     assert '"skippedChunks"' in prompt
-    assert '"chunkIndex"' in prompt
+    assert "chunkIndex" in prompt
+    assert "当前批次允许使用的 chunkIndex 只有：[7, 12]" in prompt
+    assert '"skippedChunks":[{"chunkIndex":1' not in prompt
     assert "完备分区" in prompt
     assert "不能同时" in prompt
 

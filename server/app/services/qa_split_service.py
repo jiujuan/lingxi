@@ -125,6 +125,22 @@ def _extract_json_text(raw_output: str) -> str:
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
+def _json_type_name(value: object) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, (int, float)):
+        return "number"
+    return type(value).__name__
+
+
 def _provenance_error(
     code: str,
     message: str,
@@ -375,11 +391,20 @@ def validate_qa_split_output(
             "QA 拆分输出必须是 JSON object",
             retryable=False,
         )
+    if "items" not in parsed:
+        raise _provenance_error(
+            QA_PROVENANCE_CONTRACT_INVALID,
+            "QA 拆分输出缺少 items 数组",
+            retryable=False,
+        )
     items = parsed.get("items")
     if not isinstance(items, list):
         raise _provenance_error(
             QA_PROVENANCE_CONTRACT_INVALID,
-            "QA 拆分输出 items 必须是数组",
+            (
+                "QA 拆分输出 items 必须是数组，"
+                f"实际类型为 {_json_type_name(items)}"
+            ),
             retryable=False,
         )
 

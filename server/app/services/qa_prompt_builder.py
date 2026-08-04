@@ -1,16 +1,17 @@
+import json
+
 from server.app.models.document import Document
 from server.app.models.qa_pair import DocumentChunk
 
 
 def build_qa_split_prompt(document: Document, chunks: list[DocumentChunk]) -> str:
+    available_indexes = [chunk.chunk_index for chunk in chunks]
     lines = [
         "你是企业知识库 QA 拆分助手。",
         "请基于原文片段生成可检索的问题、答案、引用原文和页码。",
         (
-            "只返回一个严格 JSON object，不要 Markdown 或解释。格式为 "
-            '{"items":[{"question":"...","answer":"...","quote":"...",'
-            '"pageNo":1,"chunkIndex":0}],"coveredChunkIndexes":[0],'
-            '"skippedChunks":[{"chunkIndex":1,"reason":"..."}]}'
+            "只返回一个严格 JSON object，不要 Markdown 或解释。输出结构为 "
+            '{"items":[],"coveredChunkIndexes":[],"skippedChunks":[]}'
         ),
         (
             "items 中每项必须有当前片段的 chunkIndex；quote 必须是该 chunk 的原文子串，"
@@ -21,6 +22,11 @@ def build_qa_split_prompt(document: Document, chunks: list[DocumentChunk]) -> st
             "记录未生成 QA 的 chunkIndex 和非空 reason。coveredChunkIndexes 与 "
             "skippedChunks 的 chunkIndex 必须对本批次所有 chunkIndex 构成完备分区："
             "每个 index 恰好出现一次，不能同时出现在两处，也不能缺失。"
+        ),
+        (
+            "当前批次允许使用的 chunkIndex 只有："
+            + json.dumps(available_indexes, ensure_ascii=False)
+            + "。不得输出列表之外的 chunkIndex。"
         ),
         f"文档标题：{document.title}",
         "原文片段：",

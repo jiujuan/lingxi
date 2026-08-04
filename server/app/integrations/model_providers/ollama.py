@@ -7,6 +7,51 @@ from server.app.integrations.model_providers.base import (
     ProviderError,
 )
 
+_QA_SPLIT_OUTPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "question": {"type": "string"},
+                    "answer": {"type": "string"},
+                    "quote": {"type": "string"},
+                    "pageNo": {"type": "integer", "minimum": 1},
+                    "chunkIndex": {"type": "integer", "minimum": 0},
+                },
+                "required": [
+                    "question",
+                    "answer",
+                    "quote",
+                    "pageNo",
+                    "chunkIndex",
+                ],
+            },
+        },
+        "coveredChunkIndexes": {
+            "type": "array",
+            "items": {"type": "integer", "minimum": 0},
+        },
+        "skippedChunks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "chunkIndex": {"type": "integer", "minimum": 0},
+                    "reason": {"type": "string"},
+                },
+                "required": ["chunkIndex", "reason"],
+            },
+        },
+    },
+    "required": ["items", "coveredChunkIndexes", "skippedChunks"],
+}
+
 
 class OllamaProvider(HttpProvider):
     """Adapter for a native Ollama server (``base_url`` e.g. http://host:11434)."""
@@ -35,9 +80,13 @@ class OllamaProvider(HttpProvider):
 
     def generate_qa_pairs(self, prompt: str) -> str:
         payload = self._chat_payload(prompt, stream=False)
-        # Constrain the server to emit strict JSON so a chatty model can't wrap
-        # the object in prose or ```json fences and break QA-split parsing.
-        payload["format"] = "json"
+        # JSON mode alone permits an empty object (Gemma can return "{}").
+        # Ollama's schema-constrained format keeps the response aligned with
+        # the provenance contract validated by QaSplitService.
+        payload["format"] = _QA_SPLIT_OUTPUT_SCHEMA
+        options = dict(payload.get("options") or {})
+        options.setdefault("temperature", 0)
+        payload["options"] = options
         return self._post_chat(payload)
 
     def _post_chat(self, payload: dict) -> str:
