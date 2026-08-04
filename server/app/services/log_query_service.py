@@ -53,6 +53,19 @@ class LogQueryService:
                     "status": item.status,
                     "latency_ms": item.latency_ms,
                     "token_usage": redact_log_payload(item.token_usage or {}),
+                    "batch_id": item.batch_id,
+                    "batch_index": item.batch_index,
+                    "retry_count": item.retry_count,
+                    "split_depth": item.split_depth,
+                    "input_char_count": item.input_char_count,
+                    "estimated_input_tokens": item.estimated_input_tokens,
+                    "output_char_count": item.output_char_count,
+                    "estimated_output_tokens": item.estimated_output_tokens,
+                    "timeout_phase": item.timeout_phase,
+                    "endpoint": redact_log_payload(item.endpoint),
+                    "model_name_snapshot": redact_log_payload(
+                        item.model_name_snapshot
+                    ),
                     "error_code": item.error_code,
                     "error_message": redact_log_payload(item.error_message),
                     "request_id": item.request_id,
@@ -167,4 +180,3 @@ class LogQueryService:
     @staticmethod
     def _iso(value: datetime | None) -> str:
         return value.isoformat() if value else ""
-

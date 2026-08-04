@@ -18,6 +18,10 @@ class ModelCallLogRepository:
         capability: str | None = None,
         request_id: str | None = None,
         run_id: str | None = None,
+        batch_id: str | None = None,
+        timeout_phase: str | None = None,
+        provider_id: str | None = None,
+        model_config_id: str | None = None,
         started_after: datetime | None = None,
         started_before: datetime | None = None,
         page: int = 1,
@@ -32,6 +36,14 @@ class ModelCallLogRepository:
             query = query.where(ModelCallLog.request_id == request_id)
         if run_id:
             query = query.where(ModelCallLog.run_id == run_id)
+        if batch_id:
+            query = query.where(ModelCallLog.batch_id == batch_id)
+        if timeout_phase:
+            query = query.where(ModelCallLog.timeout_phase == timeout_phase)
+        if provider_id:
+            query = query.where(ModelCallLog.provider_id == provider_id)
+        if model_config_id:
+            query = query.where(ModelCallLog.model_config_id == model_config_id)
         if started_after:
             query = query.where(ModelCallLog.created_at >= started_after)
         if started_before:
@@ -52,4 +64,3 @@ class ModelCallLogRepository:
             ).all()
         )
         return items, total
-

@@ -1191,6 +1191,12 @@ def test_qa_split_writes_successful_model_call_logs_for_each_batch():
     assert logs[0].capability == "QA_SPLIT"
     assert logs[0].status == "SUCCESS"
     assert logs[0].latency_ms is not None
+    assert logs[0].batch_id
+    assert logs[0].batch_index == "0"
+    assert logs[0].input_char_count > 0
+    assert logs[0].estimated_input_tokens == 0
+    assert logs[0].output_char_count > 0
+    assert logs[0].token_usage == {}
     assert logs[0].error_code is None
 
 
@@ -1235,8 +1241,12 @@ def test_qa_split_writes_failed_model_call_log_with_provider_diagnostics():
     assert "Gemma" in (log.error_message or "")
     assert "gemma3" in (log.error_message or "")
     assert "localhost:11434/api/chat" in (log.error_message or "")
-    assert log.token_usage["retryCount"] == 1
-    assert log.token_usage["splitDepth"] == 0
+    assert log.retry_count == 1
+    assert log.split_depth == 0
+    assert log.timeout_phase == "read"
+    assert log.endpoint == "http://localhost:11434/api/chat"
+    assert log.model_name_snapshot == "gemma3"
+    assert log.token_usage == {}
     assert all(entry.status == "FAILED" for entry in logs)
 
 

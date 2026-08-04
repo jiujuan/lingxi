@@ -12,6 +12,7 @@ from server.app.core.errors import not_found
 from server.app.core.config import settings
 from server.app.core import metrics
 from server.app.core.ids import current_request_id
+from server.app.core.log_redaction import redact_log_payload
 from server.app.core.secrets import decrypt_secret
 import server.app.db.base  # noqa: F401
 from server.app.integrations.model_providers.base import ProviderError
@@ -1044,10 +1045,13 @@ class QaSplitService:
         for result in batch_results:
             for leaf_result in _all_qa_batch_results(result):
                 self._record_qa_model_call(
+                    leaf_result.batch,
                     leaf_result,
                     model_config=model_config,
                     provider=provider,
                     run_id=run_id,
+                    endpoint=getattr(adapter, "last_endpoint", None),
+                    model_name_snapshot=getattr(adapter, "model_name", None),
                 )
         leaf_results = sorted(
             (
@@ -1109,10 +1113,13 @@ class QaSplitService:
         )
         for leaf_result in _all_qa_batch_results(result):
             self._record_qa_model_call(
+                leaf_result.batch,
                 leaf_result,
                 model_config=model_config,
                 provider=provider,
                 run_id=run_id,
+                endpoint=getattr(adapter, "last_endpoint", None),
+                model_name_snapshot=getattr(adapter, "model_name", None),
             )
 
         leaf_results = sorted(
@@ -1143,11 +1150,14 @@ class QaSplitService:
 
     def _record_qa_model_call(
         self,
+        batch: QaBatch,
         result: QaBatchResult,
         *,
         model_config: ModelConfig | None,
         provider: ModelProvider | None,
         run_id: str | None,
+        endpoint: str | None = None,
+        model_name_snapshot: str | None = None,
     ) -> None:
         if model_config is None or provider is None:
             return
@@ -1155,12 +1165,28 @@ class QaSplitService:
         if isinstance(error, ProviderError):
             error_code = error.code
             error_message = error.message
+            error_endpoint = error.endpoint
+            error_model_name = error.model_name
+            timeout_phase = error.timeout_phase
         elif error is not None:
             error_code = "QA_SPLIT_PROVIDER_ERROR"
             error_message = "QA Split 模型调用失败"
+            error_endpoint = None
+            error_model_name = None
+            timeout_phase = None
         else:
             error_code = None
             error_message = None
+            error_endpoint = None
+            error_model_name = None
+            timeout_phase = None
+        raw_output = result.raw_output if isinstance(result.raw_output, str) else None
+        input_char_count = sum(
+            len(chunk.content or "") for chunk in batch.chunks
+        )
+        estimated_output_tokens = None
+        if raw_output is not None and self.token_counter is not None:
+            estimated_output_tokens = self.token_counter.count(raw_output)
         self.session.add(
             ModelCallLog(
                 tenant_id=model_config.tenant_id,
@@ -1170,16 +1196,28 @@ class QaSplitService:
                 capability=ModelCapability.QA_SPLIT.value,
                 status="FAILED" if error is not None else "SUCCESS",
                 latency_ms=result.latency_ms,
-                token_usage={
-                    "batchIndex": result.batch.batch_index,
-                    "batchIndexPath": list(result.batch.batch_index_path),
-                    "inputHash": result.batch.input_hash,
-                    "estimatedInputTokens": result.batch.estimated_input_tokens,
-                    "retryCount": result.retry_count,
-                    "splitDepth": result.batch.split_depth,
-                },
+                token_usage={},
+                batch_id=batch.batch_id,
+                batch_index=".".join(
+                    str(index) for index in batch.batch_index_path
+                ),
+                retry_count=result.retry_count,
+                split_depth=batch.split_depth,
+                input_char_count=input_char_count,
+                estimated_input_tokens=batch.estimated_input_tokens,
+                output_char_count=len(raw_output) if raw_output is not None else None,
+                estimated_output_tokens=estimated_output_tokens,
+                timeout_phase=timeout_phase,
+                endpoint=redact_log_payload(
+                    error_endpoint or endpoint or provider.base_url
+                ),
+                model_name_snapshot=(
+                    error_model_name
+                    or model_name_snapshot
+                    or model_config.model_name
+                ),
                 error_code=error_code,
-                error_message=error_message,
+                error_message=redact_log_payload(error_message),
                 request_id=current_request_id(),
             )
         )

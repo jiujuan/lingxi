@@ -28,6 +28,11 @@ _SECRET_VALUE_RE = re.compile(
     r"|enc:v\d+:[A-Za-z0-9_:+/=-]{8,}"  # secret envelope
     r")"
 )
+_SENSITIVE_URL_PARAMETER_RE = re.compile(
+    r"(?P<prefix>(?:api[_-]?key|access[_-]?token|refresh[_-]?token|"
+    r"authorization|password|secret)=)(?P<value>[^&\s]+)",
+    re.IGNORECASE,
+)
 
 
 def redact_log_payload(payload: Any) -> Any:
@@ -216,6 +221,9 @@ def _redact_string(value: str) -> str:
     lowered = value.lower()
     if "authorization:" in lowered or "bearer " in lowered:
         return REDACTED
+    value = _SENSITIVE_URL_PARAMETER_RE.sub(
+        rf"\g<prefix>{REDACTED}", value
+    )
     return _SECRET_VALUE_RE.sub(REDACTED, value)
 
 

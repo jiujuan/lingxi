@@ -86,6 +86,9 @@ def test_model_provider_connection_test_writes_masked_call_log():
     assert len(logs) == 1
     assert logs[0].provider_id == provider["id"]
     assert logs[0].status == "SUCCESS"
+    assert logs[0].endpoint == "mock://success"
+    assert logs[0].model_name_snapshot is None
+    assert logs[0].timeout_phase is None
     assert logs[0].error_message is None
 
 
@@ -137,6 +140,9 @@ def test_model_connection_test_binds_selected_model_and_capability():
     assert log.provider_id == provider["id"]
     assert log.model_config_id == model["id"]
     assert log.capability == "QA_SPLIT"
+    assert log.endpoint == "mock://success"
+    assert log.model_name_snapshot == "gemma3"
+    assert log.timeout_phase is None
 
 
 def test_connection_test_filters_provider_options_before_adapter():

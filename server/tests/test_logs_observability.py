@@ -216,6 +216,7 @@ def test_logs_api_lists_filters_and_redacts_sensitive_fields():
         )
         session.add_all([provider, job])
         session.flush()
+        provider_id = provider.id
         task_run = TaskRun(
             tenant_id=tenant_id,
             task_type="parse_document",
@@ -234,6 +235,20 @@ def test_logs_api_lists_filters_and_redacts_sensitive_fields():
                     tenant_id=tenant_id,
                     provider_id=provider.id,
                     run_id="run-1",
+                    batch_id="0:batch-1",
+                    batch_index="0",
+                    retry_count=1,
+                    split_depth=2,
+                    input_char_count=120,
+                    estimated_input_tokens=48,
+                    output_char_count=80,
+                    estimated_output_tokens=30,
+                    timeout_phase="read",
+                    endpoint=(
+                        "https://api.example.com/v1/chat/completions"
+                        "?api_key=endpoint-secret"
+                    ),
+                    model_name_snapshot="gpt-x",
                     capability="CHAT",
                     status="FAILED",
                     latency_ms=123,
@@ -279,7 +294,22 @@ def test_logs_api_lists_filters_and_redacts_sensitive_fields():
     model_logs = client.get("/api/v1/logs/model-calls?runId=run-1", headers=headers)
     assert model_logs.status_code == 200
     assert model_logs.json()["data"][0]["providerName"] == "Mock Provider"
+    assert model_logs.json()["data"][0]["batchId"] == "0:batch-1"
+    assert model_logs.json()["data"][0]["batchIndex"] == "0"
+    assert model_logs.json()["data"][0]["retryCount"] == 1
+    assert model_logs.json()["data"][0]["timeoutPhase"] == "read"
+    assert model_logs.json()["data"][0]["modelNameSnapshot"] == "gpt-x"
+    assert "endpoint-secret" not in model_logs.text
     assert "secret" not in model_logs.text
+
+    filtered_logs = client.get(
+        "/api/v1/logs/model-calls"
+        "?batchId=0%3Abatch-1&timeoutPhase=read"
+        f"&providerId={provider_id}",
+        headers=headers,
+    )
+    assert filtered_logs.status_code == 200
+    assert filtered_logs.json()["pagination"]["totalItems"] == 1
 
     api_logs = client.get("/api/v1/logs/api-calls?requestId=req-api-1", headers=headers)
     assert api_logs.status_code == 200

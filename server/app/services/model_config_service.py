@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from server.app.core.errors import bad_request, conflict, not_found
 from server.app.core.ids import current_request_id
+from server.app.core.log_redaction import redact_log_payload
 from server.app.core.permissions import AccessContext
 from server.app.core.secrets import decrypt_secret, encrypt_secret, has_secret
 from server.app.integrations.model_providers.registry import (
@@ -174,8 +175,13 @@ class ModelConfigService:
             status=result.status,
             latency_ms=latency_ms,
             token_usage={},
+            timeout_phase=result.timeout_phase,
+            endpoint=redact_log_payload(result.endpoint or provider.base_url),
+            model_name_snapshot=(
+                result.model_name or model_name
+            ),
             error_code=result.error_code,
-            error_message=result.error_message,
+            error_message=redact_log_payload(result.error_message),
             request_id=current_request_id(),
         )
         self.session.add(log)

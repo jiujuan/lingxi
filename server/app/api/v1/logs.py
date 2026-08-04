@@ -66,6 +66,10 @@ def list_model_calls(
     capability: str | None = Query(default=None),
     request_id: str | None = Query(default=None, alias="requestId"),
     run_id: str | None = Query(default=None, alias="runId"),
+    batch_id: str | None = Query(default=None, alias="batchId"),
+    timeout_phase: str | None = Query(default=None, alias="timeoutPhase"),
+    provider_id: str | None = Query(default=None, alias="providerId"),
+    model_config_id: str | None = Query(default=None, alias="modelConfigId"),
     started_after: datetime | None = Query(default=None, alias="startedAfter"),
     started_before: datetime | None = Query(default=None, alias="startedBefore"),
     page: int = Query(default=1, ge=1),
@@ -79,6 +83,10 @@ def list_model_calls(
         capability=capability,
         request_id=request_id,
         run_id=run_id,
+        batch_id=batch_id,
+        timeout_phase=timeout_phase,
+        provider_id=provider_id,
+        model_config_id=model_config_id,
         started_after=started_after,
         started_before=started_before,
         page=page,
@@ -138,4 +146,3 @@ def list_audit_logs(
         page=page,
         page_size=page_size,
     )
-

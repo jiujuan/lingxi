@@ -47,6 +47,17 @@ class ModelCallLogResponse(BaseModel):
     status: str
     latency_ms: int | None = Field(alias="latencyMs")
     token_usage: dict = Field(alias="tokenUsage")
+    batch_id: str | None = Field(alias="batchId")
+    batch_index: str | None = Field(alias="batchIndex")
+    retry_count: int = Field(alias="retryCount")
+    split_depth: int = Field(alias="splitDepth")
+    input_char_count: int | None = Field(alias="inputCharCount")
+    estimated_input_tokens: int | None = Field(alias="estimatedInputTokens")
+    output_char_count: int | None = Field(alias="outputCharCount")
+    estimated_output_tokens: int | None = Field(alias="estimatedOutputTokens")
+    timeout_phase: str | None = Field(alias="timeoutPhase")
+    endpoint: str | None
+    model_name_snapshot: str | None = Field(alias="modelNameSnapshot")
     error_code: str | None = Field(alias="errorCode")
     error_message: str | None = Field(alias="errorMessage")
     request_id: str | None = Field(alias="requestId")
@@ -95,4 +106,3 @@ class AuditLogResponse(BaseModel):
 class AuditLogListResponse(BaseModel):
     data: list[AuditLogResponse]
     pagination: PaginationResponse
-
