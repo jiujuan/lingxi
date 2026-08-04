@@ -3,7 +3,6 @@ from datetime import UTC, datetime
 import json
 import logging
 import re
-from time import perf_counter
 import unicodedata
 
 from sqlalchemy import delete, select
@@ -36,7 +35,9 @@ from server.app.services.import_service import enqueue_embedding_task  # re-expo
 from server.app.services.qa_split_batching import (
     QA_SPLIT_BATCH_CONFIG_INVALID,
     QaBatch,
+    QaBatchResult,
     QaBatchingError,
+    execute_qa_batch_with_retry,
     group_qa_chunks,
     qa_batch_input_hash,
 )
@@ -90,11 +91,27 @@ class QaSplitValidationError(Exception):
         self.retryable = retryable
 
 
-@dataclass(frozen=True)
-class _QaBatchResult:
-    raw_output: str | None
-    error: Exception | None
-    latency_ms: int
+def _all_qa_batch_results(result: QaBatchResult) -> tuple[QaBatchResult, ...]:
+    """Return a split root and all descendants for safe call-log diagnostics."""
+
+    descendants: list[QaBatchResult] = [result]
+    for child in result.split_results:
+        descendants.extend(_all_qa_batch_results(child))
+    return tuple(descendants)
+
+
+def _batch_result_error(result: QaBatchResult) -> QaSplitValidationError:
+    """Prevent Celery from replaying successful batches after policy exhaustion."""
+
+    error = result.error
+    assert error is not None
+    code = getattr(error, "code", None)
+    message = getattr(error, "message", None)
+    return QaSplitValidationError(
+        message if isinstance(message, str) else "QA Batch 调用失败",
+        code=code if isinstance(code, str) else "QA_SPLIT_PROVIDER_ERROR",
+        retryable=False,
+    )
 
 
 def _extract_json_text(raw_output: str) -> str:
@@ -528,6 +545,8 @@ class QaSplitService:
         reserved_output_tokens: int | None = None,
         max_batch_chars: int | None = None,
         max_concurrency: int | None = None,
+        max_retries: int | None = None,
+        max_split_depth: int | None = None,
     ) -> None:
         self.session = session
         self._build_adapter = provider_factory
@@ -559,6 +578,16 @@ class QaSplitService:
             if max_concurrency is not None
             else getattr(settings, "qa_split_max_concurrency", 4)
         )
+        self.max_retries = (
+            max_retries
+            if max_retries is not None
+            else getattr(settings, "qa_split_max_retries", 1)
+        )
+        self.max_split_depth = (
+            max_split_depth
+            if max_split_depth is not None
+            else getattr(settings, "qa_split_max_split_depth", 1)
+        )
         if (
             not isinstance(self.max_input_tokens, int)
             or isinstance(self.max_input_tokens, bool)
@@ -566,6 +595,12 @@ class QaSplitService:
             or not isinstance(self.reserved_output_tokens, int)
             or isinstance(self.reserved_output_tokens, bool)
             or self.reserved_output_tokens < 0
+            or not isinstance(self.max_retries, int)
+            or isinstance(self.max_retries, bool)
+            or self.max_retries < 0
+            or not isinstance(self.max_split_depth, int)
+            or isinstance(self.max_split_depth, bool)
+            or self.max_split_depth < 0
         ):
             raise QaSplitValidationError(
                 "QA token budget 配置不合法",
@@ -869,54 +904,67 @@ class QaSplitService:
             for index, group in enumerate(groups)
         ]
 
-        def generate(batch: QaBatch) -> _QaBatchResult:
-            started = perf_counter()
-            try:
-                raw_output = adapter.generate_qa_pairs(
+        class PromptBatchAdapter:
+            def generate_qa_batch(self, batch: QaBatch) -> str:
+                return adapter.generate_qa_pairs(
                     build_qa_split_prompt(document, list(batch.chunks))
                 )
-            except Exception as exc:
-                return _QaBatchResult(
-                    raw_output=None,
-                    error=exc,
-                    latency_ms=max(1, int((perf_counter() - started) * 1000)),
-                )
-            return _QaBatchResult(
-                raw_output=raw_output,
-                error=None,
-                latency_ms=max(1, int((perf_counter() - started) * 1000)),
-            )
 
         batch_results = run_ordered(
-            batches, generate, self.max_concurrency
+            batches,
+            lambda batch: execute_qa_batch_with_retry(
+                PromptBatchAdapter(),
+                batch,
+                max_retries=self.max_retries,
+                max_split_depth=self.max_split_depth,
+            ),
+            self.max_concurrency,
         )
         for result in batch_results:
-            self._record_qa_model_call(
-                result,
-                model_config=model_config,
-                provider=provider,
-                run_id=run_id,
-            )
-        for result in batch_results:
+            for leaf_result in _all_qa_batch_results(result):
+                self._record_qa_model_call(
+                    leaf_result,
+                    model_config=model_config,
+                    provider=provider,
+                    run_id=run_id,
+                )
+        leaf_results = sorted(
+            (
+                leaf_result
+                for result in batch_results
+                for leaf_result in result.leaf_results()
+            ),
+            key=lambda result: (
+                result.batch.batch_index,
+                result.batch.batch_index_path,
+            ),
+        )
+        for result in leaf_results:
             if result.error is not None:
-                raise result.error
+                raise _batch_result_error(result)
 
         items: list[ValidatedQaItem] = []
-        for batch, result in zip(batches, batch_results, strict=True):
+        for result in leaf_results:
+            validated = validate_qa_split_output(
+                result.raw_output or "",
+                list(result.batch.chunks),
+                allow_legacy_missing_chunk_index=(
+                    self.legacy_missing_chunk_index_compatibility
+                ),
+            )
             items.extend(
-                validate_qa_split_output(
-                    result.raw_output or "",
-                    list(batch.chunks),
-                    allow_legacy_missing_chunk_index=(
-                        self.legacy_missing_chunk_index_compatibility
-                    ),
+                sorted(
+                    validated,
+                    key=lambda item: item.chunk_index
+                    if item.chunk_index is not None
+                    else -1,
                 )
             )
         return items
 
     def _record_qa_model_call(
         self,
-        result: _QaBatchResult,
+        result: QaBatchResult,
         *,
         model_config: ModelConfig | None,
         provider: ModelProvider | None,
@@ -943,7 +991,14 @@ class QaSplitService:
                 capability=ModelCapability.QA_SPLIT.value,
                 status="FAILED" if error is not None else "SUCCESS",
                 latency_ms=result.latency_ms,
-                token_usage={},
+                token_usage={
+                    "batchIndex": result.batch.batch_index,
+                    "batchIndexPath": list(result.batch.batch_index_path),
+                    "inputHash": result.batch.input_hash,
+                    "estimatedInputTokens": result.batch.estimated_input_tokens,
+                    "retryCount": result.retry_count,
+                    "splitDepth": result.batch.split_depth,
+                },
                 error_code=error_code,
                 error_message=error_message,
                 request_id=current_request_id(),

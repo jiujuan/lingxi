@@ -1,0 +1,42 @@
+{
+  "task": "Task 5 - QA batch retry, timeout split, and error classification",
+  "status": "passed",
+  "scope": {
+    "retryableCodes": [
+      "PROVIDER_CONNECTION_TIMEOUT",
+      "PROVIDER_WRITE_TIMEOUT",
+      "PROVIDER_POOL_TIMEOUT",
+      "PROVIDER_INFERENCE_TIMEOUT",
+      "PROVIDER_OVERALL_TIMEOUT",
+      "PROVIDER_CONNECTION_ERROR",
+      "PROVIDER_RATE_LIMITED",
+      "PROVIDER_SERVER_ERROR"
+    ],
+    "maxBackoffSeconds": 8,
+    "maxRetryAfterSeconds": 30,
+    "splitRule": "timeout or output-truncated batches split only while multi-chunk and below configured depth"
+  },
+  "verification": {
+    "command": "pytest server/tests/test_qa_split_task.py server/tests/test_batching_pipeline.py -q",
+    "result": "70 passed",
+    "scenarios": [
+      "timeout retries once and then succeeds",
+      "repeated timeout splits a two-chunk batch and preserves item order",
+      "object-valued items stops with QA_PROVENANCE_CONTRACT_INVALID after one call",
+      "401 does not retry",
+      "429 Retry-After is capped at 30 seconds",
+      "single-chunk timeout does not recurse"
+    ]
+  },
+  "observability": {
+    "modelCallLogTokenUsage": [
+      "batchIndex",
+      "batchIndexPath",
+      "inputHash",
+      "estimatedInputTokens",
+      "retryCount",
+      "splitDepth"
+    ],
+    "sensitiveDataStored": false
+  }
+}

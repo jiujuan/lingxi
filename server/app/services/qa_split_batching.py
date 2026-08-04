@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 import hashlib
 import json
 from types import SimpleNamespace
+import time
 from typing import Sequence
 
+from server.app.integrations.model_providers.base import ProviderError
 from server.app.models.document import Document
 from server.app.models.qa_pair import DocumentChunk
 from server.app.services.chunking import TokenCounter, TokenLimitError, TokenizerUnavailableError
@@ -18,6 +22,39 @@ from server.app.services.qa_prompt_builder import (
 
 QA_SPLIT_BATCH_CONFIG_INVALID = "QA_SPLIT_BATCH_CONFIG_INVALID"
 QA_PROVENANCE_CONTRACT_INVALID = "QA_PROVENANCE_CONTRACT_INVALID"
+RETRYABLE_QA_CODES = frozenset(
+    {
+        "PROVIDER_CONNECTION_TIMEOUT",
+        "PROVIDER_WRITE_TIMEOUT",
+        "PROVIDER_POOL_TIMEOUT",
+        "PROVIDER_INFERENCE_TIMEOUT",
+        "PROVIDER_OVERALL_TIMEOUT",
+        "PROVIDER_CONNECTION_ERROR",
+        "PROVIDER_RATE_LIMITED",
+        "PROVIDER_SERVER_ERROR",
+    }
+)
+TERMINAL_QA_CODES = frozenset(
+    {
+        "QA_PROVENANCE_CONTRACT_INVALID",
+        "QA_SPLIT_INVALID_OUTPUT",
+        "QA_SPLIT_MODEL_NOT_CONFIGURED",
+        "QA_PROVENANCE_UNKNOWN_CHUNK_INDEX",
+        "PROVIDER_UNAUTHORIZED",
+        "PROVIDER_REQUEST_ERROR",
+        "PROVIDER_OUTPUT_TRUNCATED",
+    }
+)
+_SPLITTABLE_QA_CODES = frozenset(
+    {
+        "PROVIDER_CONNECTION_TIMEOUT",
+        "PROVIDER_WRITE_TIMEOUT",
+        "PROVIDER_POOL_TIMEOUT",
+        "PROVIDER_INFERENCE_TIMEOUT",
+        "PROVIDER_OVERALL_TIMEOUT",
+        "PROVIDER_OUTPUT_TRUNCATED",
+    }
+)
 _EMPTY_CONTENT_HASH = hashlib.sha256(b"").hexdigest()
 
 
@@ -39,6 +76,43 @@ class QaBatch:
     reserved_output_tokens: int
     input_hash: str
     budget_mode: str = "tokens"
+    parent_batch_id: str | None = None
+    split_depth: int = 0
+    batch_index_path: tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.batch_index_path:
+            object.__setattr__(self, "batch_index_path", (self.batch_index,))
+
+    @property
+    def batch_id(self) -> str:
+        path = ".".join(str(index) for index in self.batch_index_path)
+        return f"{path}:{self.input_hash[:16]}"
+
+
+@dataclass(frozen=True)
+class QaBatchResult:
+    """One terminal result for a batch, including any successful split leaves.
+
+    ``raw_output``, ``error`` and ``latency_ms`` intentionally mirror the
+    previous private QA service result so existing call-log code can consume
+    the new type without losing diagnostics.
+    """
+
+    batch: QaBatch
+    raw_output: str | None
+    error: Exception | None
+    latency_ms: int
+    retry_count: int = 0
+    split_results: tuple["QaBatchResult", ...] = ()
+
+    def leaf_results(self) -> tuple["QaBatchResult", ...]:
+        if self.split_results:
+            leaves: list[QaBatchResult] = []
+            for result in self.split_results:
+                leaves.extend(result.leaf_results())
+            return tuple(leaves)
+        return (self,)
 
 
 def estimate_qa_prompt_tokens(
@@ -313,7 +387,7 @@ def split_qa_batch(batch: QaBatch) -> tuple[QaBatch, QaBatch]:
     left_chunks = batch.chunks[:middle]
     right_chunks = batch.chunks[middle:]
 
-    def child(chunks: tuple[DocumentChunk, ...], index: int) -> QaBatch:
+    def child(chunks: tuple[DocumentChunk, ...], child_index: int) -> QaBatch:
         total_content = sum(len(chunk.content or "") for chunk in batch.chunks)
         child_content = sum(len(chunk.content or "") for chunk in chunks)
         estimated = max(
@@ -321,15 +395,185 @@ def split_qa_batch(batch: QaBatch) -> tuple[QaBatch, QaBatch]:
             round(batch.estimated_input_tokens * child_content / max(1, total_content)),
         )
         return QaBatch(
-            batch_index=index,
+            # Keep the root index so final output can be ordered with the
+            # original batch. The binary child position lives in the path.
+            batch_index=batch.batch_index,
             chunks=chunks,
             estimated_input_tokens=estimated,
             reserved_output_tokens=batch.reserved_output_tokens,
             input_hash=qa_batch_input_hash(chunks),
             budget_mode=batch.budget_mode,
+            parent_batch_id=batch.batch_id,
+            split_depth=batch.split_depth + 1,
+            batch_index_path=batch.batch_index_path + (child_index,),
         )
 
     return (
-        child(left_chunks, batch.batch_index * 2),
-        child(right_chunks, batch.batch_index * 2 + 1),
+        child(left_chunks, 0),
+        child(right_chunks, 1),
     )
+
+
+def execute_qa_batch_with_retry(
+    adapter,
+    batch: QaBatch,
+    *,
+    max_retries: int,
+    max_split_depth: int,
+) -> QaBatchResult:
+    """Execute one QA batch with bounded retry and timeout-size reduction.
+
+    The caller supplies an adapter with either ``generate_qa_batch(batch)`` or
+    the legacy ``generate_qa_pairs(batch)`` method.  The latter keeps focused
+    tests and older service call sites compatible; production wraps its
+    provider adapter to turn the batch into a prompt.
+    """
+
+    retries = _non_negative_limit(max_retries)
+    split_depth_limit = _non_negative_limit(max_split_depth)
+    attempt = 0
+    total_latency_ms = 0
+
+    while True:
+        started_at = time.perf_counter()
+        try:
+            raw_output = _generate_qa_batch(adapter, batch)
+        except Exception as exc:
+            total_latency_ms += max(1, int((time.perf_counter() - started_at) * 1000))
+            code = _error_code(exc)
+            if _is_retryable_qa_error(exc, code) and attempt < retries:
+                time.sleep(_retry_delay_seconds(exc, attempt))
+                attempt += 1
+                continue
+
+            result = QaBatchResult(
+                batch=batch,
+                raw_output=None,
+                error=exc,
+                latency_ms=total_latency_ms,
+                retry_count=attempt,
+            )
+            if (
+                code in _SPLITTABLE_QA_CODES
+                and len(batch.chunks) > 1
+                and batch.split_depth < split_depth_limit
+            ):
+                left, right = split_qa_batch(batch)
+                return QaBatchResult(
+                    batch=batch,
+                    raw_output=None,
+                    error=exc,
+                    latency_ms=total_latency_ms,
+                    retry_count=attempt,
+                    split_results=(
+                        execute_qa_batch_with_retry(
+                            adapter,
+                            left,
+                            max_retries=retries,
+                            max_split_depth=split_depth_limit,
+                        ),
+                        execute_qa_batch_with_retry(
+                            adapter,
+                            right,
+                            max_retries=retries,
+                            max_split_depth=split_depth_limit,
+                        ),
+                    ),
+                )
+            return result
+        else:
+            total_latency_ms += max(1, int((time.perf_counter() - started_at) * 1000))
+            return QaBatchResult(
+                batch=batch,
+                raw_output=raw_output,
+                error=None,
+                latency_ms=total_latency_ms,
+                retry_count=attempt,
+            )
+
+
+def _non_negative_limit(value: int) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        return 0
+    return max(0, value)
+
+
+def _generate_qa_batch(adapter, batch: QaBatch) -> str:
+    generate_batch = getattr(adapter, "generate_qa_batch", None)
+    if callable(generate_batch):
+        return generate_batch(batch)
+    return adapter.generate_qa_pairs(batch)
+
+
+def _error_code(error: Exception) -> str | None:
+    code = getattr(error, "code", None)
+    return code if isinstance(code, str) else None
+
+
+def _is_retryable_qa_error(error: Exception, code: str | None) -> bool:
+    if code in TERMINAL_QA_CODES or code not in RETRYABLE_QA_CODES:
+        return False
+    if isinstance(error, ProviderError):
+        return error.retryable
+    return bool(getattr(error, "retryable", False))
+
+
+def _retry_delay_seconds(error: Exception, attempt: int) -> float:
+    """Return bounded delay for QA batch retry attempts.
+
+    Rate-limit hints may be surfaced by a provider adapter as either a numeric
+    ``retry_after_seconds``/``retry_after`` attribute or a response-header
+    mapping. Invalid or unavailable hints fall back to the normal schedule.
+    """
+
+    default_delay = min(8.0, 0.5 * (2**max(0, attempt)))
+    if _error_code(error) != "PROVIDER_RATE_LIMITED":
+        return default_delay
+    retry_after = _retry_after_seconds(error)
+    return min(30.0, retry_after) if retry_after is not None else default_delay
+
+
+def _retry_after_seconds(error: Exception) -> float | None:
+    candidates = [
+        getattr(error, "retry_after_seconds", None),
+        getattr(error, "retry_after", None),
+    ]
+    context = getattr(error, "context", None)
+    if isinstance(context, dict):
+        candidates.extend(
+            (
+                context.get("retry_after_seconds"),
+                context.get("retryAfter"),
+                context.get("retry-after"),
+            )
+        )
+        headers = context.get("headers")
+        if isinstance(headers, dict):
+            candidates.extend((headers.get("Retry-After"), headers.get("retry-after")))
+    headers = getattr(error, "headers", None)
+    if isinstance(headers, dict):
+        candidates.extend((headers.get("Retry-After"), headers.get("retry-after")))
+
+    for candidate in candidates:
+        parsed = _parse_retry_after(candidate)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _parse_retry_after(value: object) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value) if value > 0 else None
+    if not isinstance(value, str):
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=UTC)
+        seconds = (retry_at - datetime.now(UTC)).total_seconds()
+    return seconds if seconds > 0 else None

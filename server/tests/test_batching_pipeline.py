@@ -284,3 +284,127 @@ def test_token_batching_rejects_oversized_adaptive_chunk():
 
     assert exc_info.value.code == QA_PROVENANCE_CONTRACT_INVALID
     assert exc_info.value.retryable is False
+
+
+def _retryable_qa_batch(*chunks):
+    from server.app.services.qa_split_batching import QaBatch, qa_batch_input_hash
+
+    return QaBatch(
+        batch_index=7,
+        chunks=tuple(chunks),
+        estimated_input_tokens=100,
+        reserved_output_tokens=20,
+        input_hash=qa_batch_input_hash(chunks),
+    )
+
+
+def test_qa_batch_retries_timeout_once_then_returns_success(monkeypatch):
+    from server.app.services import qa_split_batching
+    from server.app.services.qa_split_batching import execute_qa_batch_with_retry
+
+    batch = _retryable_qa_batch(_qa_batching_chunk(1, "alpha", "a" * 64))
+
+    class Adapter:
+        calls = 0
+
+        def generate_qa_pairs(self, _batch):
+            type(self).calls += 1
+            if type(self).calls == 1:
+                raise ProviderError(
+                    "PROVIDER_INFERENCE_TIMEOUT",
+                    "inference timeout",
+                    retryable=True,
+                )
+            return "success"
+
+    monkeypatch.setattr(qa_split_batching.time, "sleep", lambda _seconds: None)
+    result = execute_qa_batch_with_retry(
+        Adapter(), batch, max_retries=1, max_split_depth=1
+    )
+
+    assert Adapter.calls == 2
+    assert result.raw_output == "success"
+    assert result.error is None
+    assert result.retry_count == 1
+
+
+def test_qa_batch_429_retry_after_is_capped(monkeypatch):
+    from server.app.services import qa_split_batching
+    from server.app.services.qa_split_batching import execute_qa_batch_with_retry
+
+    batch = _retryable_qa_batch(_qa_batching_chunk(1, "alpha", "a" * 64))
+    delays = []
+
+    class Adapter:
+        calls = 0
+
+        def generate_qa_pairs(self, _batch):
+            type(self).calls += 1
+            if type(self).calls == 1:
+                error = ProviderError(
+                    "PROVIDER_RATE_LIMITED", "slow down", retryable=True
+                )
+                error.retry_after_seconds = 300
+                raise error
+            return "success"
+
+    monkeypatch.setattr(
+        qa_split_batching.time, "sleep", lambda seconds: delays.append(seconds)
+    )
+    result = execute_qa_batch_with_retry(
+        Adapter(), batch, max_retries=1, max_split_depth=0
+    )
+
+    assert Adapter.calls == 2
+    assert result.error is None
+    assert delays == [30.0]
+
+
+def test_qa_batch_does_not_retry_unauthorized_error():
+    from server.app.services.qa_split_batching import execute_qa_batch_with_retry
+
+    batch = _retryable_qa_batch(_qa_batching_chunk(1, "alpha", "a" * 64))
+
+    class Adapter:
+        calls = 0
+
+        def generate_qa_pairs(self, _batch):
+            type(self).calls += 1
+            raise ProviderError(
+                "PROVIDER_UNAUTHORIZED", "unauthorized", retryable=False
+            )
+
+    result = execute_qa_batch_with_retry(
+        Adapter(), batch, max_retries=3, max_split_depth=3
+    )
+
+    assert Adapter.calls == 1
+    assert result.error is not None
+    assert result.error.code == "PROVIDER_UNAUTHORIZED"
+    assert result.split_results == ()
+
+
+def test_qa_single_chunk_timeout_does_not_split_or_recurse():
+    from server.app.services.qa_split_batching import execute_qa_batch_with_retry
+
+    batch = _retryable_qa_batch(_qa_batching_chunk(1, "alpha", "a" * 64))
+
+    class Adapter:
+        calls = 0
+
+        def generate_qa_pairs(self, _batch):
+            type(self).calls += 1
+            raise ProviderError(
+                "PROVIDER_INFERENCE_TIMEOUT",
+                "inference timeout",
+                retryable=True,
+            )
+
+    result = execute_qa_batch_with_retry(
+        Adapter(), batch, max_retries=0, max_split_depth=10
+    )
+
+    assert Adapter.calls == 1
+    assert result.error is not None
+    assert result.split_results == ()
+    assert len(result.leaf_results()) == 1

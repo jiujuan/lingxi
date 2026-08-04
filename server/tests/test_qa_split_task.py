@@ -651,6 +651,92 @@ def test_multi_batch_validation_retains_global_chunk_indexes(monkeypatch):
     assert [item.chunk_index for item in items] == [10, 25]
 
 
+def test_timeout_batch_retries_then_splits_and_preserves_item_order(monkeypatch):
+    from server.app.integrations.model_providers.base import ProviderError
+    from server.app.models.document import Document
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.services import qa_split_batching
+    from server.app.services.qa_split_service import QaSplitService
+
+    session, _identity = build_qa_session()
+    document = Document(title="Retry and split")
+    chunks = [
+        DocumentChunk(chunk_index=0, content="first", page_no=1),
+        DocumentChunk(chunk_index=1, content="second", page_no=2),
+    ]
+    monkeypatch.setattr(qa_split_batching.time, "sleep", lambda _seconds: None)
+
+    class Adapter:
+        calls = 0
+
+        def generate_qa_pairs(self, prompt):
+            type(self).calls += 1
+            if type(self).calls <= 2:
+                raise ProviderError(
+                    "PROVIDER_INFERENCE_TIMEOUT",
+                    "inference timeout",
+                    retryable=True,
+                )
+            if "chunkIndex=0" in prompt:
+                index, quote, page = 0, "first", 1
+            else:
+                index, quote, page = 1, "second", 2
+            return json.dumps(
+                _strict_qa_payload(
+                    items=[
+                        {
+                            "question": f"q{index}",
+                            "answer": f"a{index}",
+                            "quote": quote,
+                            "pageNo": page,
+                            "chunkIndex": index,
+                        }
+                    ],
+                    covered=[index],
+                    skipped=[],
+                )
+            )
+
+    items = QaSplitService(
+        session,
+        max_retries=1,
+        max_split_depth=1,
+        max_concurrency=1,
+    )._generate_qa_items(Adapter(), document, [chunks])
+
+    assert Adapter.calls == 4
+    assert [item.chunk_index for item in items] == [0, 1]
+
+
+def test_items_object_stops_without_network_retry(monkeypatch):
+    from server.app.models.document import Document
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.services import qa_split_batching
+    from server.app.services.qa_split_service import (
+        QaSplitService,
+        QaSplitValidationError,
+    )
+
+    session, _identity = build_qa_session()
+    monkeypatch.setattr(qa_split_batching.time, "sleep", lambda _seconds: None)
+    chunk = DocumentChunk(chunk_index=0, content="body", page_no=1)
+
+    class Adapter:
+        calls = 0
+
+        def generate_qa_pairs(self, _prompt):
+            type(self).calls += 1
+            return json.dumps({"items": {}})
+
+    with pytest.raises(QaSplitValidationError) as exc_info:
+        QaSplitService(session, max_retries=3)._generate_qa_items(
+            Adapter(), Document(title="Invalid"), [[chunk]]
+        )
+
+    assert Adapter.calls == 1
+    assert exc_info.value.code == "QA_PROVENANCE_CONTRACT_INVALID"
+
+
 def test_qa_service_uses_token_batches_and_keeps_character_fallback_available():
     from server.app.models.document import Document
     from server.app.models.qa_pair import DocumentChunk
@@ -1022,13 +1108,15 @@ def test_invalid_json_does_not_persist_raw_model_output_in_failure_messages():
 
 
 @pytest.mark.parametrize(
-    ("code", "retryable"),
+    ("code", "provider_retryable"),
     [
         ("PROVIDER_CONNECTION_ERROR", True),
         ("PROVIDER_UNAUTHORIZED", False),
     ],
 )
-def test_normalized_provider_error_preserves_code_and_retryability(code, retryable):
+def test_provider_batch_policy_preserves_code_without_celery_replay(
+    code, provider_retryable
+):
     from server.app.integrations.model_providers.base import ProviderError
     from server.app.models.import_job import ImportJob
     from server.app.models.logs import TaskRun
@@ -1041,7 +1129,9 @@ def test_normalized_provider_error_preserves_code_and_retryability(code, retryab
     class _Adapter:
         @staticmethod
         def generate_qa_pairs(_prompt):
-            raise ProviderError(code, "模型供应商调用失败", retryable=retryable)
+            raise ProviderError(
+                code, "模型供应商调用失败", retryable=provider_retryable
+            )
 
     result = QaSplitService(
         session,
@@ -1056,7 +1146,9 @@ def test_normalized_provider_error_preserves_code_and_retryability(code, retryab
     assert task_run.error == {
         "code": code,
         "message": "模型供应商调用失败",
-        "retryable": retryable,
+        # Batch-level retries are already exhausted here. Retrying the Celery
+        # task would replay any batches that succeeded before this failure.
+        "retryable": False,
         "failedAt": task_run.error["failedAt"],
     }
 
@@ -1132,7 +1224,9 @@ def test_qa_split_writes_failed_model_call_log_with_provider_diagnostics():
     ).split_import_job(job_id)
 
     assert result.status == "FAILED"
-    log = session.query(ModelCallLog).one()
+    logs = session.query(ModelCallLog).order_by(ModelCallLog.created_at).all()
+    assert len(logs) == 3  # root batch plus two terminal single-chunk children
+    log = logs[0]
     assert log.provider_id == model.provider_id
     assert log.model_config_id == model.id
     assert log.capability == "QA_SPLIT"
@@ -1141,6 +1235,9 @@ def test_qa_split_writes_failed_model_call_log_with_provider_diagnostics():
     assert "Gemma" in (log.error_message or "")
     assert "gemma3" in (log.error_message or "")
     assert "localhost:11434/api/chat" in (log.error_message or "")
+    assert log.token_usage["retryCount"] == 1
+    assert log.token_usage["splitDepth"] == 0
+    assert all(entry.status == "FAILED" for entry in logs)
 
 
 def test_unexpected_qa_provider_error_does_not_leak_raw_exception_to_logs(caplog):
