@@ -647,6 +647,48 @@ def test_safe_token_counter_validation_is_idempotent() -> None:
     assert require_token_counter(counter) is counter
 
 
+def test_legacy_qa_batch_split_round_trips_oversized_chunk_with_local_counter() -> None:
+    from server.app.models.document import Document
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.services.qa_split_batching import (
+        estimate_qa_prompt_tokens,
+        group_qa_chunks,
+    )
+
+    counter = LocalTokenCounter()
+    document = Document(title="Legacy QA")
+    original = "alpha beta gamma delta epsilon zeta eta theta iota kappa"
+    chunk = DocumentChunk(
+        chunk_index=9,
+        content=original,
+        page_no=3,
+        content_hash="d" * 64,
+        chunker_name="legacy_parser",
+    )
+    empty_chunk = DocumentChunk(
+        chunk_index=9,
+        content="",
+        page_no=3,
+        content_hash="d" * 64,
+        chunker_name="legacy_parser",
+    )
+    max_input_tokens = estimate_qa_prompt_tokens(document, [empty_chunk], counter) + 4
+
+    batches = group_qa_chunks(
+        document,
+        [chunk],
+        token_counter=counter,
+        max_input_tokens=max_input_tokens,
+        reserved_output_tokens=8,
+    )
+
+    fragments = [batch.chunks[0] for batch in batches]
+    assert "".join(fragment.content for fragment in fragments) == original
+    assert all(fragment.chunk_index == 9 for fragment in fragments)
+    assert all(fragment.content_hash == "d" * 64 for fragment in fragments)
+    assert all(batch.estimated_input_tokens <= max_input_tokens for batch in batches)
+
+
 def test_default_policy_uses_actual_exported_handler_versions() -> None:
     default = ChunkPolicy()
 

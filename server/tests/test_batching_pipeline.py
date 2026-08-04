@@ -158,3 +158,129 @@ def test_group_chunks_rejects_oversized_adaptive_chunk_before_qa(monkeypatch):
 
     with pytest.raises(QaSplitValidationError, match="超出"):
         QaSplitService(session)._group_chunks([chunk])
+
+
+class _CharacterTokenCounter:
+    name = "test-character-counter"
+    version = "1.0"
+
+    def count(self, text: str) -> int:
+        return len(text)
+
+    def split_by_token_limit(self, text: str, limit: int) -> list[str]:
+        return [text[index : index + limit] for index in range(0, len(text), limit)]
+
+
+def _qa_batching_chunk(index: int, content: str, content_hash: str):
+    return types.SimpleNamespace(
+        chunk_index=index,
+        content=content,
+        content_hash=content_hash,
+        page_no=index + 1,
+        page_start=None,
+        page_end=None,
+        title_path=[f"Section {index}"],
+        chunker_name="legacy_parser",
+        chunker_config_hash="generation-a",
+        chunk_metadata={},
+    )
+
+
+def test_token_batching_counts_fixed_prompt_title_and_chunk_metadata():
+    from server.app.models.document import Document
+    from server.app.services.qa_prompt_builder import build_qa_split_prompt
+    from server.app.services.qa_split_batching import estimate_qa_prompt_tokens
+
+    counter = _CharacterTokenCounter()
+    document = Document(title="A title that must be budgeted")
+    chunk = _qa_batching_chunk(7, "body", "a" * 64)
+
+    estimated = estimate_qa_prompt_tokens(document, [chunk], counter)
+
+    assert estimated == counter.count(build_qa_split_prompt(document, [chunk]))
+    assert estimated > counter.count(chunk.content)
+    assert document.title in build_qa_split_prompt(document, [chunk])
+    assert "pageRange=" in build_qa_split_prompt(document, [chunk])
+
+
+def test_token_batching_sorts_indexes_and_keeps_hash_stable(monkeypatch):
+    from server.app.models.document import Document
+    from server.app.services import qa_split_batching
+    from server.app.services.qa_split_batching import (
+        estimate_qa_prompt_tokens,
+        group_qa_chunks,
+        split_qa_batch,
+    )
+
+    counter = _CharacterTokenCounter()
+    document = Document(title="Stable")
+    first = _qa_batching_chunk(10, "alpha", "a" * 64)
+    second = _qa_batching_chunk(2, "bravo", "b" * 64)
+    max_input_tokens = estimate_qa_prompt_tokens(document, [first, second], counter)
+
+    batches = group_qa_chunks(
+        document,
+        [first, second],
+        token_counter=counter,
+        max_input_tokens=max_input_tokens,
+        reserved_output_tokens=12,
+    )
+    repeated = group_qa_chunks(
+        document,
+        [second, first],
+        token_counter=counter,
+        max_input_tokens=max_input_tokens,
+        reserved_output_tokens=12,
+    )
+    left, right = split_qa_batch(batches[0])
+    monkeypatch.setattr(
+        qa_split_batching,
+        "QA_SPLIT_PROMPT_VERSION",
+        "qa-split-v3",
+    )
+    changed_version = group_qa_chunks(
+        document,
+        [first, second],
+        token_counter=counter,
+        max_input_tokens=max_input_tokens,
+        reserved_output_tokens=12,
+    )
+
+    assert [[chunk.chunk_index for chunk in batch.chunks] for batch in batches] == [[2, 10]]
+    assert batches[0].input_hash == repeated[0].input_hash
+    assert changed_version[0].input_hash != batches[0].input_hash
+    assert len(batches[0].input_hash) == 64
+    assert [chunk.chunk_index for chunk in (*left.chunks, *right.chunks)] == [2, 10]
+    assert {chunk.chunk_index for chunk in (*left.chunks, *right.chunks)} == {2, 10}
+
+
+def test_token_batching_rejects_oversized_adaptive_chunk():
+    from server.app.models.document import Document
+    from server.app.services.qa_split_batching import (
+        QA_PROVENANCE_CONTRACT_INVALID,
+        QaBatchingError,
+        estimate_qa_prompt_tokens,
+        group_qa_chunks,
+    )
+
+    counter = _CharacterTokenCounter()
+    document = Document(title="Adaptive")
+    chunk = _qa_batching_chunk(4, "x" * 20, "c" * 64)
+    chunk.chunker_name = "adaptive_hierarchical"
+    max_input_tokens = estimate_qa_prompt_tokens(
+        document,
+        [_qa_batching_chunk(4, "", "c" * 64)],
+        counter,
+    ) + 1
+
+    with pytest.raises(QaBatchingError) as exc_info:
+        group_qa_chunks(
+            document,
+            [chunk],
+            token_counter=counter,
+            max_input_tokens=max_input_tokens,
+            reserved_output_tokens=0,
+        )
+
+    assert exc_info.value.code == QA_PROVENANCE_CONTRACT_INVALID
+    assert exc_info.value.retryable is False

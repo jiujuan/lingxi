@@ -183,7 +183,6 @@ def test_qa_output_validation_failures_record_stable_provenance_metric(payload, 
 
 def test_qa_split_without_chunks_records_stable_provenance_metric():
     from server.app.core import metrics
-    from server.app.models.qa_pair import DocumentChunk
     from server.app.services.qa_split_service import QaSplitService
 
     session, identity = build_qa_session()
@@ -650,6 +649,56 @@ def test_multi_batch_validation_retains_global_chunk_indexes(monkeypatch):
     )
 
     assert [item.chunk_index for item in items] == [10, 25]
+
+
+def test_qa_service_uses_token_batches_and_keeps_character_fallback_available():
+    from server.app.models.document import Document
+    from server.app.models.qa_pair import DocumentChunk
+    from server.app.services.qa_split_batching import estimate_qa_prompt_tokens
+    from server.app.services.qa_split_service import QaSplitService
+
+    class Counter:
+        name = "test-counter"
+        version = "1.0"
+
+        def count(self, text):
+            return len(text)
+
+        def split_by_token_limit(self, text, limit):
+            return [text[index : index + limit] for index in range(0, len(text), limit)]
+
+    session, _identity = build_qa_session()
+    document = Document(title="Token budget")
+    chunks = [
+        DocumentChunk(chunk_index=3, content="bravo", page_no=2, content_hash="b" * 64),
+        DocumentChunk(chunk_index=1, content="alpha", page_no=1, content_hash="a" * 64),
+    ]
+    counter = Counter()
+    budget = estimate_qa_prompt_tokens(document, chunks, counter)
+
+    token_batches = QaSplitService(
+        session,
+        token_counter=counter,
+        max_input_tokens=budget,
+        reserved_output_tokens=16,
+        max_batch_chars=1,
+    )._group_qa_batches(document, chunks)
+    fallback_batches = QaSplitService(
+        session,
+        token_counter=None,
+        max_batch_chars=5,
+    )._group_qa_batches(document, chunks)
+
+    assert [batch.budget_mode for batch in token_batches] == ["tokens"]
+    assert [chunk.chunk_index for chunk in token_batches[0].chunks] == [1, 3]
+    assert [batch.budget_mode for batch in fallback_batches] == [
+        "chars_fallback",
+        "chars_fallback",
+    ]
+    assert [
+        [chunk.chunk_index for chunk in batch.chunks] for batch in fallback_batches
+    ] == [[1], [3]]
+    assert all(len(batch.input_hash) == 64 for batch in fallback_batches)
 
 
 

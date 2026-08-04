@@ -6,7 +6,12 @@ from sqlalchemy.orm import Session
 
 from server.app.core.config import Settings, settings as runtime_settings, validate_chunking_config
 from server.app.core.retrieval_config import RetrievalConfig, get_retrieval_config
-from server.app.services.chunking import ChunkPolicy, ChunkingService, LocalTokenCounter
+from server.app.services.chunking import (
+    ChunkPolicy,
+    ChunkingService,
+    LocalTokenCounter,
+    TokenizerUnavailableError,
+)
 from server.app.services.context_hydration_service import ContextHydrationService
 from server.app.services.document_parse_service import DocumentParseService
 from server.app.services.embedding_service import EmbeddingService
@@ -99,6 +104,14 @@ class ServiceDependencies:
         )
 
     def build_qa_split_service(self, session: Session, **kwargs) -> QaSplitService:
+        token_counter = kwargs.pop("token_counter", None)
+        if token_counter is None:
+            try:
+                token_counter = self.build_token_counter()
+            except TokenizerUnavailableError:
+                # QA keeps a bounded character fallback for deployments where
+                # the pinned local tokenizer is temporarily unavailable.
+                token_counter = None
         return QaSplitService(
             session,
             # Strict provenance disabled remains compatible with existing
@@ -106,6 +119,11 @@ class ServiceDependencies:
             legacy_missing_chunk_index_compatibility=(
                 not self.settings.qa_strict_provenance_enabled
             ),
+            token_counter=token_counter,
+            max_input_tokens=self.settings.qa_split_max_input_tokens,
+            reserved_output_tokens=self.settings.qa_split_reserved_output_tokens,
+            max_batch_chars=self.settings.qa_split_max_batch_chars,
+            max_concurrency=self.settings.qa_split_max_concurrency,
             **kwargs,
         )
 

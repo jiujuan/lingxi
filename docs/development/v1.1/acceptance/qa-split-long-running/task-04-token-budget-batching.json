@@ -1,0 +1,27 @@
+{
+  "task": "Task 4",
+  "scope": "QA Split token-budget batching with character fallback",
+  "testedAt": "2026-08-04",
+  "testCommand": "pytest server/tests/test_qa_split_task.py server/tests/test_batching_pipeline.py server/tests/test_chunk_tokenizer.py -q",
+  "testResult": {
+    "passed": 124,
+    "failed": 0,
+    "errors": 0
+  },
+  "assertions": {
+    "promptBudgetIncludesFixedContractDocumentTitleAndChunkMetadata": true,
+    "batchOrderChunkIndexesAndInputHashAreStable": true,
+    "promptVersionChangesInvalidateInputHash": true,
+    "splitBatchesRetainOriginalChunkIndexCoverage": true,
+    "oversizedAdaptiveChunkIsNonRetryableProvenanceError": true,
+    "legacyOversizedChunkUsesTokenSafeRoundTripSplit": true,
+    "tokenizerUnavailableUsesCharacterFallbackWithDiagnosticMode": true,
+    "batchHashContainsOnlyPromptVersionAndChunkHashMetadata": true
+  },
+  "sensitiveData": {
+    "apiKeys": false,
+    "prompts": false,
+    "modelOutput": false,
+    "documentContent": false
+  }
+}

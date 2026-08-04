@@ -31,7 +31,15 @@ from server.app.models.model_config import (
 )
 from server.app.models.qa_pair import DocumentChunk, QaPair
 from server.app.services._batching import run_ordered
+from server.app.services.chunking import TokenCounter
 from server.app.services.import_service import enqueue_embedding_task  # re-exported
+from server.app.services.qa_split_batching import (
+    QA_SPLIT_BATCH_CONFIG_INVALID,
+    QaBatch,
+    QaBatchingError,
+    group_qa_chunks,
+    qa_batch_input_hash,
+)
 from server.app.services.qa_prompt_builder import build_qa_split_prompt
 
 logger = logging.getLogger(__name__)
@@ -515,6 +523,11 @@ class QaSplitService:
         provider_factory: ProviderFactory = build_provider_adapter,
         *,
         legacy_missing_chunk_index_compatibility: bool = False,
+        token_counter: TokenCounter | None = None,
+        max_input_tokens: int | None = None,
+        reserved_output_tokens: int | None = None,
+        max_batch_chars: int | None = None,
+        max_concurrency: int | None = None,
     ) -> None:
         self.session = session
         self._build_adapter = provider_factory
@@ -523,6 +536,42 @@ class QaSplitService:
         self.legacy_missing_chunk_index_compatibility = (
             legacy_missing_chunk_index_compatibility
         )
+        # The service factory resolves these inputs for production. Defaults
+        # preserve direct construction in focused legacy tests.
+        self.token_counter = token_counter
+        self.max_input_tokens = (
+            max_input_tokens
+            if max_input_tokens is not None
+            else getattr(settings, "qa_split_max_input_tokens", 4096)
+        )
+        self.reserved_output_tokens = (
+            reserved_output_tokens
+            if reserved_output_tokens is not None
+            else getattr(settings, "qa_split_reserved_output_tokens", 2048)
+        )
+        self.max_batch_chars = (
+            max_batch_chars
+            if max_batch_chars is not None
+            else getattr(settings, "qa_split_max_batch_chars", 6000)
+        )
+        self.max_concurrency = (
+            max_concurrency
+            if max_concurrency is not None
+            else getattr(settings, "qa_split_max_concurrency", 4)
+        )
+        if (
+            not isinstance(self.max_input_tokens, int)
+            or isinstance(self.max_input_tokens, bool)
+            or self.max_input_tokens <= 0
+            or not isinstance(self.reserved_output_tokens, int)
+            or isinstance(self.reserved_output_tokens, bool)
+            or self.reserved_output_tokens < 0
+        ):
+            raise QaSplitValidationError(
+                "QA token budget 配置不合法",
+                code=QA_SPLIT_BATCH_CONFIG_INVALID,
+                retryable=False,
+            )
 
     def split_import_job(self, job_id: str) -> ImportJob:
         job, _task_run_id = self.split_import_job_for_task(job_id)
@@ -584,7 +633,7 @@ class QaSplitService:
                 max_tokens=model_config.max_tokens,
                 provider_name=provider.name,
             )
-            prompt_batches = self._group_chunks(chunks)
+            prompt_batches = self._group_qa_batches(document, chunks)
             items = self._generate_qa_items(
                 adapter,
                 document,
@@ -720,6 +769,42 @@ class QaSplitService:
             )
         return row[0], row[1]
 
+    def _group_qa_batches(
+        self,
+        document: Document,
+        chunks: list[DocumentChunk],
+    ) -> list[QaBatch]:
+        """Use token budgets when injected, with chars retained as a fallback."""
+
+        if self.token_counter is not None:
+            try:
+                return group_qa_chunks(
+                    document,
+                    chunks,
+                    token_counter=self.token_counter,
+                    max_input_tokens=self.max_input_tokens,
+                    reserved_output_tokens=self.reserved_output_tokens,
+                )
+            except QaBatchingError as exc:
+                raise _provenance_error(
+                    exc.code,
+                    exc.message,
+                    retryable=exc.retryable,
+                ) from exc
+
+        groups = self._group_chunks(sorted(chunks, key=lambda chunk: chunk.chunk_index))
+        return [
+            QaBatch(
+                batch_index=index,
+                chunks=tuple(group),
+                estimated_input_tokens=0,
+                reserved_output_tokens=self.reserved_output_tokens,
+                input_hash=qa_batch_input_hash(group),
+                budget_mode="chars_fallback",
+            )
+            for index, group in enumerate(groups)
+        ]
+
     def _group_chunks(self, chunks: list[DocumentChunk]) -> list[list[DocumentChunk]]:
         """Group chunks so each QA-split prompt stays within a size budget.
 
@@ -728,7 +813,7 @@ class QaSplitService:
         ``qa_split_max_batch_chars`` (an approximate token proxy). A chunk larger
         than the budget forms its own group.
         """
-        max_chars = max(1, settings.qa_split_max_batch_chars)
+        max_chars = max(1, self.max_batch_chars)
         groups: list[list[DocumentChunk]] = []
         current: list[DocumentChunk] = []
         current_chars = 0
@@ -757,7 +842,7 @@ class QaSplitService:
         self,
         adapter,
         document: Document,
-        groups: list[list[DocumentChunk]],
+        groups: list[list[DocumentChunk]] | list[QaBatch],
         *,
         model_config: ModelConfig | None = None,
         provider: ModelProvider | None = None,
@@ -770,11 +855,25 @@ class QaSplitService:
         back to the correct source chunk in order.
         """
 
-        def generate(group: list[DocumentChunk]) -> _QaBatchResult:
+        batches = [
+            group
+            if isinstance(group, QaBatch)
+            else QaBatch(
+                batch_index=index,
+                chunks=tuple(group),
+                estimated_input_tokens=0,
+                reserved_output_tokens=self.reserved_output_tokens,
+                input_hash=qa_batch_input_hash(group),
+                budget_mode="legacy_group",
+            )
+            for index, group in enumerate(groups)
+        ]
+
+        def generate(batch: QaBatch) -> _QaBatchResult:
             started = perf_counter()
             try:
                 raw_output = adapter.generate_qa_pairs(
-                    build_qa_split_prompt(document, group)
+                    build_qa_split_prompt(document, list(batch.chunks))
                 )
             except Exception as exc:
                 return _QaBatchResult(
@@ -789,7 +888,7 @@ class QaSplitService:
             )
 
         batch_results = run_ordered(
-            groups, generate, settings.qa_split_max_concurrency
+            batches, generate, self.max_concurrency
         )
         for result in batch_results:
             self._record_qa_model_call(
@@ -803,11 +902,11 @@ class QaSplitService:
                 raise result.error
 
         items: list[ValidatedQaItem] = []
-        for group, result in zip(groups, batch_results, strict=True):
+        for batch, result in zip(batches, batch_results, strict=True):
             items.extend(
                 validate_qa_split_output(
                     result.raw_output or "",
-                    group,
+                    list(batch.chunks),
                     allow_legacy_missing_chunk_index=(
                         self.legacy_missing_chunk_index_compatibility
                     ),
