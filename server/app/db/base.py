@@ -43,3 +43,4 @@ import server.app.models.qa_pair  # noqa: E402,F401
 import server.app.models.chat  # noqa: E402,F401
 import server.app.models.logs  # noqa: E402,F401
 import server.app.models.model_config  # noqa: E402,F401
+import server.app.models.qa_split_run  # noqa: E402,F401

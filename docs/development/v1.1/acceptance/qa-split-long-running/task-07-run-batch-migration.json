@@ -1,0 +1,38 @@
+{
+  "task": "Task 7 - QA split run and batch persistence",
+  "date": "2026-08-04",
+  "branch": "feat/qa-split-long-timeout-impl",
+  "scope": {
+    "orm_models": [
+      "QaSplitRun",
+      "QaSplitBatch"
+    ],
+    "migration_revision": "0008_qa_split_long_running",
+    "down_revision": "0007_adaptive_chunking"
+  },
+  "assertions": [
+    "QaSplitRun and QaSplitBatch are registered in Base.metadata.",
+    "Run foreign keys reference import jobs, documents, task runs, model configs, and model providers.",
+    "Batch foreign keys reference its run and an optional persisted parent batch.",
+    "The unique constraint on run_id and batch_index rejects duplicate batch paths.",
+    "chunk_indexes rejects empty or duplicate values.",
+    "result_payload rejects prompt, api_key, and content keys.",
+    "The migration conditionally creates run and batch tables.",
+    "The migration conditionally adds model_config timeout columns and ModelCallLog batch observability columns.",
+    "The migration upgrade and downgrade preserve pre-existing model config and model call log rows in the SQLite migration contract."
+  ],
+  "checks": [
+    {
+      "command": "pytest server/tests/test_qa_split_run.py server/tests/test_qa_split_task.py server/tests/test_batching_pipeline.py server/tests/test_chunk_tokenizer.py -q",
+      "result": "138 passed in 32.98s"
+    },
+    {
+      "command": "ruff check server/app/models/qa_split_run.py server/app/db/base.py server/app/db/migrations/versions/0008_qa_split_long_running.py server/tests/test_qa_split_run.py",
+      "result": "All checks passed"
+    },
+    {
+      "command": "git diff --check -- server/app/models/qa_split_run.py server/app/db/base.py server/app/db/migrations/versions/0008_qa_split_long_running.py server/tests/test_qa_split_run.py",
+      "result": "passed"
+    }
+  ]
+}
