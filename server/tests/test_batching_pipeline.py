@@ -408,3 +408,79 @@ def test_qa_single_chunk_timeout_does_not_split_or_recurse():
     assert result.error is not None
     assert result.split_results == ()
     assert len(result.leaf_results()) == 1
+
+
+def test_backpressure_reduces_concurrency_and_recovers_in_order(monkeypatch):
+    from server.app.services import qa_split_backpressure
+    from server.app.services.qa_split_backpressure import (
+        BackpressureState,
+        run_ordered_with_backpressure,
+    )
+
+    monkeypatch.setattr(qa_split_backpressure.time, "sleep", lambda _seconds: None)
+    state = BackpressureState(
+        current_concurrency=4,
+        min_concurrency=1,
+        max_concurrency=4,
+    )
+
+    def worker(item):
+        if item < 4:
+            return types.SimpleNamespace(
+                error=ProviderError(
+                    "PROVIDER_RATE_LIMITED",
+                    "rate limited",
+                    retryable=True,
+                ),
+                value=item,
+            )
+        return types.SimpleNamespace(error=None, value=item)
+
+    results = run_ordered_with_backpressure(range(7), worker, state)
+
+    assert [result.value for result in results] == list(range(7))
+    assert state.current_concurrency == 2
+    assert state.consecutive_successes == 0
+
+
+def test_backpressure_state_isolated_by_provider_and_model():
+    from server.app.services.qa_split_backpressure import (
+        get_backpressure_state,
+        reset_backpressure_states,
+    )
+
+    reset_backpressure_states()
+    first = get_backpressure_state(
+        "provider-a",
+        "model-a",
+        current_concurrency=4,
+        min_concurrency=1,
+        max_concurrency=4,
+    )
+    second = get_backpressure_state(
+        "provider-b",
+        "model-b",
+        current_concurrency=4,
+        min_concurrency=1,
+        max_concurrency=4,
+    )
+
+    first.on_retryable_failure("PROVIDER_OVERALL_TIMEOUT")
+
+    assert first.current_concurrency == 2
+    assert second.current_concurrency == 4
+
+
+def test_backpressure_state_recovers_one_level_after_three_successes():
+    from server.app.services.qa_split_backpressure import BackpressureState
+
+    state = BackpressureState(
+        current_concurrency=1,
+        min_concurrency=1,
+        max_concurrency=4,
+    )
+
+    assert state.on_success() == 1
+    assert state.on_success() == 1
+    assert state.on_success() == 2
+    assert state.consecutive_successes == 0

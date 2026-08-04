@@ -1,0 +1,33 @@
+{
+  "task": "Task 6 - QA backpressure and provider-scoped concurrency",
+  "status": "passed",
+  "scope": {
+    "ollamaDefaultConcurrency": 1,
+    "retryablePressureCodes": [
+      "PROVIDER_RATE_LIMITED",
+      "PROVIDER_SERVER_ERROR",
+      "PROVIDER_INFERENCE_TIMEOUT",
+      "PROVIDER_OVERALL_TIMEOUT"
+    ],
+    "successRecoveryThreshold": 3,
+    "systemMaxConcurrency": "QA_SPLIT_MAX_CONCURRENCY",
+    "stateKey": [
+      "provider_id",
+      "model_config_id"
+    ]
+  },
+  "verification": {
+    "command": "pytest server/tests/test_batching_pipeline.py server/tests/test_qa_split_task.py -q",
+    "result": "74 passed",
+    "scenarios": [
+      "backpressure preserves input order",
+      "retryable pressure reduces concurrency and later successes recover one level",
+      "different provider/model keys have independent state",
+      "Ollama defaults to one concurrent QA batch",
+      "provider maxConcurrency is capped by the system maximum"
+    ],
+    "lint": "ruff check passed",
+    "diffCheck": "git diff --check passed"
+  },
+  "embeddingBoundary": "Embedding continues using run_ordered with its existing static concurrency."
+}

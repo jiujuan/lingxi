@@ -123,6 +123,8 @@ class ServiceDependencies:
             max_input_tokens=self.settings.qa_split_max_input_tokens,
             reserved_output_tokens=self.settings.qa_split_reserved_output_tokens,
             max_batch_chars=self.settings.qa_split_max_batch_chars,
+            initial_concurrency=self.settings.qa_split_initial_concurrency,
+            min_concurrency=self.settings.qa_split_min_concurrency,
             max_concurrency=self.settings.qa_split_max_concurrency,
             max_retries=self.settings.qa_split_max_retries,
             max_split_depth=self.settings.qa_split_max_split_depth,

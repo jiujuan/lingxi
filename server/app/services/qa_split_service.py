@@ -32,6 +32,11 @@ from server.app.models.qa_pair import DocumentChunk, QaPair
 from server.app.services._batching import run_ordered
 from server.app.services.chunking import TokenCounter
 from server.app.services.import_service import enqueue_embedding_task  # re-exported
+from server.app.services.qa_split_backpressure import (
+    BackpressureState,
+    get_backpressure_state,
+    run_ordered_with_backpressure,
+)
 from server.app.services.qa_split_batching import (
     QA_SPLIT_BATCH_CONFIG_INVALID,
     QaBatch,
@@ -545,6 +550,8 @@ class QaSplitService:
         reserved_output_tokens: int | None = None,
         max_batch_chars: int | None = None,
         max_concurrency: int | None = None,
+        initial_concurrency: int | None = None,
+        min_concurrency: int | None = None,
         max_retries: int | None = None,
         max_split_depth: int | None = None,
     ) -> None:
@@ -578,6 +585,16 @@ class QaSplitService:
             if max_concurrency is not None
             else getattr(settings, "qa_split_max_concurrency", 4)
         )
+        self.initial_concurrency = (
+            initial_concurrency
+            if initial_concurrency is not None
+            else getattr(settings, "qa_split_initial_concurrency", 1)
+        )
+        self.min_concurrency = (
+            min_concurrency
+            if min_concurrency is not None
+            else getattr(settings, "qa_split_min_concurrency", 1)
+        )
         self.max_retries = (
             max_retries
             if max_retries is not None
@@ -601,12 +618,56 @@ class QaSplitService:
             or not isinstance(self.max_split_depth, int)
             or isinstance(self.max_split_depth, bool)
             or self.max_split_depth < 0
+            or not isinstance(self.initial_concurrency, int)
+            or isinstance(self.initial_concurrency, bool)
+            or self.initial_concurrency <= 0
+            or not isinstance(self.min_concurrency, int)
+            or isinstance(self.min_concurrency, bool)
+            or self.min_concurrency <= 0
+            or not isinstance(self.max_concurrency, int)
+            or isinstance(self.max_concurrency, bool)
+            or self.max_concurrency <= 0
         ):
             raise QaSplitValidationError(
                 "QA token budget 配置不合法",
                 code=QA_SPLIT_BATCH_CONFIG_INVALID,
                 retryable=False,
             )
+
+    def _get_qa_backpressure_state(
+        self,
+        provider: ModelProvider,
+        model_config: ModelConfig,
+    ) -> BackpressureState:
+        """Resolve provider options and return an isolated adaptive state."""
+
+        system_max = max(1, int(self.max_concurrency))
+        minimum = min(max(1, int(self.min_concurrency)), system_max)
+        provider_qa = (provider.config or {}).get("qaSplit", {})
+        model_qa = (model_config.config or {}).get("qaSplit", {})
+        if not isinstance(provider_qa, dict):
+            provider_qa = {}
+        if not isinstance(model_qa, dict):
+            model_qa = {}
+        configured_max = model_qa.get("maxConcurrency", provider_qa.get("maxConcurrency"))
+        has_explicit_max = configured_max is not None
+        try:
+            configured_max = int(configured_max) if has_explicit_max else system_max
+        except (TypeError, ValueError):
+            configured_max = system_max
+        effective_max = min(system_max, max(1, configured_max))
+        minimum = min(minimum, effective_max)
+        initial = self.initial_concurrency
+        if provider.provider_type == "OLLAMA" and not has_explicit_max:
+            initial = 1
+        initial = min(effective_max, max(minimum, int(initial)))
+        return get_backpressure_state(
+            provider.id,
+            model_config.id,
+            current_concurrency=initial,
+            min_concurrency=minimum,
+            max_concurrency=effective_max,
+        )
 
     def split_import_job(self, job_id: str) -> ImportJob:
         job, _task_run_id = self.split_import_job_for_task(job_id)
@@ -910,16 +971,24 @@ class QaSplitService:
                     build_qa_split_prompt(document, list(batch.chunks))
                 )
 
-        batch_results = run_ordered(
-            batches,
-            lambda batch: execute_qa_batch_with_retry(
-                PromptBatchAdapter(),
+        prompt_batch_adapter = PromptBatchAdapter()
+
+        def worker(batch: QaBatch) -> QaBatchResult:
+            return execute_qa_batch_with_retry(
+                prompt_batch_adapter,
                 batch,
                 max_retries=self.max_retries,
                 max_split_depth=self.max_split_depth,
-            ),
-            self.max_concurrency,
-        )
+            )
+
+        if provider is not None and model_config is not None:
+            batch_results = run_ordered_with_backpressure(
+                batches,
+                worker,
+                self._get_qa_backpressure_state(provider, model_config),
+            )
+        else:
+            batch_results = run_ordered(batches, worker, self.max_concurrency)
         for result in batch_results:
             for leaf_result in _all_qa_batch_results(result):
                 self._record_qa_model_call(

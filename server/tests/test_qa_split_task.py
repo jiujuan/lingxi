@@ -1326,3 +1326,33 @@ def test_later_invalid_batch_leaves_no_qa_pairs_from_earlier_valid_batch(monkeyp
     assert document.last_error_code == "QA_PROVENANCE_UNKNOWN_CHUNK_INDEX"
     assert job.error_code == "QA_PROVENANCE_UNKNOWN_CHUNK_INDEX"
     assert session.scalars(select(QaPair).where(QaPair.document_id == document_id)).all() == []
+
+
+def test_qa_backpressure_defaults_ollama_to_one_and_caps_provider_override():
+    from server.app.services.qa_split_service import QaSplitService
+
+    service = QaSplitService(
+        None,
+        initial_concurrency=4,
+        min_concurrency=1,
+        max_concurrency=4,
+    )
+    ollama = SimpleNamespace(
+        id="provider-ollama",
+        provider_type="OLLAMA",
+        config={},
+    )
+    model = SimpleNamespace(id="model-ollama", config={})
+    cloud = SimpleNamespace(
+        id="provider-cloud",
+        provider_type="OPENAI_COMPATIBLE",
+        config={"qaSplit": {"maxConcurrency": 9}},
+    )
+    cloud_model = SimpleNamespace(id="model-cloud", config={})
+
+    ollama_state = service._get_qa_backpressure_state(ollama, model)
+    cloud_state = service._get_qa_backpressure_state(cloud, cloud_model)
+
+    assert ollama_state.current_concurrency == 1
+    assert cloud_state.current_concurrency == 4
+    assert cloud_state.max_concurrency == 4
