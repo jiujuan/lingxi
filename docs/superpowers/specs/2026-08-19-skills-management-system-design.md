@@ -292,6 +292,117 @@ POST Chat Skill 执行请求
 
 提供管理员审计列表，可按 Skill、连接器、用户、角色、状态、时间和错误码筛选。指标至少包括执行总量、成功率、分位耗时、超时率、失败类型、取消数、连接器可用性和导入拒绝数。
 
+### 5.7 Tool Skill 的作用、`SKILL.md` 与调用步骤
+
+#### Tool Skill 的作用
+
+Tool Skill 是把一个已经审核的系统能力包装成 Chat 中可选择、可授权、可审计的任务入口。它不等同于可执行脚本，也不允许导入包直接控制服务器。职责分离如下：
+
+| 层级 | 责任 |
+| --- | --- |
+| Skill | 声明“做什么”、面向用户的说明、输入结构、输出预期和可见的限制。 |
+| Connector Operation | 在服务端实现“如何安全执行”；固定操作类型、内部目标、凭据引用、超时和输出契约。 |
+| 后端执行引擎 | 执行鉴权、参数验证、审计、队列、取消、限流、脱敏和 SSE 事件推送。 |
+| Chat | 帮助用户发现 Skill、填写受限表单、显式发起执行并查看结果。 |
+
+例如，“客户报表导出”是一个 Tool Skill，可绑定 `reporting.export_customer_report`；“创建 IT 工单”可绑定 `ticketing.create_ticket`。用户看到业务名称和表单，而不会看到内部 URL、认证令牌或可修改的执行代码。
+
+#### `SKILL.md` 示例
+
+下面是“客户报表导出”包的示例。它提供可移植的 Skill 说明和候选映射，不携带真实的凭据或服务器执行逻辑：
+
+```md
+---
+name: customer-report-export
+description: 根据筛选条件导出客户报表，生成受权限保护的 Excel 文件。
+metadata:
+  lingxi:
+    category_key: data-analysis
+    connector_key: reporting
+    operation_key: export_customer_report
+    input_schema_ref: customer-report-export-v1
+    requires_confirmation: true
+---
+
+# 客户报表导出
+
+## 适用场景
+
+需要按日期、客户等级或所属部门导出客户统计报表时使用。
+
+## 输入说明
+
+- `date_from`：统计起始日期，必填。
+- `date_to`：统计结束日期，必填。
+- `customer_level`：客户等级，可选。
+- `department_id`：部门标识，可选；只能查询当前用户有权访问的部门。
+- `format`：导出格式，`xlsx` 或 `csv`。
+
+## 输出
+
+- 报表生成状态；
+- 汇总数据；
+- 一个有效期受限、下载时再次鉴权的文件产物。
+
+## 限制
+
+- 最大查询区间：365 天。
+- 最大导出行数：50,000。
+- 不返回客户手机号、身份证号等敏感字段。
+```
+
+导入时，`metadata.lingxi.connector_key` 和 `operation_key` 只能用作候选映射。管理员必须在后台把它们绑定到当前租户中已启用、已审核的 Connector Operation，配置参数 schema、角色授权和执行策略，然后才能测试或发布。包中的脚本、凭据、任意 URL、自由 SQL 和其他可执行内容均不会被接受。
+
+#### 调用步骤
+
+**管理员配置与发布：**
+
+```text
+平台注册受控 Connector Operation
+  → 管理员创建或导入 SKILL.md 包
+  → 选择分类并绑定已审核的 Operation
+  → 定义参数表单/JSON Schema、结果展示和安全策略
+  → 授予可执行角色
+  → 测试运行
+  → 发布当前版本
+```
+
+**Chat 用户手动调用：**
+
+```text
+打开 Chat
+  → 打开 Skills 面板
+  → 按分类筛选并选择本人有权限的 Tool Skill
+  → 阅读用途、限制和副作用提示
+  → 填写结构化参数
+  → 点击“执行”
+  → 接收 SSE 状态、结果和受控产物
+```
+
+客户端创建执行时只发送 `skill_id` 和结构化 `input`，例如：
+
+```json
+{
+  "skill_id": "skill_create_it_ticket",
+  "input": {
+    "title": "无法访问 VPN",
+    "priority": "HIGH",
+    "description": "从上午开始连接 VPN 后立即断开。"
+  }
+}
+```
+
+客户端不能传递 `skill_version_id`、`connector_key`、`operation_key`、角色、完整 URL、SQL 或凭据。服务端从当前已发布版本、认证上下文和受控 Connector 配置中决定实际调用目标，并按第 5.5 节的固定执行流程处理。典型状态为：`已校验 → 运行中 → 成功/失败/超时/已取消`。
+
+#### 与普通 Chat 的边界
+
+| 普通 Chat | Tool Skill |
+| --- | --- |
+| 用户输入自然语言问题。 | 用户主动选择任务能力并填写参数。 |
+| 主要由模型生成文本回答，可结合知识库检索。 | 服务端调用预审核的连接器操作。 |
+| 主要记录模型调用、检索和引用。 | 额外记录用户、角色快照、Skill 版本、参数摘要、Operation、结果和产物。 |
+| 默认不产生外部副作用。 | 可以产生受策略约束的外部副作用，但只能由用户显式触发。 |
+
 ## 6. 权限模型
 
 沿用项目现有角色和权限体系，并新增：
