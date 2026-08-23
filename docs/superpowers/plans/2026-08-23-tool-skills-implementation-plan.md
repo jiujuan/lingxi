@@ -22,6 +22,365 @@
 6. 导入包只作为草稿来源。导入预检拒绝脚本、可执行文件、路径穿越、符号链接、密钥模式、未知二进制、超大文件和压缩炸弹；系统永不加载或运行包内 scripts/。
 7. 权限、审计写入、Connector 状态、凭据引用、输入校验任一失败时必须 fail closed，不得降级成未审计调用。
 
+
+## 里程碑交付策略
+
+本计划不再把 Task 1–14 视为一次性大版本，而是把它们切成三个能够独立部署、独立回归、独立人工演示的交付里程碑。每个里程碑都必须满足“自动化测试通过 + 浏览器人工验收通过 + 数据迁移可升级/回滚 + 安全边界没有被绕过”四个条件，才允许进入下一个里程碑。
+
+### 共同交付约束
+
+1. **每个里程碑都有可运行的闭环。** 里程碑一不是只交付模型或 API，而是必须完成“管理员创建/编辑/发布 → Chat 用户浏览/选择/填写/执行 → 返回安全结果”的完整路径。里程碑二在同一条路径上增加版本、生命周期、长任务、授权和审计；里程碑三再补齐导入、连接器运营和生产治理。
+2. **数据库先保证向后兼容。** `0009_tool_skills.py` 在里程碑一创建 Skill、版本、角色授权、执行、事件、产物、Preset 和导入所需的基础表；里程碑二和三只添加索引、约束、字段和数据回填，不重命名里程碑一已经使用的列，不改变 `POST /chat/sessions/{session_id}/skill-runs` 的请求体语义。
+3. **执行入口保持同一个服务接口。** 里程碑一使用 `InlineSkillExecutionDriver` 执行确定性的短任务；里程碑二切换到 `CelerySkillExecutionDriver`，但两者都调用同一个 `SkillExecutionService`，都先锁定服务端发布版本、Operation、租户连接和角色快照。这样里程碑一的 Chat UI 不需要在里程碑二重写。
+4. **里程碑一也不能绕过安全门禁。** 里程碑一使用种子数据中的固定演示角色（`EMPLOYEE`）进行真实的 `SKILL_READ`、`SKILL_EXECUTE` 检查，管理员创建的演示 Skill 只允许授予该角色；不在 UI 暴露任意角色选择。里程碑二把固定角色策略替换为可配置的角色授权矩阵和管理员授权界面。
+5. **功能开关只控制入口，不改变安全逻辑。** 使用以下配置键，默认值由部署环境显式设置：
+
+   | 配置键 | 里程碑一 | 里程碑二 | 里程碑三 |
+   |---|---|---|---|
+   | `SKILLS_M1_CORE_ENABLED` | `true` | `true` | `true` |
+   | `SKILLS_M2_OPERATIONS_ENABLED` | `false` | `true` | `true` |
+   | `SKILLS_M3_IMPORTS_ENABLED` | `false` | `false` | `true` |
+   | `SKILLS_EXECUTION_DRIVER` | `inline` | `celery` | `celery` |
+   | `SKILLS_FIXED_DEMO_ROLE_MODE` | `true` | `false` | `false` |
+
+   关闭开关时，服务端返回既有统一的 `FEATURE_DISABLED` 错误；不能仅仅隐藏前端按钮后仍允许直接调用 API。
+6. **每个里程碑单独拥有验收测试入口。** 新增三个服务端验收文件，并在已有浏览器验收文件中按 marker 分组：
+
+   - `server/tests/e2e/test_m1_tool_skill_closed_loop.py`
+   - `server/tests/e2e/test_m2_tool_skill_operational_loop.py`
+   - `server/tests/e2e/test_m3_tool_skill_complete.py`
+   - `web/admin/tests/t20_tool_skill_admin_playwright.py` 中的 `@pytest.mark.m1`、`@pytest.mark.m2`、`@pytest.mark.m3`
+   - `web/admin/tests/t21_tool_skill_chat_playwright.py` 中的 `@pytest.mark.m1`、`@pytest.mark.m2`、`@pytest.mark.m3`
+
+7. **里程碑之间使用独立提交和验收标签。** 每个里程碑的最后一个提交必须只包含该里程碑计划范围内的代码、迁移、测试和文档。推荐标签分别为 `tool-skills-m1-closed-loop`、`tool-skills-m2-secure-operations`、`tool-skills-m3-production-complete`；标签建立前必须完成本文对应的退出条件。
+
+---
+
+## Milestone 1：Tool Skill 最小可用闭环
+
+**目标：** 交付一个管理员能够在后台创建、编辑、校验和发布，Chat 用户能够按分类手动选择并执行的 Tool Skill 闭环。第一条演示链路使用服务端预注册的确定性 Operation，确保开发、测试和人工验收不依赖外部系统。
+
+**交付结果：** 管理员登录 Skills 后台创建“客户报表查询”分类和 `customer-report-search` Tool Skill，绑定预注册的 `knowledge-base.search` fake Operation，发布后，员工在 Chat 的 Skills 面板中看到该 Skill，填写关键词并明确点击“执行”，页面显示结构化结果。用户可以收藏 Skill 和保存个人默认参数，但不能创建、发布、导入或共享真正的 Skill。
+
+### M1 功能范围
+
+| 领域 | 里程碑一交付内容 | 明确不在 M1 的内容 |
+|---|---|---|
+| Skill 合同 | TOOL 类型、`SKILL.md` 元数据映射、受限 JSON Schema、表单展示配置、执行策略上限 | PROMPT Skill、模型自动选择、自由脚本 |
+| 持久化 | 分类、Skill、初始草稿版本、发布指针、执行记录、最小事件记录、私有 Preset | 版本历史页面、版本对比和回滚操作 |
+| 管理后台 | Skills 列表、分类 CRUD、Tool Skill 编辑器、保存草稿、服务端校验、发布 | 导入/导出、连接器管理、完整角色授权矩阵、审计查询 |
+| Connector | 服务端代码注册的 `knowledge-base.search` fake Operation；管理员只能从白名单选择 | 任意 URL、自由 SQL、用户上传代码、多 Connector 管理 |
+| 执行引擎 | 同一执行服务接口下的 inline 短任务、输入校验、租户隔离、固定演示角色检查、结果脱敏、结果大小上限 | Celery 长任务、超时、取消、重试、产物下载、限流/并发控制 |
+| Chat | 分类浏览、可用 Skill 列表、结构化参数表单、手动确认执行、结果卡片 | 自动触发、长任务进度、取消按钮、产物卡片 |
+| 用户个性化 | 私有收藏、显示名称、排序、默认参数；严格限制为已发布系统 Skill 的引用 | 用户创建/发布/共享真实 Skill；改变 Operation、角色或策略 |
+| 安全基线 | 登录、租户隔离、最小权限、固定角色真实授权检查、请求字段白名单、最小事件记录 | 可配置 RBAC 管理、完整审计检索和安全报表 |
+
+### M1 技术切片和任务映射
+
+1. **合同与迁移：Task 1、Task 2。** 先落地 `ToolInputSchema`、`SkillVersionDraftRequest`、`SkillAvailableDefinition` 和 `SkillRunCreateRequest`，再执行 `0009_tool_skills.py`。M1 只使用 `version_number=1` 的草稿/发布版本，但保留不可变版本字段、`current_published_version_id` 和角色授权表，保证 M2 可以直接增加版本历史，不需要重建数据。
+2. **权限种子：Task 3 的 M1 slice。** 保留 `SKILL_READ`、`SKILL_EXECUTE`、`SKILL_MANAGE`、`SKILL_CATEGORY_MANAGE`；`SYSTEM_ADMIN` 拥有管理权限，`EMPLOYEE` 只拥有读取/执行权限。`SKILL_CONNECTOR_MANAGE` 和 `SKILL_AUDIT_READ` 可以提前种子化，但 M1 不开放对应页面。发布时服务端只允许给 `EMPLOYEE` 演示角色建立固定 grant，客户端不能提交任意 `roleIds`。
+3. **受控 Operation：Task 4 的 M1 slice。** 只实现 `knowledge-base.search` 的 fake 注册项。它接受 `{ "query": string, "limit": integer }`，返回固定格式的本地测试结果和 `isArtifact=false`，不读取真实网络、不执行 SQL、不读取凭据。Operation 注册表仍然只允许服务端注册，Skill 编辑器只显示注册表中的安全展示名。
+4. **管理域：Task 5 的 M1 slice。** 实现分类新增/编辑/停用、Skill 新建、草稿元数据编辑、输入 Schema 编辑、Operation 绑定、服务端校验和首次发布。已发布 Skill 的再次编辑只能创建/更新当前编辑草稿，不提供历史版本、回滚和归档按钮；旧的发布指针不会被客户端直接修改。
+5. **私有 Preset：Task 7。** 在主闭环中实现收藏和默认参数保存。默认参数必须再次按当前发布版本的 Schema 校验，查询必须同时按 `tenant_id` 和 `user_id` 过滤；Preset 不存 connector、operation、role、URL、SQL、凭据或执行策略。
+6. **执行引擎：Task 8 的 M1 slice。** 实现 `InlineSkillExecutionDriver` 和统一的 `SkillExecutionService`。流程为“鉴权 → 查当前发布版本 → 校验输入 → 创建执行 → 写入 started 事件 → 调用 fake Operation → 脱敏结果 → 写入 done/result 事件 → 返回 SSE 事件序列”。事件至少包含 `skill_run_started`、`skill_run_status`、`skill_run_result`、`skill_run_done`；没有队列时也必须持久化执行记录和请求 ID。
+7. **Chat 后端：Task 9 的 M1 slice。** 实现可用分类、可用 Skill 定义和 `POST /chat/sessions/{session_id}/skill-runs`。M1 在 inline driver 下快速发完同一条 SSE 流；若前端环境不支持流式测试，允许通过 `GET /skill-executions/{execution_id}` 查询同一份结果。请求体只允许 `skillId` 和 `input`。
+8. **管理后台：Task 10、Task 11 的 M1 slice。** 先完成列表和分类管理，再完成三步编辑器：基本信息 → Operation/参数 Schema → 校验/发布。编辑器必须显示 Skill 类型为 TOOL、当前状态、阻断错误和发布确认；不能渲染或接受 Connector 内部 URL、密钥、自由 SQL、脚本或任意角色 ID。
+9. **Chat UI：Task 13 的 M1 slice。** 在 Skills 抽屉中按分类展示可用 Skill；进入详情后展示描述、输入限制和结构化表单；执行按钮必须是用户明确点击，不能由普通 Chat 文本触发。执行完成后显示安全结果、失败码和 request ID；收藏/默认参数保存后刷新页面仍然存在。
+10. **M1 集成验收：Task 14 的 M1 slice。** 只运行 M1 acceptance matrix，确认 admin 和 employee 两个角色均经过真实权限中间件，且对伪造 `skillVersionId`、`connectorKey`、`operationKey`、`roleIds`、`url`、`sql`、`credential` 的请求返回 4xx 且 fake Operation 调用次数为 0。
+
+### M1 自动化验证
+
+从 `D:\codeproject\python\lingxi` 执行：
+
+```powershell
+$env:SKILLS_M1_CORE_ENABLED = "true"
+$env:SKILLS_M2_OPERATIONS_ENABLED = "false"
+$env:SKILLS_M3_IMPORTS_ENABLED = "false"
+$env:SKILLS_EXECUTION_DRIVER = "inline"
+$env:SKILLS_FIXED_DEMO_ROLE_MODE = "true"
+
+pytest server/tests/test_skill_contracts.py -q
+pytest server/tests/test_skill_models.py -m m1 -q
+pytest server/tests/test_skill_permissions.py -m m1 -q
+pytest server/tests/test_skill_connectors.py -m m1 -q
+pytest server/tests/test_skill_operations.py -m m1 -q
+pytest server/tests/test_skills_api.py -m m1 -q
+pytest server/tests/test_skill_preset.py -m m1 -q
+pytest server/tests/test_skill_execution.py -m m1 -q
+pytest server/tests/test_skill_sse.py -m m1 -q
+pytest server/tests/test_skill_chat_api.py -m m1 -q
+pytest server/tests/security/test_skill_security.py -m m1 -q
+pytest server/tests/e2e/test_m1_tool_skill_closed_loop.py -q
+
+cd web/admin
+npm test -- --run src/features/skills src/features/chat
+npm run typecheck
+npm run lint
+npm run build
+cd ../..
+
+pytest web/admin/tests/t20_tool_skill_admin_playwright.py -m m1 -q
+pytest web/admin/tests/t21_tool_skill_chat_playwright.py -m m1 -q
+git diff --check
+```
+
+**M1 自动化通过标准：** 共享测试文件中的 M1 用例必须标注 `@pytest.mark.m1`，未标记的基础合同测试单独运行；后端 focused suite、M1 e2e、前端单元/类型/构建和两个浏览器 marker 全部 PASS；`test_m1_tool_skill_closed_loop.py` 至少验证管理员创建/发布、员工可见/可执行、结果事件顺序、用户不能管理、跨租户不可见和伪造控制字段拒绝。
+
+### M1 人工验收脚本
+
+使用一套本地演示租户，准备两个账号：`system_admin` 和 `employee`。测试数据只包含本地 fake Operation，禁止把真实生产连接器作为 M1 的验收依赖。
+
+1. **管理员进入 Skills。** 登录管理后台，确认左侧出现“Skills”；`employee` 登录后不显示管理入口，直接访问管理 URL 返回 403/统一无权限页。
+2. **创建分类。** `system_admin` 打开“分类管理”，新增“客户数据”，填写 key `customer-data`、名称和描述，保存后在列表中看到“启用”。编辑名称并刷新，确认修改持久化。
+3. **创建 Skill 草稿。** 打开“Skills 列表”→“新建 Tool Skill”，填写 key `customer-report-search`、名称“客户报表查询”、描述、分类，确认类型固定显示 TOOL 且不可切换为 PROMPT。
+4. **绑定安全 Operation。** 在编辑器的 Operation 下拉框选择 `knowledge-base.search`；确认列表不出现 URL、SQL、凭据输入框，也不能粘贴或保存未知 operation key。
+5. **配置输入表单。** 在参数 Schema 步骤添加必填 `query` 字符串和可选 `limit` 整数，设置默认值 `10`；尝试添加 `password`、`url` 或 `sql` 字段，页面显示阻断校验并且保存请求被服务端拒绝。
+6. **保存并发布。** 点击“保存草稿”，返回列表确认状态为“草稿”；点击“校验”，确认无阻断错误；点击“发布”并确认弹窗，列表状态变为“已发布”。刷新后 Skill 仍然存在。
+7. **Chat 浏览和手动选择。** 用 `employee` 打开 Chat → Skills，按“客户数据”分类看到“客户报表查询”；打开详情看到描述和 `query`/`limit` 表单。普通 Chat 输入“请自动调用客户报表查询”不会创建 Skill 执行。
+8. **收藏和默认参数。** 点击收藏，设置默认 `limit=10`，刷新浏览器并重新打开 Skill，确认收藏状态和默认值保留；确认只能影响当前 employee，不影响另一个账号。
+9. **执行并查看结果。** 填写 `query=华东客户`，点击“执行”并确认，看到 started/status/result/done 对应的运行卡片和 fake Operation 返回的结构化结果。页面显示 request ID，但不显示内部连接器地址、凭据、堆栈或原始日志。
+10. **安全负向操作。** 使用浏览器开发者工具手工把请求体增加 `skillVersionId`、`connectorKey`、`operationKey` 或 `roleIds`，服务端返回 400/422；把 `skillId` 改成未授权或另一租户的 ID，返回 403/404；后端 fake Operation 记录没有新增调用。
+
+### M1 退出条件和演示包
+
+- [ ] `0009_tool_skills.py` 在空数据库和现有开发数据库上都能升级，既有业务测试无回归。
+- [ ] 管理员创建/编辑/发布和 Chat 浏览/选择/执行的闭环可在本地一键启动后完成。
+- [ ] M1 的所有自动化命令通过，且没有被 `xfail`、跳过或仅依赖人工判断的关键断言。
+- [ ] 人工验收脚本 1–10 全部通过并保存截图/录屏到 `docs/development/v1.1/acceptance/tool-skills/m1/`。
+- [ ] 现有系统中不存在 Chat 用户创建、导入、发布或共享真实 Skill 的 UI/API。
+- [ ] M1 发布标签建立后，才允许开始 M2 的长任务、授权矩阵和生命周期开发。
+
+**M1 可演示结果：** 一名管理员从空白分类开始创建一个 Tool Skill，一名员工在 Chat 中按分类手动选择它，填写结构化参数并得到结果；这个结果可重复、可自动化测试，并且客户端无法注入 Operation、角色或凭据。
+
+---
+
+## Milestone 2：可安全运营的 Tool Skill 执行闭环
+
+**目标：** 在 M1 的可用闭环上补齐版本、生命周期、长任务控制、审计、产物下载和完整 RBAC/角色授权，使 Tool Skill 可以在受控生产环境中运营。
+
+**交付结果：** 管理员可以从已发布版本创建新草稿、查看版本差异、发布或回滚形成的新版本、停用/归档 Skill，并为不同角色授权；Chat 用户只能看到并执行自己被授权的已发布 Skill。长任务能够显示状态和进度，用户可以取消；执行超时、审计写入失败、权限不匹配和产物越权下载都能安全失败。
+
+### M2 功能范围
+
+| 领域 | 里程碑二交付内容 | M2 仍不包含的内容 |
+|---|---|---|
+| 版本 | 不可变版本、版本列表、差异、发布、回滚为新版本、执行锁定版本 | Prompt Skill 的版本与模型策略 |
+| 生命周期 | 禁用、重新启用、归档（归档为终态）；保留历史执行 | 删除历史、物理清理执行数据 |
+| RBAC | Skill 管理/读取/执行/分类/连接器/审计权限；按租户和角色授权；授权变更审计 | Chat 用户创建共享 Skill |
+| 执行 | Celery/Redis 队列、状态机、超时、取消、幂等、并发和输出基础限制 | 高级重试策略、跨 Skill 编排 |
+| 审计 | 管理、授权、执行、取消、超时、下载事件的脱敏记录和查询页面 | SIEM/SOC 外部联动 |
+| 产物 | 白名单产物存储、二次鉴权、短时下载令牌、过期清理 | 任意文件浏览或任意路径下载 |
+| 管理后台 | 版本历史/差异、发布/回滚/停用/归档确认、角色授权、审计查询 | 包导入、连接器连接配置、健康检查页面 |
+| Chat | 运行中状态、进度、取消、终态、错误、产物下载 | 自动重试和复杂工作流 |
+
+### M2 技术切片和任务映射
+
+1. **权限和授权矩阵：Task 3、Task 5 的 M2 slice。** 开启 `SKILLS_M2_OPERATIONS_ENABLED` 后，移除 M1 的固定演示角色限制，管理员可以在 Skill 版本授权面板选择当前租户角色。服务端使用 `user_has_permission(SKILL_EXECUTE) AND active_skill AND active_category AND published_version AND role_grant AND active_operation AND active_connection` 公式；任一条件失败都返回安全错误。角色 ID、权限和租户 ID 始终由服务端解析。
+2. **版本和生命周期：Task 5 的 M2 slice。** 编辑已发布版本时创建新的不可变草稿；发布后旧版本仍可被历史执行引用但不再用于新执行。版本差异只返回脱敏字段；回滚不是修改旧版本，而是复制目标版本内容创建新的草稿并重新校验。归档是终态，停用阻止新执行但保留列表和执行历史。
+3. **异步执行：Task 8 的 M2 slice。** 用 `CelerySkillExecutionDriver` 替换 inline driver，使用同一 `SkillExecutionService`。实现 `PENDING → VALIDATING → QUEUED → RUNNING → SUCCEEDED/FAILED/TIMED_OUT/CANCELED`，每个状态转换写入事件；队列提交失败不得伪造成功。
+4. **超时和取消：Task 8 的 M2 slice。** 在 Operation 契约和 Skill execution policy 的较小者上设置超时；取消只向声明支持取消的 Operation 发送 cancel token，不支持时标记取消请求并等待安全终止。超时和取消必须阻止后续成功结果覆盖终态。
+5. **审计：Task 8、Task 12 的 M2 slice。** `skill_audit_service.py` 写入发布、停用、归档、授权变更、执行、取消、超时、下载和失败事件；输入、结果、凭据、连接器内部地址和 traceback 均按 schema 进行脱敏。审计写入失败时，管理变更和执行创建均 fail closed；审计查询只能看到本租户允许的字段。
+6. **产物：Task 8、Task 9 的 M2 slice。** 只允许注册 Operation 通过 `SkillArtifactService` 写入白名单目录/对象存储；下载端点再次检查租户、执行所有者、角色和产物未过期状态，并签发短时令牌。令牌一次性使用或在有效期内绑定用户/租户，不能通过修改 artifact ID 下载他人文件。
+7. **后台 UI：Task 10、Task 11、Task 12 的 M2 slice。** 列表新增版本、授权角色、最近运行状态；编辑器新增版本历史和 JSON/表单差异；发布、回滚、停用、归档、授权变更均使用明确确认弹窗；新增审计页，支持按 Skill、操作者、事件、状态和时间范围筛选。
+8. **Chat UI：Task 13 的 M2 slice。** 运行卡片显示排队、执行、进度、失败、超时、取消；长任务提供取消按钮和防重复点击；成功后显示产物文件名、大小和下载按钮；下载失败显示安全错误而不暴露存储 key。
+9. **M2 集成验收：Task 14 的 M2 slice。** 增加跨角色、跨租户、版本锁定、生命周期、审计失败、超时/取消竞态、产物越权、幂等和状态机测试。
+
+### M2 自动化验证
+
+```powershell
+$env:SKILLS_M1_CORE_ENABLED = "true"
+$env:SKILLS_M2_OPERATIONS_ENABLED = "true"
+$env:SKILLS_M3_IMPORTS_ENABLED = "false"
+$env:SKILLS_EXECUTION_DRIVER = "celery"
+$env:SKILLS_FIXED_DEMO_ROLE_MODE = "false"
+
+pytest server/tests/test_skill_permissions.py -m "m1 or m2" -q
+pytest server/tests/test_skills_api.py -m "m1 or m2" -q
+pytest server/tests/test_skill_execution.py -m "m1 or m2" -q
+pytest server/tests/test_skill_sse.py -m "m1 or m2" -q
+pytest server/tests/test_skill_chat_api.py -m "m1 or m2" -q
+pytest server/tests/test_skill_release_acceptance.py -m "m1 or m2" -q
+pytest server/tests/e2e/test_m1_tool_skill_closed_loop.py -q
+pytest server/tests/e2e/test_m2_tool_skill_operational_loop.py -q
+pytest server/tests/security/test_skill_security.py -m "m1 or m2" -q
+
+cd web/admin
+npm test -- --run src/features/skills src/features/chat
+npm run typecheck
+npm run lint
+npm run build
+cd ../..
+
+pytest web/admin/tests/t20_tool_skill_admin_playwright.py -m "m1 or m2" -q
+pytest web/admin/tests/t21_tool_skill_chat_playwright.py -m "m1 or m2" -q
+git diff --check
+```
+
+**M2 自动化通过标准：** 共享测试文件中的 M1/M2 用例必须分别标注 marker，M2 命令只运行 `m1 or m2`；M1 全部测试继续通过；M2 测试覆盖版本、角色授权、状态机、超时、取消、审计、产物下载和越权拒绝；Playwright 能稳定等待队列状态，不依赖固定 sleep；同一 `idempotency-key` 不会创建重复执行。
+
+### M2 人工验收脚本
+
+使用 M1 已发布的 `customer-report-search`，再准备一个由 fake Connector 模拟 8 秒延迟和可取消能力的 `customer-report-export` Skill。创建 `system_admin`、`report_viewer`、`report_operator` 三个角色，并分别准备有/无授权的用户。
+
+1. **创建新版本。** 管理员打开已发布 `customer-report-search`，修改表单字段描述或默认 `limit`，保存后确认产生“草稿 v2”；版本列表中 v1 仍显示“已发布”，v1 的内容和内容 hash 不变。
+2. **查看差异并发布。** 打开 v1/v2 差异，确认只展示业务字段和安全策略摘要，不展示凭据、连接器内部地址或原始输入；发布 v2 后，新执行锁定 v2，历史 v1 执行仍显示 v1。
+3. **按角色授权。** 只给 `report_viewer` 授权 `customer-report-search`，让 viewer 登录 Chat 能看到并执行；撤销授权后刷新，Skill 从可用列表消失，直接猜 ID 返回 403/404；`report_operator` 无授权时不能执行。
+4. **停用和归档。** 管理员停用 Skill 并确认，Chat 列表不再显示且新执行被拒绝；历史执行和审计记录仍可查看。归档后尝试重新打开旧管理链接，页面显示只读终态，不能直接编辑或发布。
+5. **执行长任务。** 启用 `customer-report-export`，Chat 用户填写参数并点击执行，运行卡片依次显示 queued/running/progress；点击“取消”后显示 canceled，fake Connector 收到 cancel token，不能再转为 succeeded。
+6. **验证超时。** 把测试策略设置为 2 秒，执行 8 秒 Operation，页面显示 timed out；审计中有 timeout 事件，错误只显示安全错误码和建议，不显示线程堆栈、连接字符串或内部路径。
+7. **验证审计。** 管理员进入“Skills → 审计”，按操作人、Skill 和时间范围筛选，看到发布、授权、执行、取消、超时事件；把审计写入模拟为失败，新的执行不进入队列，接口返回 request ID 和安全错误。
+8. **验证产物下载。** 让 fake Operation 生成 `customer-report.csv`，成功卡片显示文件名、大小和下载按钮；换成未授权用户、修改 artifact ID、使用过期令牌分别下载，均被拒绝；合法下载后文件内容正确且不包含凭据。
+9. **验证并发和幂等。** 连续点击两次执行或重复发送同一个 `Idempotency-Key`，页面只显示一个 execution；达到并发上限后新任务收到安全的限流提示，不影响普通 Chat。
+10. **验证普通 Chat 边界。** 在普通 Chat 输入“取消刚才的 Skill”只能通过运行卡片按钮执行取消；模型文本不能直接创建新 Skill、改变授权或调用未展示的 Operation。
+
+### M2 退出条件和演示包
+
+- [ ] M1 演示脚本在 `SKILLS_EXECUTION_DRIVER=celery` 下继续通过。
+- [ ] 版本、归档、超时、取消、审计、产物下载、RBAC 和角色授权均有服务端测试与浏览器测试，且没有仅靠前端隐藏按钮的安全断言。
+- [ ] 人工验收脚本 1–10 全部通过并保存截图/录屏到 `docs/development/v1.1/acceptance/tool-skills/m2/`。
+- [ ] 任何新执行都经过角色、租户、Connector 状态和审计写入检查；历史执行只读且可追溯到锁定版本。
+- [ ] 产物下载不会泄露存储 key、凭据、内部 URL 或其他租户数据；超时和取消不会覆盖已写入终态。
+- [ ] M2 发布标签建立后，才允许开始 M3 的包导入、Connector 管理和生产治理工作。
+
+**M2 可演示结果：** 同一个 Tool Skill 可以安全地被迭代、授权、运行、取消、审计和下载产物；管理员和 Chat 用户在同一条闭环上看到与其角色相符的能力和状态。
+
+---
+
+## Milestone 3：完整 Tool Skill 能力和生产治理
+
+**目标：** 在 M2 的安全运营闭环上补齐 Agent Skills 包导入/导出、Connector 管理、多种受控 Operation、健康检查、重试/限流/并发治理、结果脱敏策略和完整发布运行手册。
+
+**交付结果：** 管理员可以安全预检并导入符合 Agent Skills 规范的 `SKILL.md` 包，把包中的描述映射到平台白名单 Operation 后生成草稿；可以管理租户连接和健康状态；可以在不开放脚本执行、任意 URL、自由 SQL 或包内凭据的前提下运行更多受控业务动作。
+
+### M3 功能范围
+
+| 领域 | 里程碑三交付内容 | 明确边界 |
+|---|---|---|
+| 包管理 | ZIP 预检、恶意包拒绝、冲突策略、导入草稿、脱敏导出、导入历史 | 永不执行包内 scripts/，不安装依赖，不加载插件 |
+| Connector 管理 | 高权限管理员配置租户连接、健康检查、启停和安全状态 | 凭据只存引用，不在 Skill 或导出包中保存明文 |
+| Operation | `database-readonly.run-template`、`internal-http.call-registered`、`file-processing.transform`、`ticketing.search/create/update` 的服务端注册和契约测试 | 不允许客户端注册 Operation、用户传完整 URL/SQL/HTTP method/header |
+| 运行治理 | 重试策略、速率限制、并发配额、队列优先级、保留期、连接器熔断 | 不做跨 Skill 自主编排，不由模型自动调用 |
+| 结果与审计 | 字段级脱敏、敏感输出检测、审计高级查询、健康/失败指标、告警和运行手册 | 不把原始凭据、traceback 或内部连接信息返回 Chat |
+| 管理后台 | 导入/导出、Connector、Operation 映射、连接健康、运行统计和高级审计 | 仍不开放 Chat 用户创建共享 Skill |
+| 用户侧 | Preset 完整管理、重试提示、限流提示、健康状态提示、产物/结果体验收 | Prompt Skill 和自动选择留到后续独立阶段 |
+| 后续增强 | 私有 Skill 草稿和管理员审核流可作为独立 feature flag 设计；只产生用户私有草稿，不改变共享 Tool Skill 的发布权限 | 不作为 M3 基础闭环的完成条件，避免扩大当前权限边界 |
+
+### M3 技术切片和任务映射
+
+1. **安全导入/导出：Task 6。** 先对 ZIP 条目做路径、符号链接、脚本、可执行文件、密钥模式、压缩炸弹、未知二进制和大小预检，再提取到临时目录；只解析单个 `SKILL.md`、`references/` 和 `assets/`。导入始终创建草稿，管理员必须重新选择平台 Operation、分类和角色授权；导出只包含规范化的 Skill 描述和安全资源。
+2. **Connector 管理：Task 4 的剩余 slice、Task 12。** 增加租户连接配置、加密凭据引用、健康检查和启停 UI；健康检查失败时新执行 fail closed，普通 Chat 不受影响。所有连接器变更写入审计，管理员 UI 只显示安全连接状态。
+3. **多 Operation 契约：Task 4。** 每个 Operation 以 `OperationProtocol` 注册输入/输出 JSON Schema、side-effect 等级、超时上限、取消能力、产物能力和脱敏器；为 readonly database、registered internal HTTP、file processing 和 ticketing Operation 分别编写 fake adapter 和安全测试。
+4. **运行治理：Task 8、Task 9。** 实现按租户/用户/Skill 的并发和速率限制、指数退避重试、不可重试错误分类、连接器熔断、队列优先级和执行/产物保留清理任务；重试必须新建 execution 并保留 `retry_of_execution_id`，不能覆盖原执行。
+5. **管理后台补齐：Task 12。** 完成导入预检报告、冲突选择、Operation 映射、连接器管理、健康检查、导出、审计高级筛选和运行统计；所有危险操作仍使用确认弹窗，浏览器不能直接上传可执行包或调用任意接口。
+6. **Chat 体验补齐：Task 13。** 完成 Preset 收藏/默认参数的完整入口、可重试错误提示、限流/熔断提示、产物过期提示、结果字段脱敏展示和窄屏/键盘无障碍体验。
+7. **发布治理：Task 14。** 生成运行手册、监控指标、告警阈值、备份/恢复和数据保留策略，执行安全攻击测试、全量 E2E、迁移升级/回滚和性能基线；Prompt Skill 不纳入 M3 发布标签。
+
+### M3 自动化验证
+
+```powershell
+$env:SKILLS_M1_CORE_ENABLED = "true"
+$env:SKILLS_M2_OPERATIONS_ENABLED = "true"
+$env:SKILLS_M3_IMPORTS_ENABLED = "true"
+$env:SKILLS_EXECUTION_DRIVER = "celery"
+$env:SKILLS_FIXED_DEMO_ROLE_MODE = "false"
+
+pytest server/tests/test_skill_contracts.py `
+  server/tests/test_skill_models.py `
+  server/tests/test_skill_permissions.py `
+  server/tests/test_skill_connectors.py `
+  server/tests/test_skill_operations.py `
+  server/tests/test_skills_api.py `
+  server/tests/test_skill_import.py `
+  server/tests/test_skill_preset.py `
+  server/tests/test_skill_execution.py `
+  server/tests/test_skill_sse.py `
+  server/tests/test_skill_chat_api.py `
+  server/tests/security/test_skill_security.py `
+  server/tests/e2e/test_m1_tool_skill_closed_loop.py `
+  server/tests/e2e/test_m2_tool_skill_operational_loop.py `
+  server/tests/e2e/test_m3_tool_skill_complete.py `
+  server/tests/test_skill_release_acceptance.py -q
+
+cd web/admin
+npm test -- --run src/features/skills src/features/chat
+npm run typecheck
+npm run lint
+npm run build
+cd ../..
+
+pytest web/admin/tests/t20_tool_skill_admin_playwright.py -m "m1 or m2 or m3" -q
+pytest web/admin/tests/t21_tool_skill_chat_playwright.py -m "m1 or m2 or m3" -q
+git diff --check
+```
+
+**M3 自动化通过标准：** 包安全测试在“拒绝前不提取、不执行、不写入业务数据”条件下通过；所有 Operation 只通过服务端 registry 调用；全量浏览器场景、类型检查、构建、迁移和性能基线通过；任意安全测试失败都阻止发布标签。
+
+### M3 人工验收脚本
+
+1. **导入合法 Agent Skills 包。** 管理员打开“导入”，上传 `customer-report-export` fixture ZIP，先看到预检报告和 manifest 摘要；选择当前租户的分类和 `file-processing.transform` Operation 后应用，列表出现“未发布草稿”，不会直接发布。
+2. **拒绝恶意包。** 依次上传包含 `scripts/run.py`、路径穿越、符号链接、`.env`、私钥文本、超大压缩比和未知二进制的测试包；每次都在解压前得到阻断报告，服务器没有脚本进程、临时业务 Skill 或敏感日志。
+3. **冲突处理。** 再导入同一 key，选择“新建 Skill”“新建草稿版本”“取消”分别验证结果；不选择策略时不能覆盖已有 Skill。
+4. **连接器健康。** 管理员配置 fake 租户连接，执行健康检查，状态从 healthy 切换为 unavailable；健康失败期间新执行被安全拒绝，恢复后可重新执行，普通 Chat 文本正常工作。
+5. **受控内部 HTTP。** 选择 registered internal HTTP Operation，Skill 表单只能选择服务端注册的 service key 和 operation name；尝试输入 loopback、metadata 地址、任意 method/header 被服务端拒绝，无法形成 SSRF。
+6. **只读数据库 Operation。** 选择预注册 query template，表单只出现模板允许的参数；提交 SQL、注释、union、模板名枚举字段均被拒绝，数据库 adapter 没有执行调用。
+7. **结果与重试。** 触发可重试的 fake connector 错误，Chat 显示安全重试按钮；重试产生新的 execution 并链接原 execution，超过租户/Skill 配额后显示限流提示。
+8. **高级审计和运行指标。** 在审计页筛选导入、连接器健康、重试、限流、结果脱敏事件；在运行统计中看到成功率、超时率、队列等待时间和产物过期清理，不显示秘密或内部路径。
+9. **Preset 与响应式体验。** 用户收藏多个 Skill、设置默认参数和排序，在桌面/窄屏/键盘操作下均可稳定使用；默认参数失效时页面提示重新确认，而不是静默提交旧字段。
+10. **发布和恢复。** 按运行手册执行迁移升级、备份恢复、功能开关关闭和重新开启；关闭导入开关时 API 与 UI 都拒绝导入，恢复后不丢失 M1/M2 已发布 Skill。
+
+### M3 退出条件和演示包
+
+- [ ] 合法包导入、恶意包拒绝、冲突处理、脱敏导出、Connector 健康和多 Operation 均有自动化与人工验收记录。
+- [ ] 全量安全测试确认没有脚本执行、任意 URL、自由 SQL、包内凭据、跨租户访问、未授权下载或模型自动调用路径。
+- [ ] 运行手册、监控/告警、数据保留、备份恢复和故障处理文档已提交到 `docs/development/v1.1/skills/`。
+- [ ] M1/M2 的数据库、API、浏览器用例在 M3 配置下继续通过，且关闭 M3 开关不会影响已发布 Skill 的读取和执行。
+- [ ] M3 标签建立后，Prompt Skill 另行立项，不把 Prompt Skill 混入本 Tool Skill 交付。
+
+**M3 可演示结果：** 管理员可以从安全的 Agent Skills 包得到一个可审查草稿，将其映射到平台受控 Operation 后发布；系统能够在连接器异常、恶意包、权限变化和资源压力下保持可解释、可审计、fail closed。
+
+---
+
+## Milestone Acceptance Matrix
+
+| 验收项 | M1 最小闭环 | M2 安全运营闭环 | M3 完整生产能力 |
+|---|---|---|---|
+| 管理员登录与权限 | 管理员可管理；员工管理 API 403 | 角色/权限矩阵可配置并审计 | 高权限 Connector/导入/审计分层 |
+| 分类 | 新增、编辑、停用、Chat 浏览 | 停用阻断新执行并保留历史 | 排序、统计和运营筛选 |
+| Tool Skill | TOOL 创建、编辑、校验、首次发布 | 版本、差异、回滚新版本、归档 | 导入草稿、脱敏导出、完整治理 |
+| Operation | 一个服务端 fake Operation | 版本锁定、超时、取消、状态机 | 多 Operation、健康检查、熔断 |
+| Chat | 分类浏览、手动选择、结构化表单、点击执行 | 进度、取消、终态、产物下载 | 重试、限流提示、完整 Preset 体验 |
+| 安全 | 请求字段白名单、租户隔离、固定角色检查 | RBAC、审计 fail closed、二次下载鉴权 | 包扫描、SSRF/SQL/资源耗尽全量测试 |
+| 自动化 | `test_m1...` + Playwright m1 | `test_m2...` + Playwright m1/m2 | `test_m3...` + 全量安全/E2E |
+| 人工操作 | 10 步 M1 脚本 | 10 步 M2 脚本 | 10 步 M3 脚本 |
+| 退出门槛 | 可重复演示且无未授权调用 | 可运营、可取消、可审计、可下载 | 可导入、可扩展、可上线治理 |
+
+## Milestone-to-Task Mapping
+
+| 现有任务 | M1：最小闭环 | M2：安全运营闭环 | M3：完整能力/生产治理 |
+|---|---|---|---|
+| Task 1 合同与 fixture | 受限 Tool Schema、运行请求、M1 fixture | 增加版本/取消/产物字段校验 | 增加导入元数据和多 Operation 契约校验 |
+| Task 2 持久化 | 创建全部核心表和 `0009_tool_skills.py`，启用 M1 使用的字段 | 增加状态/取消/审计/产物索引和约束，补数据回填 | 增加导入历史、连接器健康、保留清理字段 |
+| Task 3 权限种子 | 管理/分类/读取/执行权限，固定 EMPLOYEE 演示授权 | 可配置角色权限、角色 grant CRUD、授权变更审计 | 高权限 Connector/导入/审计分层和运营角色 |
+| Task 4 Connector | 只注册 `knowledge-base.search` fake Operation | 接入 Operation 超时/取消/产物能力 | 连接器 CRUD、健康检查、readonly DB/registered HTTP/file/ticketing |
+| Task 5 管理域 | 分类 CRUD、Skill CRUD、草稿、校验、首次发布 | 版本历史、差异、角色授权、停用/归档/回滚 | 导入映射、健康状态、运行统计和高级生命周期 |
+| Task 6 包导入导出 | 不执行；只保留 schema/feature flag | 不开放页面和路由 | ZIP 预检、冲突处理、导入草稿、脱敏导出 |
+| Task 7 SkillPreset | 收藏、显示名称、排序、默认参数 | 校验当前版本并处理版本变更/失效 | 完整 Preset 体验、排序和响应式入口 |
+| Task 8 执行引擎 | Inline driver、短任务、最小事件、结果脱敏 | Celery、状态机、超时、取消、审计、产物、幂等 | 重试、配额、限流、熔断、清理和性能治理 |
+| Task 9 Chat 后端/SSE | 可用列表、手动执行、快速 SSE/查询结果 | 长任务 SSE、进度、取消、终态和产物事件 | 重试/限流/健康提示和运行指标 |
+| Task 10 管理列表/分类 UI | Skills 列表、分类管理、M1 过滤 | 版本/授权/审计入口和生命周期动作 | 导入/连接器/统计/高级筛选 |
+| Task 11 Tool Skill 编辑器 | 基本信息、Operation、Schema、校验、发布 | 版本差异、角色授权、回滚/停用/归档确认 | 导入映射、安全报告和连接健康提示 |
+| Task 12 管理扩展 UI | 不开放导入/Connector/审计页面 | 审计列表、产物/生命周期相关管理 | 导入导出、Connector、健康、审计高级查询 |
+| Task 13 Chat UI | 分类浏览、手动选择、表单、执行、Preset | 进度、取消、超时、错误、产物下载 | 重试、限流、脱敏展示、完整响应式体验 |
+| Task 14 集成发布 | M1 acceptance matrix 和 m1 浏览器脚本 | M2 RBAC/长任务/审计/产物验收 | 全量安全、性能、运行手册、M3 发布 |
+
+## 里程碑实施顺序和分支策略
+
+1. **M1 实施顺序：** Task 1 → Task 2 → Task 3 → Task 4（fake slice）→ Task 5（management slice）→ Task 7 → Task 8（inline slice）→ Task 9（Chat backend slice）→ Task 10/11 → Task 13（Chat UI slice）→ Task 14（M1 gate）。每完成一个任务执行该任务已有的 focused test 和独立 commit，不跨越 M1 范围实现导入或完整 RBAC UI。
+2. **M2 实施顺序：** 以 M1 发布标签为基线，先完成 Task 3/5 的 RBAC 与版本，再完成 Task 8 的 Celery/状态机，随后 Task 9 的 SSE、Task 11/12 的后台治理页面、Task 13 的运行卡，最后 Task 14 M2 gate。任何 M2 任务都必须先验证 M1 的 e2e 仍然通过。
+3. **M3 实施顺序：** 以 M2 发布标签为基线，先完成 Task 6 的 ZIP 安全导入导出，再完成 Task 4/12 的 Connector 管理和多 Operation，接着完成 Task 8/9 的运行治理，最后 Task 13/14 的体验、监控、运行手册和全量安全验收。
+4. **分支与回滚：** 每个里程碑从上一个发布标签创建 `codex/tool-skills-m1`、`codex/tool-skills-m2`、`codex/tool-skills-m3` 分支；上线前在 staging 执行同一套迁移和验收命令。若 M2/M3 开关关闭，M1 已发布 Skill 的读/执行接口必须保持可用；若迁移回滚失败，停止发布，不执行手工删表或跨版本强制修改。
+5. **完成标准：** 里程碑完成不是“代码合并”而是对应退出条件、自动化 suite、人工脚本、迁移验证和安全负向测试全部有结果。任何一项缺失都保持当前里程碑状态，不进入下一个里程碑。
+
 ## File Structure
 
 ### 后端新增文件
@@ -126,6 +485,7 @@
 | server/app/tasks/celery_app.py | 加载 Skill Celery task。 |
 | server/app/core/config.py | 增加 Skill 导入、执行、产物、队列和下载令牌配置。 |
 | requirements.txt | 增加 PyYAML 和 jsonschema。 |
+| pyproject.toml | 注册 `m1`、`m2`、`m3` pytest markers，使后端和 Playwright 验收可以按里程碑独立运行。 |
 | web/admin/src/routes/index.tsx | 增加 Skills 管理后台路由和权限门禁。 |
 | web/admin/src/api/queryClient.ts | 增加 Skill 相关 query key。 |
 | web/admin/src/features/chat/pages/ChatPage.tsx | 增加 Skill 抽屉、运行卡和刷新逻辑。 |
@@ -156,6 +516,9 @@ The implementation must keep the existing module boundaries and add only the fol
 | `web/admin/src/features/skills/utils/skillPackagePreview.ts` | Safe client-side preview helpers; never parses or executes package scripts. |
 | `web/admin/tests/t20_tool_skill_admin_playwright.py` | Browser acceptance tests for the complete administrator workflow. |
 | `web/admin/tests/t21_tool_skill_chat_playwright.py` | Browser acceptance tests for manual Chat execution and result cards. |
+| `server/tests/e2e/test_m1_tool_skill_closed_loop.py` | M1 服务端端到端闭环：管理员创建/发布、员工浏览/执行、Preset 和安全负向请求。 |
+| `server/tests/e2e/test_m2_tool_skill_operational_loop.py` | M2 服务端端到端闭环：版本、RBAC、生命周期、异步执行、审计、取消和产物下载。 |
+| `server/tests/e2e/test_m3_tool_skill_complete.py` | M3 服务端端到端闭环：导入/导出、Connector 健康、多 Operation、限流和生产治理。 |
 
 All new API responses use the existing Pydantic alias convention (`snake_case` internally, `camelCase` over HTTP). All management mutations must return the updated resource plus a request ID. All security decisions are server-side; client-side filtering is only a usability optimization.
 
@@ -1513,6 +1876,10 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
 **Files:**
 - Modify: `server/tests/e2e/test_tool_skill_e2e.py`
+- Create: `server/tests/e2e/test_m1_tool_skill_closed_loop.py`
+- Create: `server/tests/e2e/test_m2_tool_skill_operational_loop.py`
+- Create: `server/tests/e2e/test_m3_tool_skill_complete.py`
+- Modify: `pyproject.toml`
 - Modify: `server/tests/security/test_skill_security.py`
 - Create: `server/tests/test_skill_release_acceptance.py`
 - Create: `docs/development/v1.1/skills/tool-skill-runbook.md`
@@ -1615,34 +1982,25 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
   git commit -m "test: complete tool skill release acceptance"
   ```
 
-## Implementation order and delivery checkpoints
+## 最终实施检查清单
 
-Execute tasks in the listed order because each following slice depends on a stable contract from the prior slice. The administrator UI is intentionally split into catalog/navigation (Task 10), the full editor (Task 11), and import/connector/audit pages (Task 12), so the backend behavior is testable before the visual workflow is connected.
+以下检查在每个里程碑退出时都执行；M1/M2/M3 的具体命令和人工脚本见上文，Task 14 负责把它们汇总为发布验收记录。
 
-| Checkpoint | Tasks | Demonstrable result |
-|---|---:|---|
-| Contract and persistence | 1–3 | Schemas, tables, seed permissions, and migration are testable. |
-| Controlled operations | 4 | Registry exposes only approved operations and safe tenant connections. |
-| Management domain | 5–7 | Admin can create/version/authorize/import/export a draft; users can only save private presets. |
-| Execution | 8 | A validated Skill runs through Celery with locked version, audit, timeout, cancel, and artifact controls. |
-| Chat backend | 9 | The existing session can create a manual Skill run and stream the defined events. |
-| Admin UI | 10–12 | Admin can create a Tool Skill in a visual editor, map/import it, test, publish, disable, and audit it. |
-| Chat UI | 13 | Users browse by category, fill a form, confirm, execute, and view results. |
-| Release | 14 | E2E/RBAC/security/observability acceptance is green. |
+- [ ] 占位符扫描没有发现未替换的占位符标记、示例路径或示例 ID。
+- [ ] 所有设计实体已映射到 ORM、迁移、repository、service、API 和测试；M1/M2/M3 的任务切片没有引用不存在的字段或旧 API 名称。
+- [ ] 设计中的七类 Skill SSE 事件（started、status、progress、result、artifact、error、done）都有 schema、服务端发送/重放测试和前端展示路径。
+- [ ] 所有用户侧/管理侧 API、后台页面和 Chat 页面都映射到对应 Task；M1/M2/M3 的浏览器验收不会依赖手工修改数据库。
+- [ ] 设计安全威胁中的包扫描、SSRF、自由 SQL、凭据泄露、跨租户访问、资源耗尽和下载越权均有命名控制与自动化测试。
+- [ ] 所有权限和授权公式都由服务端执行；前端过滤只用于体验，不能作为安全控制。
+- [ ] Skill 和 SkillExecution 状态机均有合法/非法转换测试；终态不可被晚到的 worker 结果覆盖。
+- [ ] `POST /chat/sessions/{session_id}/skill-runs` 的客户端请求体始终只包含 `skillId` 和结构化 `input`；服务端拒绝 version/connector/operation/role/URL/SQL/credential 注入。
+- [ ] 任何执行都锁定租户、已发布版本、Operation 契约和角色快照；跨租户、未授权、停用、归档、连接器不可用和审计写入失败均 fail closed。
+- [ ] M1 不允许 Chat 用户创建、导入、发布或共享真正的 Skill；用户个性化只写入私有 `SkillPreset`。
+- [ ] M2 的版本、归档、超时、取消、审计、产物下载和 RBAC 都有自动化测试和人工操作证据。
+- [ ] M3 的包导入在解压前完成安全预检，永不执行包内脚本；Connector 和 Operation 只能由服务端白名单注册。
+- [ ] `git diff --check`、后端 focused suite、前端 typecheck/lint/build、对应 marker 的 Playwright 和迁移 upgrade/downgrade 均通过。
+- [ ] 完成 M3 后另行立项 Prompt Skill；本计划不把 Prompt Skill、模型自动选择、自治编排或共享用户 Skill 混入 Tool Skill 发布。
 
-## Explicit first-phase boundary
+## 执行方式选择
 
-The first phase delivers **administrator-created and administrator-published system Tool Skills**, plus **user-owned SkillPreset** records for favorites, display names, ordering, and default parameters. A Chat user cannot create, publish, share, import, bind, or modify a real `Skill`, `SkillVersion`, `Connector`, `ConnectorOperation`, `SkillRoleGrant`, or execution policy. The `SKILL_MANAGE` permission remains administrator-only. If a future shortcut editor is needed, it must create/update only `SkillPreset` and must not widen Tool Skill execution authority. Prompt Skills, model auto-selection, autonomous chaining, and package script execution are outside this plan.
-
-- [ ] Before implementation, run a repository placeholder-token scan on this file and require no matches.
-
-- [ ] All design entities from sections 3–5 are mapped to ORM models, migration fields, repositories, and tests.
-- [ ] All permissions and the authorization formula from section 6 are represented in seed, routes, services, and RBAC tests.
-- [ ] Every threat in section 7 has a named control and a security test in Tasks 4, 6, 8, and 14.
-- [ ] Skill and execution state machines from section 8 have explicit transition tests.
-- [ ] All user/admin API routes and all seven SSE event types from section 9 have implementation tasks and tests.
-- [ ] All management and Chat surfaces from section 10 have concrete pages/components and browser acceptance coverage.
-- [ ] The Connector Operation protocol from section 11 is implemented with no dynamic client/package registration.
-- [ ] Acceptance criteria from section 12 are represented in Task 14 and do not rely on manual-only verification.
-- [ ] No plan step permits user-provided full URLs, free SQL, package scripts, package credentials, model auto-invocation, or user-created shared Skills.
-- [ ] Before implementation, run a repository placeholder-token scan on this file and require no matches.
+计划已按三个可独立验收的里程碑拆分。实现阶段推荐使用 `subagent-driven-development`：每个 Task 由独立 worker 完成，主线程在任务之间审查 diff 和测试结果；如果希望在同一会话中连续实施，也可以使用 `executing-plans`，按 M1/M2/M3 的 gate 分批执行，不能跳过里程碑验收。
