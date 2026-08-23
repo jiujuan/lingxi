@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax (- [ ]) for tracking.
 
-**Goal:** 在灵犀第一期交付一个安全、可审计、按角色授权的 Tool Skill 系统：管理员可以创建、导入、配置、测试、发布和停用系统 Tool Skill，Chat 用户可以按分类手动选择并执行自己有权限的 Skill，并可以收藏 Skill、保存个人默认参数，但不能创建或共享真正的 Tool Skill。
+**Goal:** 分三个能够独立验收的里程碑交付 Tool Skill 系统：M1 先完成仅供本地开发/测试使用的创建、编辑、发布、执行和 Chat 手动选择闭环；M2 再加入基础登录、租户隔离、`SKILL_READ` / `SKILL_EXECUTE` 权限校验、服务端预注册 fake Connector Operation、版本和安全运营；M3 最后加入收藏、默认参数、显示名称、排序、私有 `SkillPreset`、安全导入导出和生产治理。Chat 用户始终只能使用管理员发布的系统 Tool Skill，不能创建或共享真正的 Skill。
 
-**Architecture:** Skill 只保存面向用户的能力定义和不可变版本，不携带可执行代码；实际动作只能通过服务端注册、审核和配置的 Connector Operation 完成。后端以 SkillExecution 锁定发布版本、角色快照和操作契约，以 Celery 执行长任务并将脱敏事件写入数据库，Chat 通过既有 SSE 传输显示状态与结果。用户个性化能力使用租户内用户私有的 SkillPreset，它只能引用当前已发布的系统 Skill，不能改变连接器、Operation、权限、URL、SQL、凭据或安全策略。
+**Architecture:** Skill 只保存面向用户的能力定义和不可变版本，不携带可执行代码。M1 使用受本地回环保护的固定 `DemoSkillHandler`，不提供 Connector Operation 绑定；M2 切换为服务端预注册、不可由客户端扩展的 fake Connector Operation，并由统一执行服务锁定发布版本、租户、角色快照和操作契约；M3 在此基础上增加 Agent Skills 包导入、连接器运营和用户私有 `SkillPreset`。模型不得自动选择或调用 Skill。
 
 **Tech Stack:** FastAPI、Pydantic、SQLAlchemy、Alembic、PostgreSQL/SQLite、Celery/Redis、jsonschema、PyYAML、React 19、TypeScript、Vite、TanStack Query、既有 Chat SSE 与 RBAC。
 
@@ -12,16 +12,15 @@
 
 ## 0. 第一期开工边界与不可违反的安全约束
 
-本计划以 docs/superpowers/specs/2026-08-19-skills-management-system-design.md 为产品和接口基线。实现时必须同时满足以下范围：
+本计划以 `docs/superpowers/specs/2026-08-19-skills-management-system-design.md` 为产品和接口基线，并按里程碑延后安全能力。实现时必须同时满足以下范围：
 
-1. skill_type 数据库保留 TOOL、PROMPT 两个枚举值，但第一期所有创建、导入、编辑和发布 API 只接受 TOOL。
-2. 只有拥有 SKILL_MANAGE 的管理员可以创建/编辑系统 Skill；Chat 用户没有创建 Skill 的 API、页面或权限。
-3. Chat 用户只能选择管理员发布且按角色授权的系统 Skill；第一期调用方式固定为“打开 Skills 面板 → 选择分类和 Skill → 填写结构化参数 → 明确点击执行”。模型不得自动选择或自动调用 Skill。
-4. 用户私有 SkillPreset 可以保存显示名称、收藏状态、排序和默认参数；它不是 Skill 版本，不可共享，不可发布，不可绑定新 Connector Operation。
-5. 任何执行都从服务端当前发布版本重新解析 connector_operation_id、角色授权和租户连接配置；客户端不得传 skill_version_id、connector_key、operation_key、角色、完整 URL、SQL 或凭据。
-6. 导入包只作为草稿来源。导入预检拒绝脚本、可执行文件、路径穿越、符号链接、密钥模式、未知二进制、超大文件和压缩炸弹；系统永不加载或运行包内 scripts/。
-7. 权限、审计写入、Connector 状态、凭据引用、输入校验任一失败时必须 fail closed，不得降级成未审计调用。
-
+1. `skill_type` 数据库保留 `TOOL`、`PROMPT` 两个枚举值，但本计划的三个里程碑都只接受 `TOOL`；Prompt Skill 另行立项。
+2. M1 不实现真实登录、真实租户隔离或 `SKILL_READ` / `SKILL_EXECUTE` 权限校验。M1 只能在显式开启 `SKILLS_M1_LOCAL_DEMO_MODE=true`、请求来自 loopback、身份为本地演示身份时运行；该模式不能部署到 staging/production。M2 才接入真实登录、租户上下文和服务端权限链路。
+3. Chat 的交互方式固定为“打开 Skills 面板 → 按分类浏览 → 手动选择 Skill → 填写结构化参数 → 明确点击执行”。普通 Chat 文本、模型输出和客户端猜测都不能自动触发 Skill。
+4. M1 不提供用户个性化持久化。收藏、显示名称、默认参数和排序只能在 M3 通过租户内用户私有 `SkillPreset` 实现；`SkillPreset` 不是 Skill 版本，不可共享、不可发布，也不能改变 Operation、角色、URL、SQL、凭据或安全策略。
+5. 客户端请求体始终只允许 `skillId` 和结构化 `input`。M1 的服务端固定解析 `demo_handler_key=customer_report_search`；M2/M3 从服务端已发布版本解析 Connector Operation、租户连接、角色授权和策略。客户端不得传 `skillVersionId`、`connectorKey`、`operationKey`、`roleIds`、完整 URL、SQL 或凭据。
+6. Agent Skills 导入包只作为 M3 草稿来源。导入预检拒绝脚本、可执行文件、路径穿越、符号链接、密钥模式、未知二进制、超大文件和压缩炸弹；系统永不加载或运行包内 `scripts/`。
+7. M1 的安全底线是“本地模式不可对外暴露、固定 Handler 不读取网络/凭据/任意代码、控制字段白名单”；M2/M3 进一步要求权限、审计写入、Connector 状态、凭据引用、输入校验任一失败时 fail closed，不得降级成未审计调用。
 
 ## 里程碑交付策略
 
@@ -29,21 +28,21 @@
 
 ### 共同交付约束
 
-1. **每个里程碑都有可运行的闭环。** 里程碑一不是只交付模型或 API，而是必须完成“管理员创建/编辑/发布 → Chat 用户浏览/选择/填写/执行 → 返回安全结果”的完整路径。里程碑二在同一条路径上增加版本、生命周期、长任务、授权和审计；里程碑三再补齐导入、连接器运营和生产治理。
-2. **数据库先保证向后兼容。** `0009_tool_skills.py` 在里程碑一创建 Skill、版本、角色授权、执行、事件、产物、Preset 和导入所需的基础表；里程碑二和三只添加索引、约束、字段和数据回填，不重命名里程碑一已经使用的列，不改变 `POST /chat/sessions/{session_id}/skill-runs` 的请求体语义。
-3. **执行入口保持同一个服务接口。** 里程碑一使用 `InlineSkillExecutionDriver` 执行确定性的短任务；里程碑二切换到 `CelerySkillExecutionDriver`，但两者都调用同一个 `SkillExecutionService`，都先锁定服务端发布版本、Operation、租户连接和角色快照。这样里程碑一的 Chat UI 不需要在里程碑二重写。
-4. **里程碑一也不能绕过安全门禁。** 里程碑一使用种子数据中的固定演示角色（`EMPLOYEE`）进行真实的 `SKILL_READ`、`SKILL_EXECUTE` 检查，管理员创建的演示 Skill 只允许授予该角色；不在 UI 暴露任意角色选择。里程碑二把固定角色策略替换为可配置的角色授权矩阵和管理员授权界面。
-5. **功能开关只控制入口，不改变安全逻辑。** 使用以下配置键，默认值由部署环境显式设置：
+1. **每个里程碑都有可运行的闭环。** M1 是“本地演示身份 → 管理后台创建/编辑/发布 → Chat 用户浏览/手动选择/填写/执行固定 Demo Handler → 返回安全结果”；M2 在同一条链路上加入登录、租户、权限、fake Connector Operation、版本、生命周期、长任务、审计和产物；M3 再补齐私有 Preset、导入导出和生产治理。
+2. **数据库按阶段启用能力。** `0009_tool_skills.py` 可以为了向后兼容预建未来阶段所需的基础表和字段，但 M1 只启用分类、Skill、草稿/发布指针、执行和最小事件；M2 才启用真实租户上下文、角色授权、Connector/Operation 绑定、版本运营和审计/产物；M3 才启用 Preset、导入历史和完整治理字段。不能因为提前建表就把后续 API/UI 暴露到 M1。
+3. **执行入口保持同一个服务接口。** M1 使用 `InlineDemoSkillExecutionDriver` 调用固定本地 Handler；M2 切换到 `CelerySkillExecutionDriver` 调用服务端预注册 fake Operation；两者都通过同一个 `SkillExecutionService`，客户端请求体不变。M3 只扩展 Operation 和运行治理，不重写 Chat 调用协议。
+4. **M1 是明确的开发/测试模式，不是安全生产模式。** `LocalDemoIdentityMiddleware` 只接受 loopback 请求和固定演示身份，固定使用一个本地 Demo namespace；它不冒充登录，也不宣称提供租户隔离或 `SKILL_READ` / `SKILL_EXECUTE` 校验。M2 完成真实登录、租户隔离和服务端权限后，才允许进入受控 staging/production。
+5. **功能开关只控制入口，不改变已经实现的服务端门禁。** 部署环境必须显式设置以下配置：
 
-   | 配置键 | 里程碑一 | 里程碑二 | 里程碑三 |
+   | 配置键 | M1 | M2 | M3 |
    |---|---|---|---|
    | `SKILLS_M1_CORE_ENABLED` | `true` | `true` | `true` |
+   | `SKILLS_M1_LOCAL_DEMO_MODE` | `true`（仅 loopback） | `false` | `false` |
    | `SKILLS_M2_OPERATIONS_ENABLED` | `false` | `true` | `true` |
    | `SKILLS_M3_IMPORTS_ENABLED` | `false` | `false` | `true` |
-   | `SKILLS_EXECUTION_DRIVER` | `inline` | `celery` | `celery` |
-   | `SKILLS_FIXED_DEMO_ROLE_MODE` | `true` | `false` | `false` |
+   | `SKILLS_EXECUTION_DRIVER` | `inline-demo` | `celery` | `celery` |
 
-   关闭开关时，服务端返回既有统一的 `FEATURE_DISABLED` 错误；不能仅仅隐藏前端按钮后仍允许直接调用 API。
+   关闭开关时，服务端返回统一的 `FEATURE_DISABLED` 错误；不能仅隐藏前端按钮后仍允许直接调用 API。
 6. **每个里程碑单独拥有验收测试入口。** 新增三个服务端验收文件，并在已有浏览器验收文件中按 marker 分组：
 
    - `server/tests/e2e/test_m1_tool_skill_closed_loop.py`
@@ -52,41 +51,38 @@
    - `web/admin/tests/t20_tool_skill_admin_playwright.py` 中的 `@pytest.mark.m1`、`@pytest.mark.m2`、`@pytest.mark.m3`
    - `web/admin/tests/t21_tool_skill_chat_playwright.py` 中的 `@pytest.mark.m1`、`@pytest.mark.m2`、`@pytest.mark.m3`
 
-7. **里程碑之间使用独立提交和验收标签。** 每个里程碑的最后一个提交必须只包含该里程碑计划范围内的代码、迁移、测试和文档。推荐标签分别为 `tool-skills-m1-closed-loop`、`tool-skills-m2-secure-operations`、`tool-skills-m3-production-complete`；标签建立前必须完成本文对应的退出条件。
+7. **里程碑之间使用独立提交和验收标签。** 每个里程碑的最后一个提交必须只包含该里程碑计划范围内的代码、迁移、测试和文档。推荐标签分别为 `tool-skills-m1-local-demo`、`tool-skills-m2-secure-operations`、`tool-skills-m3-production-complete`；标签建立前必须完成本文对应的退出条件。
 
 ---
+## Milestone 1：Tool Skill 本地 Demo 最小闭环
 
-## Milestone 1：Tool Skill 最小可用闭环
+**目标：** 在不引入真实登录、租户隔离、`SKILL_READ` / `SKILL_EXECUTE` 校验和 Connector Operation 绑定的前提下，交付一个仅限本地开发/测试使用的闭环：管理员可以创建、编辑、校验和发布 Tool Skill，Chat 演示用户可以按分类手动选择、填写结构化参数并执行固定 Demo Handler。
 
-**目标：** 交付一个管理员能够在后台创建、编辑、校验和发布，Chat 用户能够按分类手动选择并执行的 Tool Skill 闭环。第一条演示链路使用服务端预注册的确定性 Operation，确保开发、测试和人工验收不依赖外部系统。
-
-**交付结果：** 管理员登录 Skills 后台创建“客户报表查询”分类和 `customer-report-search` Tool Skill，绑定预注册的 `knowledge-base.search` fake Operation，发布后，员工在 Chat 的 Skills 面板中看到该 Skill，填写关键词并明确点击“执行”，页面显示结构化结果。用户可以收藏 Skill 和保存个人默认参数，但不能创建、发布、导入或共享真正的 Skill。
+**交付结果：** 开发者启动本地服务并显式打开 `SKILLS_M1_LOCAL_DEMO_MODE`，使用本地演示身份 `system_admin` 创建“客户数据”分类和 `customer-report-search` Tool Skill；编辑器固定关联 `customer_report_search` Demo Handler，不显示 Connector Operation 选择器；发布后，`demo_employee` 在 Chat 的 Skills 面板中手动选择该 Skill、填写关键词并点击执行，页面显示结构化结果。任何非 loopback 请求、任意 Operation/角色/凭据注入和普通 Chat 自动调用都被拒绝。M1 不实现登录、租户隔离、真实权限、收藏、默认参数、显示名称、排序或 `SkillPreset`。
 
 ### M1 功能范围
 
 | 领域 | 里程碑一交付内容 | 明确不在 M1 的内容 |
 |---|---|---|
-| Skill 合同 | TOOL 类型、`SKILL.md` 元数据映射、受限 JSON Schema、表单展示配置、执行策略上限 | PROMPT Skill、模型自动选择、自由脚本 |
-| 持久化 | 分类、Skill、初始草稿版本、发布指针、执行记录、最小事件记录、私有 Preset | 版本历史页面、版本对比和回滚操作 |
-| 管理后台 | Skills 列表、分类 CRUD、Tool Skill 编辑器、保存草稿、服务端校验、发布 | 导入/导出、连接器管理、完整角色授权矩阵、审计查询 |
-| Connector | 服务端代码注册的 `knowledge-base.search` fake Operation；管理员只能从白名单选择 | 任意 URL、自由 SQL、用户上传代码、多 Connector 管理 |
-| 执行引擎 | 同一执行服务接口下的 inline 短任务、输入校验、租户隔离、固定演示角色检查、结果脱敏、结果大小上限 | Celery 长任务、超时、取消、重试、产物下载、限流/并发控制 |
+| Skill 合同 | TOOL 类型、`SKILL.md` 元数据映射、受限 JSON Schema、表单展示配置、执行策略上限 | PROMPT Skill、模型自动选择、自由脚本、可执行导入包 |
+| 持久化 | 单一 local demo namespace 下的分类、Skill、初始草稿/发布指针、执行记录、最小事件记录 | 真实租户隔离、角色授权、版本历史/差异/回滚、SkillPreset |
+| 管理后台 | Skills 列表、分类 CRUD、Tool Skill 编辑器、保存草稿、服务端校验、首次发布 | 登录页、Connector/Operation 管理或绑定、RBAC 授权矩阵、审计查询、导入/导出 |
+| 执行引擎 | `InlineDemoSkillExecutionDriver`、固定 `customer_report_search` Handler、输入校验、结果脱敏、结果大小上限 | 预注册 Connector Operation、Celery 长任务、超时、取消、重试、产物下载、限流/并发控制 |
 | Chat | 分类浏览、可用 Skill 列表、结构化参数表单、手动确认执行、结果卡片 | 自动触发、长任务进度、取消按钮、产物卡片 |
-| 用户个性化 | 私有收藏、显示名称、排序、默认参数；严格限制为已发布系统 Skill 的引用 | 用户创建/发布/共享真实 Skill；改变 Operation、角色或策略 |
-| 安全基线 | 登录、租户隔离、最小权限、固定角色真实授权检查、请求字段白名单、最小事件记录 | 可配置 RBAC 管理、完整审计检索和安全报表 |
+| 用户个性化 | 只支持 Schema 中声明的服务端默认值展示，不保存用户个性化数据 | 收藏、显示名称、排序、默认参数保存、共享 Skill、发布 SkillPreset |
+| 安全边界 | loopback + local demo flag、固定演示身份、请求字段白名单、固定 Handler 不访问外部资源 | 基础登录、租户隔离、`SKILL_READ` / `SKILL_EXECUTE`、可配置 RBAC、生产部署 |
 
 ### M1 技术切片和任务映射
 
-1. **合同与迁移：Task 1、Task 2。** 先落地 `ToolInputSchema`、`SkillVersionDraftRequest`、`SkillAvailableDefinition` 和 `SkillRunCreateRequest`，再执行 `0009_tool_skills.py`。M1 只使用 `version_number=1` 的草稿/发布版本，但保留不可变版本字段、`current_published_version_id` 和角色授权表，保证 M2 可以直接增加版本历史，不需要重建数据。
-2. **权限种子：Task 3 的 M1 slice。** 保留 `SKILL_READ`、`SKILL_EXECUTE`、`SKILL_MANAGE`、`SKILL_CATEGORY_MANAGE`；`SYSTEM_ADMIN` 拥有管理权限，`EMPLOYEE` 只拥有读取/执行权限。`SKILL_CONNECTOR_MANAGE` 和 `SKILL_AUDIT_READ` 可以提前种子化，但 M1 不开放对应页面。发布时服务端只允许给 `EMPLOYEE` 演示角色建立固定 grant，客户端不能提交任意 `roleIds`。
-3. **受控 Operation：Task 4 的 M1 slice。** 只实现 `knowledge-base.search` 的 fake 注册项。它接受 `{ "query": string, "limit": integer }`，返回固定格式的本地测试结果和 `isArtifact=false`，不读取真实网络、不执行 SQL、不读取凭据。Operation 注册表仍然只允许服务端注册，Skill 编辑器只显示注册表中的安全展示名。
-4. **管理域：Task 5 的 M1 slice。** 实现分类新增/编辑/停用、Skill 新建、草稿元数据编辑、输入 Schema 编辑、Operation 绑定、服务端校验和首次发布。已发布 Skill 的再次编辑只能创建/更新当前编辑草稿，不提供历史版本、回滚和归档按钮；旧的发布指针不会被客户端直接修改。
-5. **私有 Preset：Task 7。** 在主闭环中实现收藏和默认参数保存。默认参数必须再次按当前发布版本的 Schema 校验，查询必须同时按 `tenant_id` 和 `user_id` 过滤；Preset 不存 connector、operation、role、URL、SQL、凭据或执行策略。
-6. **执行引擎：Task 8 的 M1 slice。** 实现 `InlineSkillExecutionDriver` 和统一的 `SkillExecutionService`。流程为“鉴权 → 查当前发布版本 → 校验输入 → 创建执行 → 写入 started 事件 → 调用 fake Operation → 脱敏结果 → 写入 done/result 事件 → 返回 SSE 事件序列”。事件至少包含 `skill_run_started`、`skill_run_status`、`skill_run_result`、`skill_run_done`；没有队列时也必须持久化执行记录和请求 ID。
-7. **Chat 后端：Task 9 的 M1 slice。** 实现可用分类、可用 Skill 定义和 `POST /chat/sessions/{session_id}/skill-runs`。M1 在 inline driver 下快速发完同一条 SSE 流；若前端环境不支持流式测试，允许通过 `GET /skill-executions/{execution_id}` 查询同一份结果。请求体只允许 `skillId` 和 `input`。
-8. **管理后台：Task 10、Task 11 的 M1 slice。** 先完成列表和分类管理，再完成三步编辑器：基本信息 → Operation/参数 Schema → 校验/发布。编辑器必须显示 Skill 类型为 TOOL、当前状态、阻断错误和发布确认；不能渲染或接受 Connector 内部 URL、密钥、自由 SQL、脚本或任意角色 ID。
-9. **Chat UI：Task 13 的 M1 slice。** 在 Skills 抽屉中按分类展示可用 Skill；进入详情后展示描述、输入限制和结构化表单；执行按钮必须是用户明确点击，不能由普通 Chat 文本触发。执行完成后显示安全结果、失败码和 request ID；收藏/默认参数保存后刷新页面仍然存在。
-10. **M1 集成验收：Task 14 的 M1 slice。** 只运行 M1 acceptance matrix，确认 admin 和 employee 两个角色均经过真实权限中间件，且对伪造 `skillVersionId`、`connectorKey`、`operationKey`、`roleIds`、`url`、`sql`、`credential` 的请求返回 4xx 且 fake Operation 调用次数为 0。
+1. **合同与迁移：Task 1、Task 2。** 先落地 `ToolInputSchema`、M1 管理请求、`SkillAvailableDefinition` 和 `SkillRunCreateRequest`，再执行 `0009_tool_skills.py`。M1 只启用一个 local demo namespace 和一个可发布版本；为 M2 预留版本、授权、Connector、审计、产物和 Preset 字段，但不在 M1 路由中开放。
+2. **本地演示边界：Task 3 不在 M1 实现。** 用 `LocalDemoIdentityMiddleware` 将 `system_admin`/`demo_employee` 映射为本地演示身份，拒绝非 loopback 请求；不调用真实登录服务，不执行 `SKILL_READ` / `SKILL_EXECUTE`，也不把演示身份当作生产角色。M1 的管理 API 和 Chat API 都必须检查 local demo flag，关闭或脱离 loopback 即返回 `FEATURE_DISABLED`/`LOCAL_DEMO_ONLY`。
+3. **固定 Demo Handler：Task 4 不在 M1 实现。** 在执行层实现一个代码内固定的 `customer_report_search` Handler，输入只允许 `query: string` 和有上限的 `limit: integer`，返回固定的本地测试结果；它不读取真实网络、SQL、文件、凭据或用户传入的 Handler 名称。M1 编辑器不显示 Connector/Operation 下拉框，Skill 版本由服务端写入固定的内部 handler 标识。
+4. **管理域：Task 5 的 M1 slice。** 实现分类新增/编辑/停用、Skill 新建、草稿元数据编辑、输入 Schema 编辑、服务端校验和首次发布。已发布 Skill 的再次编辑只允许更新当前编辑草稿；不提供版本历史、角色授权、Operation 绑定、回滚和归档按钮。
+5. **执行引擎：Task 8 的 M1 slice。** 实现 `InlineDemoSkillExecutionDriver` 和统一的 `SkillExecutionService`。流程为“local demo gate → 查当前发布版本 → 校验输入 → 创建执行 → 写入 started 事件 → 调用固定 Handler → 脱敏结果 → 写入 done/result 事件 → 返回 SSE 事件序列”。M1 至少持久化 `skill_run_started`、`skill_run_status`、`skill_run_result`、`skill_run_done` 和 request ID。
+6. **Chat 后端：Task 9 的 M1 slice。** 实现本地可用分类、可用 Skill 定义和 `POST /chat/sessions/{session_id}/skill-runs`。M1 在 inline driver 下快速发完同一条 SSE 流；若前端环境不支持流式测试，允许通过 `GET /skill-executions/{execution_id}` 查询同一份结果。请求体只允许 `skillId` 和 `input`，不能借此绕过 local demo gate。
+7. **管理后台：Task 10、Task 11 的 M1 slice。** 先完成列表和分类管理，再完成三步编辑器：基本信息 → 参数 Schema → 校验/发布。编辑器显示类型 TOOL、当前状态、阻断错误和发布确认；不得渲染或接受 Connector URL、密钥、自由 SQL、脚本、Operation key 或角色 ID。
+8. **Chat UI：Task 13 的 M1 slice。** 在 Skills 抽屉中按分类展示可用 Skill；进入详情后展示描述、输入限制和结构化表单；执行按钮必须是用户明确点击，不能由普通 Chat 文本触发。执行完成后显示安全结果、失败码和 request ID；不显示收藏、默认参数、显示名称或排序控件。
+9. **M1 安全验收：Task 14 的 M1 slice。** 验证非 loopback 请求被拒绝，关闭 local demo flag 后所有管理/执行入口被拒绝，并对伪造 `skillVersionId`、`connectorKey`、`operationKey`、`roleIds`、`url`、`sql`、`credential` 的请求返回 4xx 且固定 Handler 调用次数为 0。
 
 ### M1 自动化验证
 
@@ -94,18 +90,14 @@
 
 ```powershell
 $env:SKILLS_M1_CORE_ENABLED = "true"
+$env:SKILLS_M1_LOCAL_DEMO_MODE = "true"
 $env:SKILLS_M2_OPERATIONS_ENABLED = "false"
 $env:SKILLS_M3_IMPORTS_ENABLED = "false"
-$env:SKILLS_EXECUTION_DRIVER = "inline"
-$env:SKILLS_FIXED_DEMO_ROLE_MODE = "true"
+$env:SKILLS_EXECUTION_DRIVER = "inline-demo"
 
 pytest server/tests/test_skill_contracts.py -q
 pytest server/tests/test_skill_models.py -m m1 -q
-pytest server/tests/test_skill_permissions.py -m m1 -q
-pytest server/tests/test_skill_connectors.py -m m1 -q
-pytest server/tests/test_skill_operations.py -m m1 -q
 pytest server/tests/test_skills_api.py -m m1 -q
-pytest server/tests/test_skill_preset.py -m m1 -q
 pytest server/tests/test_skill_execution.py -m m1 -q
 pytest server/tests/test_skill_sse.py -m m1 -q
 pytest server/tests/test_skill_chat_api.py -m m1 -q
@@ -124,85 +116,92 @@ pytest web/admin/tests/t21_tool_skill_chat_playwright.py -m m1 -q
 git diff --check
 ```
 
-**M1 自动化通过标准：** 共享测试文件中的 M1 用例必须标注 `@pytest.mark.m1`，未标记的基础合同测试单独运行；后端 focused suite、M1 e2e、前端单元/类型/构建和两个浏览器 marker 全部 PASS；`test_m1_tool_skill_closed_loop.py` 至少验证管理员创建/发布、员工可见/可执行、结果事件顺序、用户不能管理、跨租户不可见和伪造控制字段拒绝。
+**M1 自动化通过标准：** M1 用例不得依赖真实登录、租户、角色权限或 Connector registry；后端 focused suite、M1 e2e、前端单元/类型/构建和两个浏览器 marker 全部 PASS；`test_m1_tool_skill_closed_loop.py` 至少验证本地管理员创建/发布、本地 Chat 演示用户可见/可执行、结果事件顺序、普通 Chat 不自动调用、非 loopback 被拒绝和伪造控制字段拒绝。
 
 ### M1 人工验收脚本
 
-使用一套本地演示租户，准备两个账号：`system_admin` 和 `employee`。测试数据只包含本地 fake Operation，禁止把真实生产连接器作为 M1 的验收依赖。
+在本地开发机启动服务，设置 `SKILLS_M1_LOCAL_DEMO_MODE=true`，使用浏览器提供的本地演示身份切换器选择 `system_admin` 或 `demo_employee`。M1 不使用登录页，不接入真实租户，不连接真实外部系统。
 
-1. **管理员进入 Skills。** 登录管理后台，确认左侧出现“Skills”；`employee` 登录后不显示管理入口，直接访问管理 URL 返回 403/统一无权限页。
-2. **创建分类。** `system_admin` 打开“分类管理”，新增“客户数据”，填写 key `customer-data`、名称和描述，保存后在列表中看到“启用”。编辑名称并刷新，确认修改持久化。
-3. **创建 Skill 草稿。** 打开“Skills 列表”→“新建 Tool Skill”，填写 key `customer-report-search`、名称“客户报表查询”、描述、分类，确认类型固定显示 TOOL 且不可切换为 PROMPT。
-4. **绑定安全 Operation。** 在编辑器的 Operation 下拉框选择 `knowledge-base.search`；确认列表不出现 URL、SQL、凭据输入框，也不能粘贴或保存未知 operation key。
-5. **配置输入表单。** 在参数 Schema 步骤添加必填 `query` 字符串和可选 `limit` 整数，设置默认值 `10`；尝试添加 `password`、`url` 或 `sql` 字段，页面显示阻断校验并且保存请求被服务端拒绝。
+1. **验证本地模式边界。** 以 `system_admin` 进入本地 Skills 后台，确认页面显示“Local Demo”；从非 loopback 地址或关闭 local demo flag 后访问同一页面，服务端返回 `LOCAL_DEMO_ONLY`/`FEATURE_DISABLED`，而不是打开管理页面。
+2. **创建分类。** `system_admin` 打开“分类管理”，新增“客户数据”，填写 key `customer-data`、名称和描述，保存后在列表中看到“启用”；编辑名称并刷新，确认修改持久化。
+3. **创建 Skill 草稿。** 打开“Skills 列表”→“新建 Tool Skill”，填写 key `customer-report-search`、名称“客户报表查询”、描述和分类，确认类型固定显示 TOOL 且不能切换为 PROMPT。
+4. **确认 M1 不暴露 Connector。** 在编辑器中确认只有固定的“客户报表查询 Demo Handler”提示，没有 Connector、Operation、URL、SQL、凭据或角色选择器；尝试粘贴未知 Operation key，页面和服务端都拒绝。
+5. **配置输入表单。** 在参数 Schema 步骤添加必填 `query` 字符串和可选 `limit` 整数，设置 Schema 默认值 `10`；尝试添加 `password`、`url` 或 `sql` 字段，页面显示阻断校验且保存请求被服务端拒绝。
 6. **保存并发布。** 点击“保存草稿”，返回列表确认状态为“草稿”；点击“校验”，确认无阻断错误；点击“发布”并确认弹窗，列表状态变为“已发布”。刷新后 Skill 仍然存在。
-7. **Chat 浏览和手动选择。** 用 `employee` 打开 Chat → Skills，按“客户数据”分类看到“客户报表查询”；打开详情看到描述和 `query`/`limit` 表单。普通 Chat 输入“请自动调用客户报表查询”不会创建 Skill 执行。
-8. **收藏和默认参数。** 点击收藏，设置默认 `limit=10`，刷新浏览器并重新打开 Skill，确认收藏状态和默认值保留；确认只能影响当前 employee，不影响另一个账号。
-9. **执行并查看结果。** 填写 `query=华东客户`，点击“执行”并确认，看到 started/status/result/done 对应的运行卡片和 fake Operation 返回的结构化结果。页面显示 request ID，但不显示内部连接器地址、凭据、堆栈或原始日志。
-10. **安全负向操作。** 使用浏览器开发者工具手工把请求体增加 `skillVersionId`、`connectorKey`、`operationKey` 或 `roleIds`，服务端返回 400/422；把 `skillId` 改成未授权或另一租户的 ID，返回 403/404；后端 fake Operation 记录没有新增调用。
+7. **Chat 浏览和手动选择。** 切换为 `demo_employee`，打开 Chat → Skills，按“客户数据”分类看到“客户报表查询”；打开详情看到描述和 `query`/`limit` 表单。普通 Chat 输入“请自动调用客户报表查询”不会创建 Skill 执行。
+8. **验证 Schema 默认值。** 重新打开 Skill 详情，确认 `limit` 显示 Schema 默认值 `10`；修改输入后离开并重新打开，确认 M1 不保存用户个性化输入，也不显示收藏、显示名称或排序控件。
+9. **执行并查看结果。** 填写 `query=华东客户`，点击“执行”并确认，看到 started/status/result/done 对应的运行卡片和固定 Demo Handler 返回的结构化结果。页面显示 request ID，但不显示内部地址、凭据、堆栈或原始日志。
+10. **安全负向操作。** 使用浏览器开发者工具在请求体增加 `skillVersionId`、`connectorKey`、`operationKey`、`roleIds`、`url`、`sql` 或 `credential`，服务端返回 400/422 且 Handler 没有新增调用；从非 loopback 重放请求也必须被拒绝。
 
 ### M1 退出条件和演示包
 
 - [ ] `0009_tool_skills.py` 在空数据库和现有开发数据库上都能升级，既有业务测试无回归。
-- [ ] 管理员创建/编辑/发布和 Chat 浏览/选择/执行的闭环可在本地一键启动后完成。
+- [ ] 管理员创建/编辑/发布和 Chat 浏览/选择/执行的本地 Demo 闭环可在本地一键启动后完成。
 - [ ] M1 的所有自动化命令通过，且没有被 `xfail`、跳过或仅依赖人工判断的关键断言。
 - [ ] 人工验收脚本 1–10 全部通过并保存截图/录屏到 `docs/development/v1.1/acceptance/tool-skills/m1/`。
-- [ ] 现有系统中不存在 Chat 用户创建、导入、发布或共享真实 Skill 的 UI/API。
-- [ ] M1 发布标签建立后，才允许开始 M2 的长任务、授权矩阵和生命周期开发。
+- [ ] 服务端在 local demo flag 关闭、非 loopback 或非法控制字段时 fail closed。
+- [ ] M1 没有登录页、真实租户隔离、`SKILL_READ` / `SKILL_EXECUTE` 校验、Connector Operation 绑定或 SkillPreset API/UI；M1 标签明确标注为 local demo，不得部署到 staging/production。
 
-**M1 可演示结果：** 一名管理员从空白分类开始创建一个 Tool Skill，一名员工在 Chat 中按分类手动选择它，填写结构化参数并得到结果；这个结果可重复、可自动化测试，并且客户端无法注入 Operation、角色或凭据。
+**M1 可演示结果：** 开发者可以在本地从空白分类开始创建一个 Tool Skill，一名本地演示用户在 Chat 中按分类手动选择它，填写结构化参数并得到结果；这个结果可重复、可自动化测试，但 M1 不冒充真实身份、租户或权限系统。
 
 ---
+## Milestone 2：基础安全与受控执行 Tool Skill 闭环
 
-## Milestone 2：可安全运营的 Tool Skill 执行闭环
+**目标：** 把 M1 的本地 Demo 闭环升级为第一个可进入受控 staging/production 的闭环：加入基础登录、租户隔离、`SKILL_READ` / `SKILL_EXECUTE` 服务端校验、管理员 `SKILL_MANAGE`/`SKILL_CATEGORY_MANAGE` 校验、服务端预注册 fake Connector Operation、版本和生命周期、长任务控制、审计、产物下载及 RBAC/角色授权。
 
-**目标：** 在 M1 的可用闭环上补齐版本、生命周期、长任务控制、审计、产物下载和完整 RBAC/角色授权，使 Tool Skill 可以在受控生产环境中运营。
-
-**交付结果：** 管理员可以从已发布版本创建新草稿、查看版本差异、发布或回滚形成的新版本、停用/归档 Skill，并为不同角色授权；Chat 用户只能看到并执行自己被授权的已发布 Skill。长任务能够显示状态和进度，用户可以取消；执行超时、审计写入失败、权限不匹配和产物越权下载都能安全失败。
+**交付结果：** 用户通过真实登录进入所属租户；管理员在租户内创建或升级 Tool Skill，编辑器可以从服务端白名单绑定 `knowledge-base.search` fake Connector Operation；管理员按租户角色授予执行权限。Chat 用户只能看到同时满足 `SKILL_READ` 和 `SKILL_EXECUTE`、属于当前租户、处于已发布且启用状态、Connector/Operation 可用的 Skill。长任务能够显示状态和进度，用户可以取消；执行超时、审计写入失败、权限不匹配和产物越权下载都能安全失败。M2 不实现收藏、默认参数、显示名称或排序。
 
 ### M2 功能范围
 
 | 领域 | 里程碑二交付内容 | M2 仍不包含的内容 |
 |---|---|---|
+| 登录与身份 | 基础登录、会话/token 校验、当前用户和当前租户上下文、登出和过期处理 | SSO、复杂组织同步、多因子认证运营 |
+| 租户隔离 | 所有 Skill、分类、版本、Connector 连接、执行、事件和产物按 `tenant_id` 隔离；跨租户 ID/key 不可解析 | 跨租户共享 Skill、跨租户执行 |
+| 权限 | 服务端强制校验 `SKILL_READ`、`SKILL_EXECUTE`、`SKILL_MANAGE`、`SKILL_CATEGORY_MANAGE`、`SKILL_CONNECTOR_MANAGE`、`SKILL_AUDIT_READ`；按租户角色授权 Skill 版本 | Chat 用户创建或共享 Skill |
+| Connector | 服务端预注册的 `knowledge-base.search` fake Connector Operation；管理员可绑定并配置安全契约 | 任意 URL、自由 SQL、用户上传代码、多 Connector 生产连接管理 |
 | 版本 | 不可变版本、版本列表、差异、发布、回滚为新版本、执行锁定版本 | Prompt Skill 的版本与模型策略 |
 | 生命周期 | 禁用、重新启用、归档（归档为终态）；保留历史执行 | 删除历史、物理清理执行数据 |
-| RBAC | Skill 管理/读取/执行/分类/连接器/审计权限；按租户和角色授权；授权变更审计 | Chat 用户创建共享 Skill |
 | 执行 | Celery/Redis 队列、状态机、超时、取消、幂等、并发和输出基础限制 | 高级重试策略、跨 Skill 编排 |
 | 审计 | 管理、授权、执行、取消、超时、下载事件的脱敏记录和查询页面 | SIEM/SOC 外部联动 |
 | 产物 | 白名单产物存储、二次鉴权、短时下载令牌、过期清理 | 任意文件浏览或任意路径下载 |
-| 管理后台 | 版本历史/差异、发布/回滚/停用/归档确认、角色授权、审计查询 | 包导入、连接器连接配置、健康检查页面 |
-| Chat | 运行中状态、进度、取消、终态、错误、产物下载 | 自动重试和复杂工作流 |
+| 管理后台 | 版本历史/差异、Operation 绑定、发布/回滚/停用/归档确认、角色授权、审计查询、登录态和租户上下文 | 包导入、连接器连接配置和多 Operation 管理、用户个性化入口 |
+| Chat | 运行中状态、进度、取消、终态、错误、产物下载 | 收藏、显示名称、默认参数、排序和完整 `SkillPreset` |
 
 ### M2 技术切片和任务映射
 
-1. **权限和授权矩阵：Task 3、Task 5 的 M2 slice。** 开启 `SKILLS_M2_OPERATIONS_ENABLED` 后，移除 M1 的固定演示角色限制，管理员可以在 Skill 版本授权面板选择当前租户角色。服务端使用 `user_has_permission(SKILL_EXECUTE) AND active_skill AND active_category AND published_version AND role_grant AND active_operation AND active_connection` 公式；任一条件失败都返回安全错误。角色 ID、权限和租户 ID 始终由服务端解析。
-2. **版本和生命周期：Task 5 的 M2 slice。** 编辑已发布版本时创建新的不可变草稿；发布后旧版本仍可被历史执行引用但不再用于新执行。版本差异只返回脱敏字段；回滚不是修改旧版本，而是复制目标版本内容创建新的草稿并重新校验。归档是终态，停用阻止新执行但保留列表和执行历史。
-3. **异步执行：Task 8 的 M2 slice。** 用 `CelerySkillExecutionDriver` 替换 inline driver，使用同一 `SkillExecutionService`。实现 `PENDING → VALIDATING → QUEUED → RUNNING → SUCCEEDED/FAILED/TIMED_OUT/CANCELED`，每个状态转换写入事件；队列提交失败不得伪造成功。
-4. **超时和取消：Task 8 的 M2 slice。** 在 Operation 契约和 Skill execution policy 的较小者上设置超时；取消只向声明支持取消的 Operation 发送 cancel token，不支持时标记取消请求并等待安全终止。超时和取消必须阻止后续成功结果覆盖终态。
-5. **审计：Task 8、Task 12 的 M2 slice。** `skill_audit_service.py` 写入发布、停用、归档、授权变更、执行、取消、超时、下载和失败事件；输入、结果、凭据、连接器内部地址和 traceback 均按 schema 进行脱敏。审计写入失败时，管理变更和执行创建均 fail closed；审计查询只能看到本租户允许的字段。
-6. **产物：Task 8、Task 9 的 M2 slice。** 只允许注册 Operation 通过 `SkillArtifactService` 写入白名单目录/对象存储；下载端点再次检查租户、执行所有者、角色和产物未过期状态，并签发短时令牌。令牌一次性使用或在有效期内绑定用户/租户，不能通过修改 artifact ID 下载他人文件。
-7. **后台 UI：Task 10、Task 11、Task 12 的 M2 slice。** 列表新增版本、授权角色、最近运行状态；编辑器新增版本历史和 JSON/表单差异；发布、回滚、停用、归档、授权变更均使用明确确认弹窗；新增审计页，支持按 Skill、操作者、事件、状态和时间范围筛选。
-8. **Chat UI：Task 13 的 M2 slice。** 运行卡片显示排队、执行、进度、失败、超时、取消；长任务提供取消按钮和防重复点击；成功后显示产物文件名、大小和下载按钮；下载失败显示安全错误而不暴露存储 key。
-9. **M2 集成验收：Task 14 的 M2 slice。** 增加跨角色、跨租户、版本锁定、生命周期、审计失败、超时/取消竞态、产物越权、幂等和状态机测试。
+1. **登录、租户和权限：Task 3、Task 5、Task 9 的 M2 slice。** 接入项目现有登录/会话机制，建立当前用户、当前租户和角色上下文；所有 Skill 查询、执行、版本、事件、产物和 Connector 查询必须带服务端 `tenant_id` 条件。服务端以 `SKILL_READ` 控制可用列表、以 `SKILL_EXECUTE` 控制执行入口，管理动作再校验对应的 `SKILL_MANAGE`/分类/审计/Connector 权限。前端隐藏按钮不算安全控制。
+2. **fake Connector Operation：Task 4、Task 5、Task 11 的 M2 slice。** 启用 `SKILLS_M2_OPERATIONS_ENABLED` 后，注册只读的 `knowledge-base.search` fake Operation，接受 `{ "query": string, "limit": integer }`，返回固定格式的本地测试结果。Skill 版本必须保存服务端解析出的 `connector_operation_id` 和 Operation 契约；客户端只能提交 `skillId` 和业务输入，不能提交 Operation key。M2 的编辑器才显示 Operation 白名单选择器。
+3. **角色授权矩阵：Task 3、Task 5 的 M2 slice。** 移除 M1 的固定演示身份限制，管理员可以为当前租户角色授予某个 Skill 版本的执行权。可用列表和执行服务共同使用 `authenticated_user AND same_tenant AND user_has_permission(SKILL_READ/SKILL_EXECUTE) AND active_skill AND active_category AND published_version AND role_grant AND active_operation` 公式；任一条件失败都返回安全错误，不能泄露资源是否存在。
+4. **版本和生命周期：Task 5 的 M2 slice。** 编辑已发布版本时创建新的不可变草稿；发布后旧版本仍可被历史执行引用但不再用于新执行。版本差异只返回脱敏字段；回滚不是修改旧版本，而是复制目标版本内容创建新草稿并重新校验。归档是终态，停用阻止新执行但保留列表和执行历史。
+5. **异步执行：Task 8 的 M2 slice。** 用 `CelerySkillExecutionDriver` 替换 M1 driver，使用同一 `SkillExecutionService`。实现 `PENDING → VALIDATING → QUEUED → RUNNING → SUCCEEDED/FAILED/TIMED_OUT/CANCELED`，每个状态转换写入事件；队列提交失败不得伪造成功。
+6. **超时和取消：Task 8 的 M2 slice。** 在 Operation 契约和 Skill execution policy 的较小者上设置超时；取消只向声明支持取消的 Operation 发送 cancel token，不支持时标记取消请求并等待安全终止。超时和取消必须阻止后续成功结果覆盖终态。
+7. **审计和产物：Task 8、Task 9、Task 12 的 M2 slice。** `skill_audit_service.py` 写入发布、停用、归档、授权变更、执行、取消、超时、下载和失败事件；输入、结果、凭据、连接器内部地址和 traceback 均按 schema 脱敏。审计写入失败时，管理变更和执行创建均 fail closed。产物只允许注册 Operation 通过 `SkillArtifactService` 写入白名单目录/对象存储，下载端点再次检查租户、执行所有者、当前角色和产物未过期状态。
+8. **后台和 Chat UI：Task 10、Task 11、Task 12、Task 13 的 M2 slice。** 管理后台新增登录态/租户上下文、版本历史、差异、Operation 绑定、角色授权和生命周期动作；Chat 运行卡片显示排队、执行、进度、失败、超时、取消，成功后显示产物文件名、大小和下载按钮。M2 不显示收藏、默认参数、显示名称或排序控件。
+9. **M2 集成验收：Task 14 的 M2 slice。** 增加跨用户、跨角色、跨租户、未登录、过期会话、无 `SKILL_READ`、无 `SKILL_EXECUTE`、未授权角色、Operation 不可用和审计写入失败的负向用例；确认客户端不能通过伪造版本/Operation/角色字段绕过服务端。
 
 ### M2 自动化验证
 
+从 `D:\codeproject\python\lingxi` 执行：
+
 ```powershell
 $env:SKILLS_M1_CORE_ENABLED = "true"
+$env:SKILLS_M1_LOCAL_DEMO_MODE = "false"
 $env:SKILLS_M2_OPERATIONS_ENABLED = "true"
 $env:SKILLS_M3_IMPORTS_ENABLED = "false"
 $env:SKILLS_EXECUTION_DRIVER = "celery"
-$env:SKILLS_FIXED_DEMO_ROLE_MODE = "false"
 
-pytest server/tests/test_skill_permissions.py -m "m1 or m2" -q
-pytest server/tests/test_skills_api.py -m "m1 or m2" -q
+pytest server/tests/test_skill_contracts.py -q
+pytest server/tests/test_skill_models.py -m "m1 or m2" -q
+pytest server/tests/test_skill_permissions.py -m m2 -q
+pytest server/tests/test_skill_connectors.py -m m2 -q
+pytest server/tests/test_skill_operations.py -m m2 -q
+pytest server/tests/test_skills_api.py -m m2 -q
 pytest server/tests/test_skill_execution.py -m "m1 or m2" -q
 pytest server/tests/test_skill_sse.py -m "m1 or m2" -q
-pytest server/tests/test_skill_chat_api.py -m "m1 or m2" -q
-pytest server/tests/test_skill_release_acceptance.py -m "m1 or m2" -q
+pytest server/tests/test_skill_chat_api.py -m m2 -q
+pytest server/tests/security/test_skill_security.py -m "m1 or m2" -q
 pytest server/tests/e2e/test_m1_tool_skill_closed_loop.py -q
 pytest server/tests/e2e/test_m2_tool_skill_operational_loop.py -q
-pytest server/tests/security/test_skill_security.py -m "m1 or m2" -q
 
 cd web/admin
 npm test -- --run src/features/skills src/features/chat
@@ -216,90 +215,92 @@ pytest web/admin/tests/t21_tool_skill_chat_playwright.py -m "m1 or m2" -q
 git diff --check
 ```
 
-**M2 自动化通过标准：** 共享测试文件中的 M1/M2 用例必须分别标注 marker，M2 命令只运行 `m1 or m2`；M1 全部测试继续通过；M2 测试覆盖版本、角色授权、状态机、超时、取消、审计、产物下载和越权拒绝；Playwright 能稳定等待队列状态，不依赖固定 sleep；同一 `idempotency-key` 不会创建重复执行。
+**M2 自动化通过标准：** M1 本地 Demo 的功能回归继续通过；M2 测试覆盖登录、会话过期、租户隔离、`SKILL_READ`/`SKILL_EXECUTE`、角色授权、fake Operation 绑定、版本、状态机、超时、取消、审计、产物下载和越权拒绝；Playwright 能稳定等待队列状态，不依赖固定 sleep；同一 `Idempotency-Key` 不会创建重复执行。
 
 ### M2 人工验收脚本
 
-使用 M1 已发布的 `customer-report-search`，再准备一个由 fake Connector 模拟 8 秒延迟和可取消能力的 `customer-report-export` Skill。创建 `system_admin`、`report_viewer`、`report_operator` 三个角色，并分别准备有/无授权的用户。
+使用 M1 已发布的 `customer-report-search`，在租户 A 再准备一个由 fake Connector 模拟 8 秒延迟和可取消能力的 `customer-report-export` Skill。准备租户 A、租户 B，以及 `system_admin`、`report_viewer`、`report_operator` 和无权限用户，所有账号都通过真实登录页进入系统。
 
-1. **创建新版本。** 管理员打开已发布 `customer-report-search`，修改表单字段描述或默认 `limit`，保存后确认产生“草稿 v2”；版本列表中 v1 仍显示“已发布”，v1 的内容和内容 hash 不变。
-2. **查看差异并发布。** 打开 v1/v2 差异，确认只展示业务字段和安全策略摘要，不展示凭据、连接器内部地址或原始输入；发布 v2 后，新执行锁定 v2，历史 v1 执行仍显示 v1。
-3. **按角色授权。** 只给 `report_viewer` 授权 `customer-report-search`，让 viewer 登录 Chat 能看到并执行；撤销授权后刷新，Skill 从可用列表消失，直接猜 ID 返回 403/404；`report_operator` 无授权时不能执行。
-4. **停用和归档。** 管理员停用 Skill 并确认，Chat 列表不再显示且新执行被拒绝；历史执行和审计记录仍可查看。归档后尝试重新打开旧管理链接，页面显示只读终态，不能直接编辑或发布。
-5. **执行长任务。** 启用 `customer-report-export`，Chat 用户填写参数并点击执行，运行卡片依次显示 queued/running/progress；点击“取消”后显示 canceled，fake Connector 收到 cancel token，不能再转为 succeeded。
-6. **验证超时。** 把测试策略设置为 2 秒，执行 8 秒 Operation，页面显示 timed out；审计中有 timeout 事件，错误只显示安全错误码和建议，不显示线程堆栈、连接字符串或内部路径。
-7. **验证审计。** 管理员进入“Skills → 审计”，按操作人、Skill 和时间范围筛选，看到发布、授权、执行、取消、超时事件；把审计写入模拟为失败，新的执行不进入队列，接口返回 request ID 和安全错误。
-8. **验证产物下载。** 让 fake Operation 生成 `customer-report.csv`，成功卡片显示文件名、大小和下载按钮；换成未授权用户、修改 artifact ID、使用过期令牌分别下载，均被拒绝；合法下载后文件内容正确且不包含凭据。
-9. **验证并发和幂等。** 连续点击两次执行或重复发送同一个 `Idempotency-Key`，页面只显示一个 execution；达到并发上限后新任务收到安全的限流提示，不影响普通 Chat。
-10. **验证普通 Chat 边界。** 在普通 Chat 输入“取消刚才的 Skill”只能通过运行卡片按钮执行取消；模型文本不能直接创建新 Skill、改变授权或调用未展示的 Operation。
+1. **登录与租户上下文。** `system_admin` 登录租户 A，确认页面显示当前用户和租户；退出后使用租户 B 账号登录，确认不会看到租户 A 的 Skills、分类、执行或审计记录。未登录、过期会话访问 Skills API 都返回统一 401。
+2. **绑定 fake Operation。** 管理员打开 M1 的 `customer-report-search` 草稿/新版本，确认编辑器现在出现服务端白名单中的 `knowledge-base.search`；选择并保存后，页面显示输入/输出契约。尝试输入未知 Operation key、URL、SQL 或凭据均被服务端拒绝。
+3. **创建新版本。** 管理员修改表单字段描述或默认 `limit`，保存后确认产生“草稿 v2”；版本列表中 v1 仍显示“已发布”，v1 的内容和 content hash 不变。
+4. **查看差异并发布。** 打开 v1/v2 差异，确认只展示业务字段和安全策略摘要，不展示凭据、连接器内部地址或原始输入；发布 v2 后，新执行锁定 v2，历史 v1 执行仍显示 v1。
+5. **验证读取/执行权限和角色授权。** 只给 `report_viewer` 授权 `customer-report-search`，让 viewer 登录 Chat 能看到并执行；撤销 `SKILL_EXECUTE` 或 Skill 角色授权后刷新，Skill 从可用列表消失，直接猜 ID 返回 403/404；只有 `SKILL_READ` 但没有 `SKILL_EXECUTE` 的账号不能执行。
+6. **停用和归档。** 管理员停用 Skill 并确认，Chat 列表不再显示且新执行被拒绝；历史执行和审计记录仍可查看。归档后尝试重新打开旧管理链接，页面显示只读终态，不能直接编辑或发布。
+7. **执行长任务和取消。** 启用 `customer-report-export`，Chat 用户填写参数并点击执行，运行卡片依次显示 queued/running/progress；点击“取消”后显示 canceled，fake Connector 收到 cancel token，不能再转为 succeeded。
+8. **验证超时。** 把测试策略设置为 2 秒，执行 8 秒 Operation，页面显示 timed out；审计中有 timeout 事件，错误只显示安全错误码和建议，不显示线程堆栈、连接字符串或内部路径。
+9. **验证审计和产物下载。** 管理员进入“Skills → 审计”，按操作人、Skill 和时间范围筛选，看到发布、授权、执行、取消、超时事件；让 fake Operation 生成 `customer-report.csv`，合法用户可以下载，换成未授权用户、另一租户、修改 artifact ID 或过期令牌均被拒绝。
+10. **验证 fail closed 和边界。** 把审计写入模拟为失败，新的执行不进入队列，接口返回 request ID 和安全错误；普通 Chat 文本不能创建 Skill、改变授权或调用未展示的 Operation，重复 `Idempotency-Key` 只产生一个 execution。
 
 ### M2 退出条件和演示包
 
-- [ ] M1 演示脚本在 `SKILLS_EXECUTION_DRIVER=celery` 下继续通过。
-- [ ] 版本、归档、超时、取消、审计、产物下载、RBAC 和角色授权均有服务端测试与浏览器测试，且没有仅靠前端隐藏按钮的安全断言。
+- [ ] M1 本地 Demo 的功能回归在 `SKILLS_EXECUTION_DRIVER=celery` 和真实登录链路下继续通过，且客户端调用协议不变。
+- [ ] 基础登录、会话过期、租户隔离、`SKILL_READ` / `SKILL_EXECUTE`、RBAC 和角色授权均有服务端测试与浏览器测试，不能仅靠前端隐藏按钮通过。
+- [ ] 预注册 fake Connector Operation 绑定、版本、归档、超时、取消、审计、产物下载均有自动化测试和人工操作证据。
 - [ ] 人工验收脚本 1–10 全部通过并保存截图/录屏到 `docs/development/v1.1/acceptance/tool-skills/m2/`。
-- [ ] 任何新执行都经过角色、租户、Connector 状态和审计写入检查；历史执行只读且可追溯到锁定版本。
+- [ ] 任何新执行都经过用户、租户、角色、Connector 状态和审计写入检查；历史执行只读且可追溯到锁定版本。
 - [ ] 产物下载不会泄露存储 key、凭据、内部 URL 或其他租户数据；超时和取消不会覆盖已写入终态。
-- [ ] M2 发布标签建立后，才允许开始 M3 的包导入、Connector 管理和生产治理工作。
+- [ ] M2 是第一个允许进入受控 staging/production 的发布标签；在此之前不得把 M1 local demo 部署到共享环境。
 
-**M2 可演示结果：** 同一个 Tool Skill 可以安全地被迭代、授权、运行、取消、审计和下载产物；管理员和 Chat 用户在同一条闭环上看到与其角色相符的能力和状态。
+**M2 可演示结果：** 同一个 Tool Skill 可以在真实登录和租户边界内被授权、迭代、运行、取消、审计和下载产物；未登录、无权限、跨租户或客户端注入都无法绕过服务端控制。
 
 ---
+## Milestone 3：用户个性化、完整 Tool Skill 能力和生产治理
 
-## Milestone 3：完整 Tool Skill 能力和生产治理
+**目标：** 在 M2 的安全运营闭环上补齐用户私有 Skill 个性化能力——收藏、显示名称、默认参数、排序和完整 `SkillPreset`——并增加 Agent Skills 包导入/导出、Connector 管理、多种受控 Operation、健康检查、重试/限流/并发治理、结果脱敏策略和完整发布运行手册。
 
-**目标：** 在 M2 的安全运营闭环上补齐 Agent Skills 包导入/导出、Connector 管理、多种受控 Operation、健康检查、重试/限流/并发治理、结果脱敏策略和完整发布运行手册。
-
-**交付结果：** 管理员可以安全预检并导入符合 Agent Skills 规范的 `SKILL.md` 包，把包中的描述映射到平台白名单 Operation 后生成草稿；可以管理租户连接和健康状态；可以在不开放脚本执行、任意 URL、自由 SQL 或包内凭据的前提下运行更多受控业务动作。
+**交付结果：** 用户可以在不改变系统 Skill 权限和执行定义的前提下收藏已授权 Skill、设置个人显示名称、保存默认参数和调整显示顺序；这些配置只对当前用户、当前租户生效。管理员可以安全预检并导入符合 Agent Skills 规范的 `SKILL.md` 包，把包中的描述映射到平台白名单 Operation 后生成草稿；可以管理租户连接和健康状态；可以在不开放脚本执行、任意 URL、自由 SQL 或包内凭据的前提下运行更多受控业务动作。
 
 ### M3 功能范围
 
 | 领域 | 里程碑三交付内容 | 明确边界 |
 |---|---|---|
-| 包管理 | ZIP 预检、恶意包拒绝、冲突策略、导入草稿、脱敏导出、导入历史 | 永不执行包内 scripts/，不安装依赖，不加载插件 |
+| 用户个性化 | 私有 `SkillPreset`：收藏、显示名称、默认参数、排序；按用户和租户隔离，随已发布版本重新校验 | 不创建共享 Skill，不发布 Preset，不改变 Operation/角色/策略 |
+| 包管理 | ZIP 预检、恶意包拒绝、冲突策略、导入草稿、脱敏导出、导入历史 | 永不执行包内 `scripts/`，不安装依赖，不加载插件 |
 | Connector 管理 | 高权限管理员配置租户连接、健康检查、启停和安全状态 | 凭据只存引用，不在 Skill 或导出包中保存明文 |
 | Operation | `database-readonly.run-template`、`internal-http.call-registered`、`file-processing.transform`、`ticketing.search/create/update` 的服务端注册和契约测试 | 不允许客户端注册 Operation、用户传完整 URL/SQL/HTTP method/header |
 | 运行治理 | 重试策略、速率限制、并发配额、队列优先级、保留期、连接器熔断 | 不做跨 Skill 自主编排，不由模型自动调用 |
 | 结果与审计 | 字段级脱敏、敏感输出检测、审计高级查询、健康/失败指标、告警和运行手册 | 不把原始凭据、traceback 或内部连接信息返回 Chat |
-| 管理后台 | 导入/导出、Connector、Operation 映射、连接健康、运行统计和高级审计 | 仍不开放 Chat 用户创建共享 Skill |
+| 管理后台 | Preset 运营支持、导入/导出、Connector、Operation 映射、连接健康、运行统计和高级审计 | 仍不开放 Chat 用户创建共享 Skill |
 | 用户侧 | Preset 完整管理、重试提示、限流提示、健康状态提示、产物/结果体验收 | Prompt Skill 和自动选择留到后续独立阶段 |
 | 后续增强 | 私有 Skill 草稿和管理员审核流可作为独立 feature flag 设计；只产生用户私有草稿，不改变共享 Tool Skill 的发布权限 | 不作为 M3 基础闭环的完成条件，避免扩大当前权限边界 |
 
 ### M3 技术切片和任务映射
 
-1. **安全导入/导出：Task 6。** 先对 ZIP 条目做路径、符号链接、脚本、可执行文件、密钥模式、压缩炸弹、未知二进制和大小预检，再提取到临时目录；只解析单个 `SKILL.md`、`references/` 和 `assets/`。导入始终创建草稿，管理员必须重新选择平台 Operation、分类和角色授权；导出只包含规范化的 Skill 描述和安全资源。
-2. **Connector 管理：Task 4 的剩余 slice、Task 12。** 增加租户连接配置、加密凭据引用、健康检查和启停 UI；健康检查失败时新执行 fail closed，普通 Chat 不受影响。所有连接器变更写入审计，管理员 UI 只显示安全连接状态。
-3. **多 Operation 契约：Task 4。** 每个 Operation 以 `OperationProtocol` 注册输入/输出 JSON Schema、side-effect 等级、超时上限、取消能力、产物能力和脱敏器；为 readonly database、registered internal HTTP、file processing 和 ticketing Operation 分别编写 fake adapter 和安全测试。
-4. **运行治理：Task 8、Task 9。** 实现按租户/用户/Skill 的并发和速率限制、指数退避重试、不可重试错误分类、连接器熔断、队列优先级和执行/产物保留清理任务；重试必须新建 execution 并保留 `retry_of_execution_id`，不能覆盖原执行。
-5. **管理后台补齐：Task 12。** 完成导入预检报告、冲突选择、Operation 映射、连接器管理、健康检查、导出、审计高级筛选和运行统计；所有危险操作仍使用确认弹窗，浏览器不能直接上传可执行包或调用任意接口。
-6. **Chat 体验补齐：Task 13。** 完成 Preset 收藏/默认参数的完整入口、可重试错误提示、限流/熔断提示、产物过期提示、结果字段脱敏展示和窄屏/键盘无障碍体验。
-7. **发布治理：Task 14。** 生成运行手册、监控指标、告警阈值、备份/恢复和数据保留策略，执行安全攻击测试、全量 E2E、迁移升级/回滚和性能基线；Prompt Skill 不纳入 M3 发布标签。
+1. **私有 SkillPreset：Task 7、Task 13。** 只允许引用 M2 已发布且当前用户有权读取/执行的系统 Skill，保存 `isFavorite`、`displayName`、`defaultInput`、`displayOrder` 四类字段。每次读写先解析当前发布版本并按最新 Schema 校验默认参数；Skill 停用、归档、权限撤销或版本变更时重新校验并标记失效，不能静默提交旧字段。查询必须同时过滤 `tenant_id` 和 `user_id`，不允许通过 Preset 改变 Connector、Operation、角色、URL、SQL、凭据或执行策略。
+2. **安全导入/导出：Task 6。** 先对 ZIP 条目做路径、符号链接、脚本、可执行文件、密钥模式、压缩炸弹、未知二进制和大小预检，再提取到临时目录；只解析单个 `SKILL.md`、`references/` 和 `assets/`。导入始终创建草稿，管理员必须重新选择平台 Operation、分类和角色授权；导出只包含规范化的 Skill 描述和安全资源。
+3. **Connector 管理：Task 4 的剩余 slice、Task 12。** 增加租户连接配置、加密凭据引用、健康检查和启停 UI；健康检查失败时新执行 fail closed，普通 Chat 不受影响。所有连接器变更写入审计，管理员 UI 只显示安全连接状态。
+4. **多 Operation 契约：Task 4。** 每个 Operation 以 `OperationProtocol` 注册输入/输出 JSON Schema、side-effect 等级、超时上限、取消能力、产物能力和脱敏器；为 readonly database、registered internal HTTP、file processing 和 ticketing Operation 分别编写 fake adapter 和安全测试。
+5. **运行治理：Task 8、Task 9。** 实现按租户/用户/Skill 的并发和速率限制、指数退避重试、不可重试错误分类、连接器熔断、队列优先级和执行/产物保留清理任务；重试必须新建 execution 并保留 `retry_of_execution_id`，不能覆盖原执行。
+6. **管理后台补齐：Task 10、Task 11、Task 12。** 完成 Preset 运营只读统计、导入预检报告、冲突选择、Operation 映射、连接器管理、健康检查、导出、审计高级筛选和运行统计；所有危险操作仍使用确认弹窗，浏览器不能直接上传可执行包或调用任意接口。
+7. **Chat 体验补齐：Task 13。** 完成收藏、显示名称、默认参数、排序的完整入口；增加可重试错误提示、限流/熔断提示、产物过期提示、结果字段脱敏展示和窄屏/键盘无障碍体验。Preset 保存失败时不得影响原有 Skill 执行，旧 Preset 也不得绕过 M2 的权限校验。
+8. **发布治理：Task 14。** 生成运行手册、监控指标、告警阈值、备份/恢复和数据保留策略，执行安全攻击测试、全量 E2E、迁移升级/回滚和性能基线；Prompt Skill 不纳入 M3 发布标签。
 
 ### M3 自动化验证
 
 ```powershell
 $env:SKILLS_M1_CORE_ENABLED = "true"
+$env:SKILLS_M1_LOCAL_DEMO_MODE = "false"
 $env:SKILLS_M2_OPERATIONS_ENABLED = "true"
 $env:SKILLS_M3_IMPORTS_ENABLED = "true"
 $env:SKILLS_EXECUTION_DRIVER = "celery"
-$env:SKILLS_FIXED_DEMO_ROLE_MODE = "false"
 
-pytest server/tests/test_skill_contracts.py `
-  server/tests/test_skill_models.py `
-  server/tests/test_skill_permissions.py `
-  server/tests/test_skill_connectors.py `
-  server/tests/test_skill_operations.py `
-  server/tests/test_skills_api.py `
-  server/tests/test_skill_import.py `
-  server/tests/test_skill_preset.py `
-  server/tests/test_skill_execution.py `
-  server/tests/test_skill_sse.py `
-  server/tests/test_skill_chat_api.py `
-  server/tests/security/test_skill_security.py `
-  server/tests/e2e/test_m1_tool_skill_closed_loop.py `
-  server/tests/e2e/test_m2_tool_skill_operational_loop.py `
-  server/tests/e2e/test_m3_tool_skill_complete.py `
-  server/tests/test_skill_release_acceptance.py -q
+pytest server/tests/test_skill_contracts.py -q
+pytest server/tests/test_skill_models.py -m "m1 or m2 or m3" -q
+pytest server/tests/test_skill_permissions.py -m "m2 or m3" -q
+pytest server/tests/test_skill_connectors.py -m "m2 or m3" -q
+pytest server/tests/test_skill_operations.py -m "m2 or m3" -q
+pytest server/tests/test_skills_api.py -m "m1 or m2 or m3" -q
+pytest server/tests/test_skill_import.py -m m3 -q
+pytest server/tests/test_skill_preset.py -m m3 -q
+pytest server/tests/test_skill_execution.py -m "m1 or m2 or m3" -q
+pytest server/tests/test_skill_sse.py -m "m1 or m2 or m3" -q
+pytest server/tests/test_skill_chat_api.py -m "m1 or m2 or m3" -q
+pytest server/tests/security/test_skill_security.py -m "m1 or m2 or m3" -q
+pytest server/tests/e2e/test_m1_tool_skill_closed_loop.py -q
+pytest server/tests/e2e/test_m2_tool_skill_operational_loop.py -q
+pytest server/tests/e2e/test_m3_tool_skill_complete.py -q
+pytest server/tests/test_skill_release_acceptance.py -q
 
 cd web/admin
 npm test -- --run src/features/skills src/features/chat
@@ -313,74 +314,75 @@ pytest web/admin/tests/t21_tool_skill_chat_playwright.py -m "m1 or m2 or m3" -q
 git diff --check
 ```
 
-**M3 自动化通过标准：** 包安全测试在“拒绝前不提取、不执行、不写入业务数据”条件下通过；所有 Operation 只通过服务端 registry 调用；全量浏览器场景、类型检查、构建、迁移和性能基线通过；任意安全测试失败都阻止发布标签。
+**M3 自动化通过标准：** Preset 隐私/版本失效测试、包安全测试、Connector registry、全量浏览器场景、类型检查、构建、迁移和性能基线全部通过；包安全测试必须证明“拒绝前不提取、不执行、不写入业务数据”；任何 Operation 都只能通过服务端 registry 调用，任意安全测试失败都阻止发布标签。
 
 ### M3 人工验收脚本
 
-1. **导入合法 Agent Skills 包。** 管理员打开“导入”，上传 `customer-report-export` fixture ZIP，先看到预检报告和 manifest 摘要；选择当前租户的分类和 `file-processing.transform` Operation 后应用，列表出现“未发布草稿”，不会直接发布。
-2. **拒绝恶意包。** 依次上传包含 `scripts/run.py`、路径穿越、符号链接、`.env`、私钥文本、超大压缩比和未知二进制的测试包；每次都在解压前得到阻断报告，服务器没有脚本进程、临时业务 Skill 或敏感日志。
-3. **冲突处理。** 再导入同一 key，选择“新建 Skill”“新建草稿版本”“取消”分别验证结果；不选择策略时不能覆盖已有 Skill。
-4. **连接器健康。** 管理员配置 fake 租户连接，执行健康检查，状态从 healthy 切换为 unavailable；健康失败期间新执行被安全拒绝，恢复后可重新执行，普通 Chat 文本正常工作。
-5. **受控内部 HTTP。** 选择 registered internal HTTP Operation，Skill 表单只能选择服务端注册的 service key 和 operation name；尝试输入 loopback、metadata 地址、任意 method/header 被服务端拒绝，无法形成 SSRF。
-6. **只读数据库 Operation。** 选择预注册 query template，表单只出现模板允许的参数；提交 SQL、注释、union、模板名枚举字段均被拒绝，数据库 adapter 没有执行调用。
-7. **结果与重试。** 触发可重试的 fake connector 错误，Chat 显示安全重试按钮；重试产生新的 execution 并链接原 execution，超过租户/Skill 配额后显示限流提示。
-8. **高级审计和运行指标。** 在审计页筛选导入、连接器健康、重试、限流、结果脱敏事件；在运行统计中看到成功率、超时率、队列等待时间和产物过期清理，不显示秘密或内部路径。
-9. **Preset 与响应式体验。** 用户收藏多个 Skill、设置默认参数和排序，在桌面/窄屏/键盘操作下均可稳定使用；默认参数失效时页面提示重新确认，而不是静默提交旧字段。
-10. **发布和恢复。** 按运行手册执行迁移升级、备份恢复、功能开关关闭和重新开启；关闭导入开关时 API 与 UI 都拒绝导入，恢复后不丢失 M1/M2 已发布 Skill。
+1. **管理私有个性化入口。** 用 M2 已授权的 Chat 用户登录，打开 Skills 面板，确认每个个性化操作都只作用于当前用户；管理员后台不能替用户创建 Preset，也不能把 Preset 发布为共享 Skill。
+2. **收藏和显示名称。** 用户收藏 `customer-report-search`，设置显示名称“我的客户查询”；刷新、重新登录后名称和收藏状态仍在，另一个同租户用户看不到该变化，管理员也不能在系统 Skill 名称上看到用户私有覆盖。
+3. **默认参数。** 用户保存 `limit=10` 和其他合法字段为默认参数；重新打开 Skill 表单时自动填充。尝试保存 `connectorKey`、`operationKey`、`roleIds`、URL、SQL、credential 等字段，服务端拒绝且原 Preset 不被破坏。
+4. **排序。** 用户收藏多个 Skill 并设置排序，桌面和窄屏下 Skills 面板都按该用户顺序展示；删除排序或取消收藏后恢复系统默认顺序。
+5. **版本失效处理。** 管理员发布新版本并删除/修改一个输入字段，用户再次打开 Skill 时默认参数被重新校验；不兼容字段被标记为失效并要求用户确认，不能静默执行旧输入。
+6. **导入合法 Agent Skills 包。** 管理员打开“导入”，上传 `customer-report-export` fixture ZIP，先看到预检报告和 manifest 摘要；选择当前租户的分类和受控 Operation 后应用，列表出现“未发布草稿”，不会直接发布。
+7. **拒绝恶意包。** 依次上传包含 `scripts/run.py`、路径穿越、符号链接、`.env`、私钥文本、超大压缩比和未知二进制的测试包；每次都在解压前得到阻断报告，服务器没有脚本进程、临时业务 Skill 或敏感日志。
+8. **冲突处理和连接器健康。** 再导入同一 key，选择“新建 Skill”“新建草稿版本”“取消”分别验证结果；配置 fake 租户连接并执行健康检查，状态切换为 unavailable 时新执行被安全拒绝，恢复后可重新执行，普通 Chat 文本正常工作。
+9. **受控 Operation、结果与重试。** 选择 registered internal HTTP、只读数据库或 file-processing fake Operation，表单只能选择服务端注册的 service/template key；触发可重试错误时，Chat 显示安全重试按钮，重试产生新的 execution 并链接原 execution，超过配额后显示限流提示。
+10. **高级审计和发布恢复。** 在审计页筛选导入、连接器健康、重试、限流、Preset 变更和结果脱敏事件；按运行手册执行迁移升级、备份恢复、功能开关关闭和重新开启，确认关闭导入开关时 API/UI 都拒绝导入且不丢失 M1/M2 已发布 Skill。
 
 ### M3 退出条件和演示包
 
+- [ ] 收藏、显示名称、默认参数、排序和私有 `SkillPreset` 均有服务端、前端、隐私和版本失效测试，并完成 1–5 步人工验收。
 - [ ] 合法包导入、恶意包拒绝、冲突处理、脱敏导出、Connector 健康和多 Operation 均有自动化与人工验收记录。
 - [ ] 全量安全测试确认没有脚本执行、任意 URL、自由 SQL、包内凭据、跨租户访问、未授权下载或模型自动调用路径。
 - [ ] 运行手册、监控/告警、数据保留、备份恢复和故障处理文档已提交到 `docs/development/v1.1/skills/`。
-- [ ] M1/M2 的数据库、API、浏览器用例在 M3 配置下继续通过，且关闭 M3 开关不会影响已发布 Skill 的读取和执行。
+- [ ] M1/M2 的数据库、API、浏览器用例在 M3 配置下继续通过，且关闭 M3 开关不会影响已发布 Skill 的读取、执行和已有用户 Preset 的安全读取。
 - [ ] M3 标签建立后，Prompt Skill 另行立项，不把 Prompt Skill 混入本 Tool Skill 交付。
 
-**M3 可演示结果：** 管理员可以从安全的 Agent Skills 包得到一个可审查草稿，将其映射到平台受控 Operation 后发布；系统能够在连接器异常、恶意包、权限变化和资源压力下保持可解释、可审计、fail closed。
+**M3 可演示结果：** 用户可以安全地个性化自己有权限使用的 Skill；管理员可以从安全的 Agent Skills 包得到一个可审查草稿，将其映射到平台受控 Operation 后发布；系统能够在连接器异常、恶意包、权限变化和资源压力下保持可解释、可审计、fail closed。
 
 ---
-
 ## Milestone Acceptance Matrix
 
-| 验收项 | M1 最小闭环 | M2 安全运营闭环 | M3 完整生产能力 |
+| 验收项 | M1 本地 Demo 闭环 | M2 基础安全与受控执行 | M3 个性化与生产治理 |
 |---|---|---|---|
-| 管理员登录与权限 | 管理员可管理；员工管理 API 403 | 角色/权限矩阵可配置并审计 | 高权限 Connector/导入/审计分层 |
-| 分类 | 新增、编辑、停用、Chat 浏览 | 停用阻断新执行并保留历史 | 排序、统计和运营筛选 |
+| 管理员身份 | 仅 loopback 的本地演示身份；不是真实登录 | 基础登录、会话过期、`SKILL_MANAGE`/分类权限校验 | 高权限 Connector/导入/审计分层 |
+| 租户与权限 | 单一 local demo namespace；不宣称租户隔离 | 真实租户隔离、`SKILL_READ` / `SKILL_EXECUTE`、角色授权和服务端 RBAC | 更细的运营角色、审计和连接器治理 |
+| 分类 | 新增、编辑、停用、Chat 浏览 | 按租户隔离，停用阻断新执行并保留历史 | 排序、统计和运营筛选 |
 | Tool Skill | TOOL 创建、编辑、校验、首次发布 | 版本、差异、回滚新版本、归档 | 导入草稿、脱敏导出、完整治理 |
-| Operation | 一个服务端 fake Operation | 版本锁定、超时、取消、状态机 | 多 Operation、健康检查、熔断 |
-| Chat | 分类浏览、手动选择、结构化表单、点击执行 | 进度、取消、终态、产物下载 | 重试、限流提示、完整 Preset 体验 |
-| 安全 | 请求字段白名单、租户隔离、固定角色检查 | RBAC、审计 fail closed、二次下载鉴权 | 包扫描、SSRF/SQL/资源耗尽全量测试 |
+| Operation | 固定 `customer_report_search` Demo Handler；不提供 Connector 绑定 | 绑定服务端预注册 `knowledge-base.search` fake Operation；契约、超时、取消 | 多 Operation、连接健康、熔断和生产连接 |
+| Chat | 分类浏览、手动选择、结构化表单、点击执行、结果卡片 | 登录后按租户/权限显示，进度、取消、终态、产物下载 | 收藏、显示名称、默认参数、排序、重试和限流提示 |
+| 用户个性化 | 不保存用户个性化数据；只显示 Schema 默认值 | 不提供 `SkillPreset` | 私有 `SkillPreset`：收藏、显示名称、默认参数、排序 |
+| 安全 | local demo flag、loopback、请求字段白名单、固定 Handler | 登录/租户/RBAC、审计 fail closed、二次下载鉴权 | 包扫描、SSRF/SQL/资源耗尽全量测试 |
 | 自动化 | `test_m1...` + Playwright m1 | `test_m2...` + Playwright m1/m2 | `test_m3...` + 全量安全/E2E |
 | 人工操作 | 10 步 M1 脚本 | 10 步 M2 脚本 | 10 步 M3 脚本 |
-| 退出门槛 | 可重复演示且无未授权调用 | 可运营、可取消、可审计、可下载 | 可导入、可扩展、可上线治理 |
+| 退出门槛 | 仅可重复本地演示，不能部署共享环境 | 可登录、可隔离、可授权、可取消、可审计、可下载 | 可个性化、可导入、可扩展、可上线治理 |
 
 ## Milestone-to-Task Mapping
 
-| 现有任务 | M1：最小闭环 | M2：安全运营闭环 | M3：完整能力/生产治理 |
+| 现有任务 | M1：本地 Demo 闭环 | M2：基础安全与受控执行 | M3：个性化/生产治理 |
 |---|---|---|---|
-| Task 1 合同与 fixture | 受限 Tool Schema、运行请求、M1 fixture | 增加版本/取消/产物字段校验 | 增加导入元数据和多 Operation 契约校验 |
-| Task 2 持久化 | 创建全部核心表和 `0009_tool_skills.py`，启用 M1 使用的字段 | 增加状态/取消/审计/产物索引和约束，补数据回填 | 增加导入历史、连接器健康、保留清理字段 |
-| Task 3 权限种子 | 管理/分类/读取/执行权限，固定 EMPLOYEE 演示授权 | 可配置角色权限、角色 grant CRUD、授权变更审计 | 高权限 Connector/导入/审计分层和运营角色 |
-| Task 4 Connector | 只注册 `knowledge-base.search` fake Operation | 接入 Operation 超时/取消/产物能力 | 连接器 CRUD、健康检查、readonly DB/registered HTTP/file/ticketing |
-| Task 5 管理域 | 分类 CRUD、Skill CRUD、草稿、校验、首次发布 | 版本历史、差异、角色授权、停用/归档/回滚 | 导入映射、健康状态、运行统计和高级生命周期 |
+| Task 1 合同与 fixture | 受限 Tool Schema、运行请求、M1 fixture | 增加登录/租户/版本/取消/产物字段校验 | 增加导入元数据、Preset 和多 Operation 契约校验 |
+| Task 2 持久化 | 分类、Skill、草稿/发布指针、执行和最小事件；可预建未来表但不启用 | 真实租户/角色 grant、Connector/Operation、版本、审计和产物约束 | Preset、导入历史、健康和保留清理字段 |
+| Task 3 权限种子 | 不实现真实权限；只实现 local demo identity/gate 所需测试夹具 | 基础登录配套的权限种子、`SKILL_READ`/`SKILL_EXECUTE`、角色 grant CRUD 和授权审计 | 高权限 Connector/导入/审计运营角色 |
+| Task 4 Connector | 不实现 Connector registry；固定 Demo Handler 在执行层内置 | 预注册 `knowledge-base.search` fake Operation、Skill 绑定、契约、超时/取消/产物能力 | Connector CRUD、健康检查、readonly DB/registered HTTP/file/ticketing |
+| Task 5 管理域 | 分类 CRUD、Skill CRUD、草稿、校验、首次发布；local demo gate | 登录/租户/RBAC、版本历史、差异、角色授权、停用/归档/回滚 | 导入映射、健康状态、运行统计和高级生命周期 |
 | Task 6 包导入导出 | 不执行；只保留 schema/feature flag | 不开放页面和路由 | ZIP 预检、冲突处理、导入草稿、脱敏导出 |
-| Task 7 SkillPreset | 收藏、显示名称、排序、默认参数 | 校验当前版本并处理版本变更/失效 | 完整 Preset 体验、排序和响应式入口 |
-| Task 8 执行引擎 | Inline driver、短任务、最小事件、结果脱敏 | Celery、状态机、超时、取消、审计、产物、幂等 | 重试、配额、限流、熔断、清理和性能治理 |
-| Task 9 Chat 后端/SSE | 可用列表、手动执行、快速 SSE/查询结果 | 长任务 SSE、进度、取消、终态和产物事件 | 重试/限流/健康提示和运行指标 |
-| Task 10 管理列表/分类 UI | Skills 列表、分类管理、M1 过滤 | 版本/授权/审计入口和生命周期动作 | 导入/连接器/统计/高级筛选 |
-| Task 11 Tool Skill 编辑器 | 基本信息、Operation、Schema、校验、发布 | 版本差异、角色授权、回滚/停用/归档确认 | 导入映射、安全报告和连接健康提示 |
-| Task 12 管理扩展 UI | 不开放导入/Connector/审计页面 | 审计列表、产物/生命周期相关管理 | 导入导出、Connector、健康、审计高级查询 |
-| Task 13 Chat UI | 分类浏览、手动选择、表单、执行、Preset | 进度、取消、超时、错误、产物下载 | 重试、限流、脱敏展示、完整响应式体验 |
-| Task 14 集成发布 | M1 acceptance matrix 和 m1 浏览器脚本 | M2 RBAC/长任务/审计/产物验收 | 全量安全、性能、运行手册、M3 发布 |
+| Task 7 SkillPreset | 不实现 | 不实现 | 收藏、显示名称、排序、默认参数、版本失效和私有隔离 |
+| Task 8 执行引擎 | Inline Demo driver、短任务、最小事件、结果脱敏 | Celery、状态机、超时、取消、审计、产物、幂等和权限/租户快照 | 重试、配额、限流、熔断、清理和性能治理 |
+| Task 9 Chat 后端/SSE | local demo 可用列表、手动执行、快速 SSE/查询结果 | 登录、租户、`SKILL_READ`/`SKILL_EXECUTE`、长任务 SSE、进度、取消、终态和产物事件 | Preset 合并、重试/限流/健康提示和运行指标 |
+| Task 10 管理列表/分类 UI | Skills 列表、分类管理、M1 local demo 入口 | 登录态、租户上下文、版本/授权/审计入口和生命周期动作 | Preset 运营、导入/连接器/统计/高级筛选 |
+| Task 11 Tool Skill 编辑器 | 基本信息、固定 Demo Handler 提示、Schema、校验、发布 | fake Operation 选择、版本差异、角色授权、回滚/停用/归档确认 | 导入映射、安全报告和连接健康提示 |
+| Task 12 管理扩展 UI | 不开放导入/Connector/审计页面 | 审计列表、产物/生命周期相关管理和 Operation 绑定 | 导入导出、Connector、健康、审计高级查询和 Preset 统计 |
+| Task 13 Chat UI | 分类浏览、手动选择、表单、执行、结果卡；无个性化控件 | 登录后权限过滤、进度、取消、超时、错误、产物下载 | 收藏、显示名称、默认参数、排序、重试、限流和响应式体验 |
+| Task 14 集成发布 | M1 acceptance matrix 和 local demo 浏览器脚本 | M2 登录/租户/RBAC/Connector/长任务/审计/产物验收 | 全量安全、Preset、性能、运行手册和 M3 发布 |
 
 ## 里程碑实施顺序和分支策略
 
-1. **M1 实施顺序：** Task 1 → Task 2 → Task 3 → Task 4（fake slice）→ Task 5（management slice）→ Task 7 → Task 8（inline slice）→ Task 9（Chat backend slice）→ Task 10/11 → Task 13（Chat UI slice）→ Task 14（M1 gate）。每完成一个任务执行该任务已有的 focused test 和独立 commit，不跨越 M1 范围实现导入或完整 RBAC UI。
-2. **M2 实施顺序：** 以 M1 发布标签为基线，先完成 Task 3/5 的 RBAC 与版本，再完成 Task 8 的 Celery/状态机，随后 Task 9 的 SSE、Task 11/12 的后台治理页面、Task 13 的运行卡，最后 Task 14 M2 gate。任何 M2 任务都必须先验证 M1 的 e2e 仍然通过。
-3. **M3 实施顺序：** 以 M2 发布标签为基线，先完成 Task 6 的 ZIP 安全导入导出，再完成 Task 4/12 的 Connector 管理和多 Operation，接着完成 Task 8/9 的运行治理，最后 Task 13/14 的体验、监控、运行手册和全量安全验收。
-4. **分支与回滚：** 每个里程碑从上一个发布标签创建 `codex/tool-skills-m1`、`codex/tool-skills-m2`、`codex/tool-skills-m3` 分支；上线前在 staging 执行同一套迁移和验收命令。若 M2/M3 开关关闭，M1 已发布 Skill 的读/执行接口必须保持可用；若迁移回滚失败，停止发布，不执行手工删表或跨版本强制修改。
+1. **M1 实施顺序：** Task 1 → Task 2 → Task 5（management slice）→ Task 8（inline-demo slice）→ Task 9（Chat backend slice）→ Task 10/11（无 Operation 绑定）→ Task 13（无 Preset 的 Chat UI slice）→ Task 14（M1 gate）。Task 3、Task 4、Task 7 的真实能力不得提前进入 M1。
+2. **M2 实施顺序：** 以 M1 发布标签为基线，先完成 Task 3 的登录/权限种子和 Task 5/9 的租户/RBAC，再完成 Task 4 的 fake Connector Operation 与 Task 11 的绑定 UI；随后完成 Task 5 的版本生命周期、Task 8 的 Celery/状态机、Task 9 的 SSE、Task 10/12 的治理页面、Task 13 的运行卡，最后 Task 14 M2 gate。任何 M2 任务都必须先验证 M1 的闭环仍然通过。
+3. **M3 实施顺序：** 以 M2 发布标签为基线，先完成 Task 7/13 的私有 Preset（收藏、默认参数、显示名称、排序），再完成 Task 6 的 ZIP 安全导入导出和 Task 4/12 的 Connector 管理、多 Operation，接着完成 Task 8/9 的运行治理，最后 Task 13/14 的体验、监控、运行手册和全量安全验收。
+4. **分支与回滚：** 每个里程碑从上一个发布标签创建 `codex/tool-skills-m1`、`codex/tool-skills-m2`、`codex/tool-skills-m3` 分支；M1 只在本地运行，M2 起才在 staging 执行同一套登录、迁移和验收命令。若 M2/M3 开关关闭，已发布 Skill 的服务端能力必须按阶段返回明确的 `FEATURE_DISABLED`，不能回退到未认证或未隔离执行；若迁移回滚失败，停止发布，不执行手工删表或跨版本强制修改。
 5. **完成标准：** 里程碑完成不是“代码合并”而是对应退出条件、自动化 suite、人工脚本、迁移验证和安全负向测试全部有结果。任何一项缺失都保持当前里程碑状态，不进入下一个里程碑。
-
 ## File Structure
 
 ### 后端新增文件
@@ -516,7 +518,7 @@ The implementation must keep the existing module boundaries and add only the fol
 | `web/admin/src/features/skills/utils/skillPackagePreview.ts` | Safe client-side preview helpers; never parses or executes package scripts. |
 | `web/admin/tests/t20_tool_skill_admin_playwright.py` | Browser acceptance tests for the complete administrator workflow. |
 | `web/admin/tests/t21_tool_skill_chat_playwright.py` | Browser acceptance tests for manual Chat execution and result cards. |
-| `server/tests/e2e/test_m1_tool_skill_closed_loop.py` | M1 服务端端到端闭环：管理员创建/发布、员工浏览/执行、Preset 和安全负向请求。 |
+| `server/tests/e2e/test_m1_tool_skill_closed_loop.py` | M1 服务端端到端闭环：管理员创建/发布、Demo 用户浏览/执行和 local-demo 安全负向请求。 |
 | `server/tests/e2e/test_m2_tool_skill_operational_loop.py` | M2 服务端端到端闭环：版本、RBAC、生命周期、异步执行、审计、取消和产物下载。 |
 | `server/tests/e2e/test_m3_tool_skill_complete.py` | M3 服务端端到端闭环：导入/导出、Connector 健康、多 Operation、限流和生产治理。 |
 
@@ -647,7 +649,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
 - [ ] **Step 1: Write failing model and migration tests.**
 
-  Cover the tenant boundary, uniqueness, lifecycle fields, and version immutability:
+  Cover phase boundaries, uniqueness, lifecycle fields, and version immutability. M1 uses one local demo namespace; tenant/role/preset isolation tests are marked m2 or m3 and must not be used to claim M1 security:
 
   ```python
   def test_skill_key_is_unique_per_tenant(db, tenant_a, tenant_b):
@@ -656,7 +658,8 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
       with pytest.raises(IntegrityError):
           create_skill(db, tenant_a, key="customer-report-export")
 
-  def test_preset_and_grant_are_tenant_scoped(db):
+  @pytest.mark.m2
+  def test_grant_and_execution_snapshot_are_tenant_scoped(db):
       assert SkillPreset.__table__.c.user_id is not None
       assert SkillRoleGrant.__table__.c.role_id is not None
       assert SkillExecution.__table__.c.requested_role_snapshot is not None
@@ -685,16 +688,16 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
   - `SkillCategory`: `tenant_id`, `key`, `name`, `description`, `icon`, `display_order`, `status`, timestamps; unique `(tenant_id, key)`.
   - `Skill`: `tenant_id`, `category_id`, `key`, `name`, `description`, `icon`, `skill_type`, `status`, `current_published_version_id`, `created_by_user_id`, `optimistic_lock`; unique `(tenant_id, key)`.
-  - `SkillVersion`: `skill_id`, `version_number`, `package_manifest`, `input_schema`, `presentation_config`, `execution_policy`, `connector_operation_id`, `status`, `created_by_user_id`, `published_at`, `published_by_user_id`, `content_hash`; unique `(skill_id, version_number)`.
-  - `SkillRoleGrant`: `skill_version_id`, `role_id`, `can_execute`; unique `(skill_version_id, role_id)`.
-  - `SkillPreset`: `tenant_id`, `user_id`, `skill_id`, `display_name`, `is_favorite`, `default_input`, `display_order`; unique `(user_id, skill_id)` and no role/connector fields.
-  - `Connector`: platform key, name, type, status, connector version, health status, timestamps.
-  - `ConnectorOperation`: connector ID, key, display name, input/output contracts, side-effect level, timeout ceiling, allowed tenant config, status; unique `(connector_id, key)`.
-  - `ConnectorConnection`: tenant ID, connector ID, safe display name, encrypted secret reference, non-secret config, status, last health check; unique `(tenant_id, connector_id)`.
-  - `SkillExecution`: tenant/skill/version/session/message references, requester, role snapshot, status, timestamps, duration, request ID, operation snapshot, redacted input/result, safe error fields, retry/cancel references.
+  - `SkillVersion`: `skill_id`, `version_number`, `package_manifest`, `input_schema`, `presentation_config`, `execution_policy`, `connector_operation_id`, `demo_handler_key`, `status`, `created_by_user_id`, `published_at`, `published_by_user_id`, `content_hash`; unique `(skill_id, version_number)`. M1 fills only the fixed `demo_handler_key`; M2 fills `connector_operation_id` after server-side registry resolution.
+  - `SkillRoleGrant`: `skill_version_id`, `role_id`, `can_execute`; unique `(skill_version_id, role_id)`. Table/service are M2-only.
+  - `SkillPreset`: `tenant_id`, `user_id`, `skill_id`, `display_name`, `is_favorite`, `default_input`, `display_order`; unique `(user_id, skill_id)` and no role/connector fields. Table/API are M3-only.
+  - `Connector`: platform key, name, type, status, connector version, health status, timestamps. Registry/connection behavior is M2/M3-only.
+  - `ConnectorOperation`: connector ID, key, display name, input/output contracts, side-effect level, timeout ceiling, allowed tenant config, status; unique `(connector_id, key)`. Binding is M2-only.
+  - `ConnectorConnection`: tenant ID, connector ID, safe display name, encrypted secret reference, non-secret config, status, last health check; unique `(tenant_id, connector_id)`. Tenant connection enforcement is M2-only.
+  - `SkillExecution`: tenant/skill/version/session/message references, requester, role snapshot, status, timestamps, duration, request ID, operation snapshot, redacted input/result, safe error fields, retry/cancel references. M1 uses a fixed local namespace; M2 starts populating authenticated tenant/role snapshots.
   - `SkillExecutionEvent`: execution ID, sequence, event name, safe payload, created timestamp; unique `(execution_id, sequence)`.
-  - `SkillArtifact`: execution ID, storage key, safe filename, MIME, size, checksum, expiry, classification, download policy.
-  - `SkillPackageImport`: tenant/uploader, safe filename, package hash, manifest summary, status, validation report, conflict resolution, created skill/version references.
+  - `SkillArtifact`: execution ID, storage key, safe filename, MIME, size, checksum, expiry, classification, download policy. M2-only for user downloads.
+  - `SkillPackageImport`: tenant/uploader, safe filename, package hash, manifest summary, status, validation report, conflict resolution, created skill/version references. M3-only.
 
   Register all new model modules as plain imports in `server/app/db/base.py`, matching the repository's circular-import-safe pattern.
 
@@ -720,7 +723,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
   git commit -m "feat: persist tool skills and executions"
   ```
 
-### Task 3: Add Skill permissions and idempotent seed upgrades
+### Task 3: Add Skill permissions and idempotent seed upgrades (M2)
 
 **Files:**
 - Modify: `server/app/services/seed_service.py`
@@ -775,7 +778,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
   pytest server/tests/test_skill_permissions.py server/tests/test_auth_rbac.py -q
   ```
 
-  Expected: PASS, with no duplicate rows and no regression in existing permission checks.
+  Expected: PASS, with no duplicate rows and no regression in existing permission checks. These tests are the M2 gate for real login/tenant context and `SKILL_READ` / `SKILL_EXECUTE`; they must not be included in the M1 success claim.
 
 - [ ] **Step 5: Commit the permission slice.**
 
@@ -784,7 +787,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
   git commit -m "feat: seed tool skill permissions"
   ```
 
-### Task 4: Register controlled Connector Operations and tenant connections
+### Task 4: Register controlled Connector Operations and tenant connections (M2/M3)
 
 **Files:**
 - Create: `server/app/integrations/skills/protocols.py`
@@ -862,7 +865,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
 - [ ] **Step 4: Implement and test each first-phase operation boundary.**
 
-  - `knowledge-base.search`: accept query, optional category/space identifiers, and bounded page size; derive accessible knowledge scope from `AccessContext`, never from an untrusted tenant/user field.
+  - `knowledge-base.search` (M2 fake Operation): accept query, optional category/space identifiers, and bounded page size; derive accessible knowledge scope from `AccessContext`, never from an untrusted tenant/user field.
   - `database-readonly.run-template`: accept only a registered `template_key` and typed parameters; require the operation's server-side template to be marked read-only; reject SQL, table names, connection strings, and arbitrary parameter names.
   - `internal-http.call-registered`: accept an operation-specific body/path-template parameter object; resolve host, method, path, and headers from the registered operation; reject URL, host, method, proxy, and raw header inputs; enforce HTTPS/allowlisted service and response-size limits.
   - `file-processing.transform`: accept a platform file reference and a registered transformation; verify the current user can read the source artifact; enforce extension, MIME, size, decompression, and output limits.
@@ -898,7 +901,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
   git commit -m "feat: add controlled skill connector registry"
   ```
 
-### Task 5: Implement categories, Skill CRUD, versions, role grants, and lifecycle APIs
+### Task 5: Implement categories, Skill CRUD, versions, role grants, and lifecycle APIs (M1/M2)
 
 **Files:**
 - Create: `server/app/repositories/skill_repo.py`
@@ -913,7 +916,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
 - [ ] **Step 1: Write failing service/API tests for the lifecycle.**
 
-  Use seeded admin, employee, second-tenant, active/inactive category, role, and connector fixtures. Cover these cases:
+  Use milestone-specific fixtures. M1 uses `local_demo_admin`/`local_demo_user` and one local namespace; M2 adds authenticated admin/employee, second tenant, active/inactive category, role and fake Connector fixtures. Cover the matching cases:
 
   ```python
   def test_admin_creates_tool_skill_draft(client, admin_token, active_category, operation):
@@ -966,7 +969,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
   | `DELETE` | `/skill-categories/{category_id}` | `SKILL_CATEGORY_MANAGE` | Only when no Skill references it. |
   | `GET` | `/skill-categories/available` | `SKILL_READ` | Active categories with only currently executable Skill counts. |
 
-  Every repository query includes `tenant_id == context.tenant_id`. Category deletion returns a conflict when any Skill exists; disabling does not mutate Skill status.
+  In M1, repositories are reachable only through the loopback local-demo guard and use the single demo namespace. In M2, every repository query must include `tenant_id == context.tenant_id`, and every route must enforce the current user permission. Category deletion returns a conflict when any Skill exists; disabling does not mutate Skill status.
 
 - [ ] **Step 4: Implement Skill and version service invariants.**
 
@@ -988,11 +991,11 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
   | `POST` | `/skills/{skill_id}/archive` | `SKILL_MANAGE` | Terminal archive. |
   | `POST` | `/skills/{skill_id}/versions/{version_id}/rollback` | `SKILL_MANAGE` | Create/publish a new version copied from the selected historical version. |
 
-  A Skill create/edit request accepts `skillType` only when it is `TOOL`; return `SKILL_TYPE_NOT_AVAILABLE` for `PROMPT` in this phase. Publishing requires: active category, active Skill, exactly one active Connector Operation, valid input schema, policy within operation ceilings, at least one role grant, no unresolved import mapping, and a successful audit insert in the same transaction. Publishing moves the old version to `SUPERSEDED`; it never updates a published row in place.
+  A Skill create/edit request accepts `skillType` only when it is `TOOL`; return `SKILL_TYPE_NOT_AVAILABLE` for `PROMPT` in this phase. In M1, publishing requires the fixed `customer_report_search` Demo Handler, an active category, a valid input schema and local-demo gate; it does not require a role grant or Connector Operation. In M2, publishing additionally requires an active Skill, exactly one active pre-registered Connector Operation, policy within operation ceilings, at least one current-tenant role grant, no unresolved import mapping, and a successful audit insert in the same transaction. Publishing moves the old version to `SUPERSEDED`; it never updates a published row in place.
 
 - [ ] **Step 5: Add available-definition and role-grant behavior.**
 
-  Add `GET /skills/available`, `GET /skills/{skill_id}/available-definition`, and admin role-grant mutations under `/skills/{skill_id}/versions/{version_id}/role-grants`. The available query must join the current published version, active category, active connector/operation, the current user's roles, and `SKILL_READ`/`SKILL_EXECUTE`. It must return no row for an unauthorized user, even if the user guesses the key or ID. The definition response omits `connector_key`, `operation_key`, internal endpoint, credentials, role IDs, and raw package files.
+  Add `GET /skills/available`, `GET /skills/{skill_id}/available-definition`, and, in M2 only, admin role-grant mutations under `/skills/{skill_id}/versions/{version_id}/role-grants`. M1 available queries use the local demo gate and fixed Handler. In M2 the available query must join the current published version, active category, active Connector/Operation, the current user's tenant and roles, and `SKILL_READ`/`SKILL_EXECUTE`; it must return no row for an unauthorized user, even if the user guesses the key or ID. The definition response omits `connector_key`, `operation_key`, internal endpoint, credentials, role IDs, and raw package files.
 
   Role grant mutation accepts only role IDs belonging to the current tenant. It stores `can_execute=true` in phase one and writes an audit event with added/removed role codes, not secret data.
 
@@ -1111,7 +1114,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
   git commit -m "feat: securely import and export skill packages"
   ```
 
-### Task 7: Add private user SkillPreset support
+### Task 7: Add private user SkillPreset support (M3)
 
 **Files:**
 - Create: `server/app/repositories/skill_preset_repo.py`
@@ -1143,7 +1146,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
 - [ ] **Step 3: Implement the private preset model behavior and endpoints.**
 
-  Use the already-migrated `skill_presets` table and expose only these fields:
+  Use the already-migrated `skill_presets` table and expose only these fields. The table may exist for migration compatibility before M3, but routes and UI remain disabled until `SKILLS_M3_IMPORTS_ENABLED=true`:
 
   ```json
   {
@@ -1175,7 +1178,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
   Expected: PASS; users can personalize the system catalog without creating, sharing, publishing, or changing a Tool Skill.
 
-### Task 8: Implement the Skill execution engine, Celery worker, audit events, and artifacts
+### Task 8: Implement the Skill execution engine, Inline Demo/Celery drivers, audit events, and artifacts (M1/M2/M3)
 
 **Files:**
 - Create: `server/app/repositories/skill_execution_repo.py`
@@ -1193,7 +1196,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
 - [ ] **Step 1: Write failing execution state-machine and redaction tests.**
 
-  Cover every legal and illegal transition, authorization formula, idempotency, audit failure, timeout, cancellation, retry, and output limit:
+  Cover the M1 driver contract and M2/M3 operational behavior. M1 assertions must use `local_demo_gate` and a fixed Handler; tests for `SKILL_EXECUTE`, tenant/role snapshots, Connector availability, audit fail-closed, timeout/cancel, artifact authorization and retry are marked m2 or m3:
 
   ```python
   def test_unauthorized_skill_is_rejected_before_connector_call(...): ...
@@ -1221,14 +1224,14 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
 - [ ] **Step 3: Implement server-side preflight and state transitions.**
 
-  `SkillExecutionService.create` receives `AccessContext`, `chat_session_id`, `skill_id`, `input`, and an `idempotency_key` from a request header. It performs this ordered transaction before enqueueing:
+  `SkillExecutionService.create` receives `AccessContext`, `chat_session_id`, `skill_id`, `input`, and an `idempotency_key` from a request header. In M1, `AccessContext` is the loopback local-demo context and the service selects the fixed `customer_report_search` Handler; in M2/M3 it is the authenticated tenant context and the service selects the server-resolved Connector Operation. It performs this ordered transaction before executing/enqueueing:
 
   1. Resolve the current tenant's Skill by ID; never accept version, connector, operation, role, URL, SQL, or credentials from the request body.
   2. Check `SKILL_EXECUTE`, `CHAT_WRITE`, session ownership, active category, Skill `PUBLISHED`, current published version, role grant, active Connector, active Operation, and tenant connection.
   3. Validate input against the locked version's normalized schema and operation contract; reject unknown fields and size/format violations.
   4. Build a role snapshot from `AccessContext`, redact the input with the schema's sensitive paths, and create `SkillExecution(status="PENDING")` with version/operation snapshots and a generated request ID.
   5. Write the initial `skill_run_started` audit/event row in the same transaction. If this insert fails, roll back and do not enqueue.
-  6. Commit, then enqueue the Celery task with execution ID. If queue submission fails, persist a safe `QUEUE_FAILED` terminal error and emit no success event.
+  6. In M1 execute through the inline Demo driver after commit and persist the same event contract; in M2/M3 enqueue the Celery task with execution ID. If queue submission fails, persist a safe `QUEUE_FAILED` terminal error and emit no success event.
 
   Use the design state machine exactly:
 
@@ -1242,9 +1245,9 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
   Store every transition as a sequenced event with only safe status labels and progress messages.
 
-- [ ] **Step 4: Implement the Celery task and operation execution context.**
+- [ ] **Step 4: Implement the Inline Demo driver, then the Celery task and operation execution context.**
 
-  `skill_tasks.py` must open its own `SessionLocal` session, re-read the execution and locked version, transition to `VALIDATING`, call the registry operation's availability check, then transition to `RUNNING`. It must pass a `SkillExecutionContext` containing cancellation signal, redacted logger, tenant/user/role snapshot, and artifact writer. It must never trust a mutable current Skill pointer after the execution was created.
+  M1 implements `InlineDemoSkillExecutionDriver` with a deterministic `customer_report_search` handler and no network/credential/file access. M2/M3 `skill_tasks.py` opens its own `SessionLocal` session, re-reads the execution and locked version, transitions to `VALIDATING`, calls the registry Operation availability check, then transitions to `RUNNING`. It passes a `SkillExecutionContext` containing cancellation signal, redacted logger, tenant/user/role snapshot, and artifact writer. It must never trust a mutable current Skill pointer after the execution was created.
 
   On a successful result, sanitize structured data using output contract and `presentation_config`, redact configured paths, cap rows/bytes, persist an optional artifact, append `skill_run_result`, `skill_run_artifact`, and `skill_run_done`, and set `SUCCEEDED`. On connector error, persist only an allowlisted safe error code/message and set `FAILED`. On Celery soft/hard time limit, request cancellation where supported and set `TIMED_OUT`. On user cancellation, set `CANCELED` only after the operation confirms cancellation or the policy allows a safe terminal cancellation.
 
@@ -1280,7 +1283,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
   git commit -m "feat: execute tool skills safely"
   ```
 
-### Task 9: Integrate Tool Skill runs with Chat sessions and SSE
+### Task 9: Integrate Tool Skill runs with Chat sessions and SSE (M1/M2)
 
 **Files:**
 - Create: `server/app/db/migrations/versions/0010_skill_chat_links.py`
@@ -1296,7 +1299,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
 - [ ] **Step 1: Write failing Chat integration tests.**
 
-  Add tests for ownership, request shape, message persistence, SSE event order, and ordinary Chat isolation:
+  Add milestone-specific tests for the local-demo gate or authenticated ownership, request shape, message persistence, SSE event order, and ordinary Chat isolation:
 
   ```python
   def test_skill_run_requires_chat_session_owner_and_skill_execute(...): ...
@@ -1331,7 +1334,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
   response: text/event-stream
   ```
 
-  The route validates the session before opening the stream, calls `SkillExecutionService.create`, persists a `SKILL_REQUEST` message with a safe rendered summary, then streams status events. It must not pass client `skillVersionId`, `connectorKey`, `operationKey`, role, URL, SQL, or credentials through to the service. The result message is created/updated from safe result data only. If a request fails before streaming, return the project's structured 4xx error with request ID.
+  The route validates the session before opening the stream, applies the M1 local-demo gate or M2/M3 authenticated tenant and permission checks, calls `SkillExecutionService.create`, persists a `SKILL_REQUEST` message with a safe rendered summary, then streams status events. It must not pass client `skillVersionId`, `connectorKey`, `operationKey`, role, URL, SQL, or credentials through to the service. The result message is created/updated from safe result data only. If a request fails before streaming, return the project's structured 4xx error with request ID.
 
 - [ ] **Step 5: Emit the exact Skill SSE event contract.**
 
@@ -1366,6 +1369,12 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
 ### Task 10: Build the administrator Skills navigation, list, and category pages
 
+**阶段切片：**
+
+- **M1：** 只在 `SKILLS_M1_LOCAL_DEMO_MODE=true` 且请求来自 loopback 时开放 Skills 列表、分类管理和编辑器入口；不检查真实登录或 `SKILL_MANAGE`，不显示导入、Connector、审计、版本历史、角色授权和 Operation 筛选。
+- **M2：** 切换到真实会话和租户上下文；列表、分类和每个管理动作分别检查 `SKILL_MANAGE`、`SKILL_CATEGORY_MANAGE`、`SKILL_AUDIT_READ`、`SKILL_CONNECTOR_MANAGE`，并增加版本、授权角色和 Operation 信息。
+- **M3：** 在 M2 的权限门禁上开放导入/导出、Connector 运营和高级统计入口；收藏、默认参数、显示名称和排序属于 Chat 侧私有 `SkillPreset`，不在管理员列表中伪装成共享 Skill 字段。
+
 **Files:**
 - Modify: `web/admin/src/routes/index.tsx`
 - Modify: `web/admin/src/api/queryClient.ts`
@@ -1398,8 +1407,16 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
     expect(filterRuntimeFields({ connectorKey: 'x', input: { sql: 'select 1' } })).toEqual({ input: {} });
   });
 
-  it('hides admin Skill routes without SKILL_MANAGE', () => {
-    expect(visibleRoutesFor({ permissions: ['CHAT_READ'] })).not.toContain('#skills');
+  it('[M1] allows the Skills catalog only for loopback local-demo identity', () => {
+    expect(visibleRoutesFor({ localDemoMode: true, isLoopback: true })).toContain('#skills');
+    expect(visibleRoutesFor({ localDemoMode: true, isLoopback: false })).not.toContain('#skills');
+    expect(visibleRoutesFor({ localDemoMode: false, permissions: [] })).not.toContain('#skills');
+  });
+
+  it('[M2] hides management routes without the matching server permission', () => {
+    expect(visibleRoutesFor({ permissions: ['SKILL_READ'] })).not.toContain('#skills');
+    expect(visibleRoutesFor({ permissions: ['SKILL_MANAGE'] })).toContain('#skills');
+    expect(visibleRoutesFor({ permissions: ['SKILL_MANAGE'] })).not.toContain('#skills/audit');
   });
   ```
 
@@ -1418,38 +1435,42 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
   Define types for category, Skill summary, version, validation issue, operation summary, role grant, and mutation payload. Add query keys for categories, skills, skill details, versions, operations, presets, executions, and audit. Use the existing `apiRequest` helper and invalidate only affected keys after mutations.
 
-  Add routes:
+  Implement routes with a phase-aware server gate:
 
   ```text
-  #skills              -> SkillPage          (SKILL_MANAGE)
-  #skills/categories   -> SkillCategoriesPage(SKILL_CATEGORY_MANAGE)
-  #skills/new          -> SkillEditorPage    (SKILL_MANAGE, hidden)
-  #skills/:id          -> SkillEditorPage    (SKILL_MANAGE, hidden)
-  #skills/import       -> SkillImportPage    (SKILL_MANAGE, hidden)
-  #skills/connectors   -> SkillConnectorsPage(SKILL_CONNECTOR_MANAGE, hidden)
-  #skills/audit        -> SkillAuditPage     (SKILL_AUDIT_READ, hidden)
+  M1 #skills              -> SkillPage          (local-demo gate + loopback)
+  M1 #skills/categories   -> SkillCategoriesPage(local-demo gate + loopback)
+  M1 #skills/new          -> SkillEditorPage    (local-demo gate + loopback, hidden)
+  M1 #skills/:id          -> SkillEditorPage    (local-demo gate + loopback, hidden)
+
+  M2 #skills              -> SkillPage          (SKILL_MANAGE)
+  M2 #skills/categories   -> SkillCategoriesPage(SKILL_CATEGORY_MANAGE)
+  M2 #skills/new          -> SkillEditorPage    (SKILL_MANAGE, hidden)
+  M2 #skills/:id          -> SkillEditorPage    (SKILL_MANAGE, hidden)
+  M2 #skills/connectors   -> SkillConnectorsPage(SKILL_CONNECTOR_MANAGE, read-only registry)
+  M2 #skills/audit        -> SkillAuditPage     (SKILL_AUDIT_READ, hidden)
+
+  M3 #skills/import       -> SkillImportPage    (SKILL_MANAGE, hidden)
+  M3 #skills/connectors   -> SkillConnectorsPage(SKILL_CONNECTOR_MANAGE, full operations)
+  M3 #skills/audit        -> SkillAuditPage     (SKILL_AUDIT_READ, advanced filters)
   ```
 
-  Extend `SidebarIconName` with `skills` and show one “Skills” navigation item only when the current user has `SKILL_MANAGE`, `SKILL_CATEGORY_MANAGE`, `SKILL_CONNECTOR_MANAGE`, or `SKILL_AUDIT_READ`. The route renderer must still check the individual permission, so typing a hash cannot bypass the gate.
+  Extend `SidebarIconName` with `skills`. In M1 the sidebar item is visible only after the local-demo gate passes. In M2/M3 it is visible when the user has a relevant management permission, but the route renderer must still check the individual permission so typing a hash cannot bypass the gate. Failed gates render a safe 403/feature-disabled state with request ID.
 
 - [ ] **Step 4: Implement the Skills list page.**
 
-  `SkillPage` must provide:
+  `SkillPage` uses one component shell with phase-gated controls:
 
-  - title, count, “新建 Tool Skill”, “导入 Skill 包”, “分类管理”, “连接器”, and “审计” actions;
-  - search by key/name/description with server-side debounce;
-  - filters for category, status (`DRAFT`, `PUBLISHED`, `DISABLED`, `ARCHIVED`), operation, and authorized role;
-  - table columns: icon/name/key, category, type, current version, status, authorized roles, 7/30-day execution count, failure rate, updated time, and action menu;
-  - row actions: open editor, create draft version, validate, test, publish, disable/enable, rollback, export, archive;
-  - disabled action buttons with tooltips explaining the server validation that is still missing;
-  - empty state explaining that Chat users can only use published, role-authorized Tool Skills;
-  - loading skeleton, API error with request ID, pagination, and responsive card layout below 900px.
+  - **M1 local-demo：** title/count, “新建 Tool Skill”, “分类管理”, search by key/name/description, columns for icon/name/key/category/type/status/updated time, and open/edit/validate/first-publish actions. It must not render import, Connector, audit, Operation, role, version-history, rollback or export controls.
+  - **M2 secure-operations：** add real-tenant filters for category/status/Operation/authorized role, current version and lifecycle columns, execution/failure counts, create-draft-version, test, publish, disable/enable, rollback-as-new-version and archive actions. Each action requires the server-authoritative response and the matching management permission.
+  - **M3 production-governance：** add import/export, Connector health and advanced audit entry points according to independent permissions; never show user favorites, display names, default parameters or personal order as shared Skill metadata.
+  - **All phases：** search uses server-side debounce; show blocking validation tooltips, empty/loading/error states with request ID, pagination, responsive cards below 900px, and never infer availability from a status badge.
 
-  The list component must not infer availability from a status badge; every mutation handles the authoritative API response and refreshes the detail/list queries.
+  Every mutation invalidates only affected detail/list/version queries and relies on the API response rather than client-side status inference.
 
 - [ ] **Step 5: Implement category management.**
 
-  `SkillCategoriesPage` and `SkillCategoryPanel` must support create/edit, icon selection from a fixed safe set, display order, active/disabled state, counts, and drag-free up/down ordering buttons. Disabling requires `ConfirmActionDialog` text that explains existing history remains but new Chat executions stop. Delete is shown only when the server reports zero references; otherwise show “停用” and the conflict reason.
+  `SkillCategoriesPage` and `SkillCategoryPanel` support create/edit, icon selection from a fixed safe set, display order, active/disabled state, counts, and drag-free up/down ordering buttons. In M1 they operate only in the loopback local-demo namespace and use the same local gate as the list; in M2/M3 every read/write carries the authenticated tenant context and requires `SKILL_CATEGORY_MANAGE`. Disabling requires `ConfirmActionDialog` text explaining that existing history remains but new Chat executions stop. Delete is shown only when the server reports zero references; otherwise show “停用” and the conflict reason.
 
 - [ ] **Step 6: Run front-end checks and commit the navigation/list slice.**
 
@@ -1461,7 +1482,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
   npm run build
   ```
 
-  Expected: PASS; routes, query types, list, filters, category actions, and permission gates compile and the production build succeeds.
+  Expected: PASS; M1 routes work only behind the loopback local-demo gate, M2 routes enforce real permissions, and the build contains no hidden-button-only authorization path. Do not ship import, Connector or audit routes in the M1 artifact.
 
   ```powershell
   git add web/admin/package.json web/admin/package-lock.json web/admin/src/routes/index.tsx web/admin/src/api/queryClient.ts web/admin/src/features/skills web/admin/src/styles/index.css web/admin/src/styles/skills.css
@@ -1469,6 +1490,12 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
   ```
 
 ### Task 11: Build the administrator Tool Skill editor and publish workflow
+
+**阶段切片：**
+
+- **M1：** 完成基本信息、内联 `SKILL.md`、受限输入 Schema、展示策略、服务端校验、保存草稿和首次发布；执行绑定固定为 `customer_report_search` Demo Handler，不显示 Operation、角色和版本运营控件。
+- **M2：** 增加服务端预注册 `knowledge-base.search` fake Connector Operation 选择、Operation 契约、角色授权、不可变版本、差异、停用/归档/回滚和发布确认；此阶段才要求真实 `SKILL_MANAGE`、角色授权和执行权限链路。
+- **M3：** 由 Task 12 接入包导入和更多 Operation；编辑器只接收安全映射结果，不把脚本、URL、SQL 或凭据变成可执行配置。
 
 **Files:**
 - Create: `web/admin/src/features/skills/pages/SkillEditorPage.tsx`
@@ -1489,37 +1516,60 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 - Modify: `web/admin/src/features/skills/utils/skillFormValidation.ts`
 - Create: `web/admin/tests/t20_tool_skill_admin_playwright.py`
 
-- [ ] **Step 1: Write failing editor validation tests.**
+- [ ] **Step 1: Write phase-specific editor validation tests.**
 
-  Add pure-function tests for each editor section before rendering components:
+  M1 tests must not require an Operation or role grant:
 
   ```ts
-  it('builds a Tool Skill draft payload without runtime-control fields', () => {
+  it('[M1] builds a Tool Skill draft bound to the fixed Demo Handler', () => {
     const payload = toSkillDraftPayload({
-      basic: { key: 'customer-report-export', name: '客户报表导出', categoryId: 'cat-1' },
-      operationId: 'op-1',
-      fields: [{ name: 'date_from', type: 'date', required: true }],
-      roles: ['role-employee'],
+      phase: 'M1',
+      basic: { key: 'customer-report-search', name: '客户报表查询', categoryId: 'cat-1' },
+      fields: [{ name: 'query', type: 'text', required: true }],
+      demoHandlerKey: 'customer_report_search',
     });
-    expect(payload).toMatchObject({ skillType: 'TOOL', connectorOperationId: 'op-1' });
+    expect(payload).toMatchObject({ skillType: 'TOOL', demoHandlerKey: 'customer_report_search' });
+    expect(payload).not.toHaveProperty('connectorOperationId');
+    expect(payload).not.toHaveProperty('roleIds');
+    expect(JSON.stringify(payload)).not.toContain('password');
+  });
+
+  it('[M1] blocks publish for an invalid schema without requiring Operation or role', () => {
+    const codes = getPublishBlockers(invalidM1Draft).map((item) => item.code);
+    expect(codes).toContain('INPUT_SCHEMA_INVALID');
+    expect(codes).not.toContain('OPERATION_REQUIRED');
+    expect(codes).not.toContain('ROLE_REQUIRED');
+  });
+  ```
+
+  Add separate M2 tests for the secure editor contract:
+
+  ```ts
+  it('[M2] serializes only a server-listed Operation and role IDs', () => {
+    const payload = toSkillDraftPayload({
+      phase: 'M2',
+      basic: { key: 'customer-report-export', name: '客户报表导出', categoryId: 'cat-1' },
+      operationId: 'operation-knowledge-base-search',
+      fields: [{ name: 'query', type: 'text', required: true }],
+      roles: ['role-report-operator'],
+    });
+    expect(payload).toMatchObject({ skillType: 'TOOL', connectorOperationId: 'operation-knowledge-base-search' });
     expect(JSON.stringify(payload)).not.toContain('connectorKey');
     expect(JSON.stringify(payload)).not.toContain('password');
   });
 
-  it('blocks publish when the draft has no operation, no role, or unsafe policy', () => {
-    const issues = getPublishBlockers(incompleteDraft);
-    expect(issues.map((item) => item.code)).toEqual(
-      expect.arrayContaining(['OPERATION_REQUIRED', 'ROLE_REQUIRED', 'POLICY_EXCEEDS_CEILING']),
-    );
+  it('[M2] blocks publish when Operation, role, or policy ceiling is missing', () => {
+    const codes = getPublishBlockers(incompleteM2Draft).map((item) => item.code);
+    expect(codes).toEqual(expect.arrayContaining(['OPERATION_REQUIRED', 'ROLE_REQUIRED', 'POLICY_EXCEEDS_CEILING']));
   });
 
-  it('requires confirmation for external writes and file writes', () => {
+  it('[M2] requires confirmation for external writes and file writes', () => {
     expect(policyForOperation({ sideEffectLevel: 'EXTERNAL_WRITE' }).requiresConfirmation).toBe(true);
     expect(policyForOperation({ sideEffectLevel: 'FILE_WRITE' }).requiresConfirmation).toBe(true);
   });
 
-  it('does not allow an admin to change a published version in place', () => {
-    expect(editorMode({ versionStatus: 'PUBLISHED' })).toBe('CREATE_DRAFT_VERSION');
+  it('[M2] never changes a published version in place', () => {
+    expect(editorMode({ versionStatus: 'PUBLISHED', phase: 'M2' })).toBe('CREATE_DRAFT_VERSION');
   });
   ```
 
@@ -1531,6 +1581,8 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
   ```
 
   Expected: FAIL with missing editor helper functions/components.
+
+  M1 keeps a single local-demo draft/published pointer; M2 enables server-issued version IDs, optimistic locks, role grants and immutable version history. The same editor component must not expose later-phase fields merely because they exist in the database schema.
 
 - [ ] **Step 3: Implement the editor data model and step shell.**
 
@@ -1578,6 +1630,8 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
   If the Skill originated from an import, show the immutable package hash, file scan summary, and safe references/assets. The editor may change the description/body and mapping fields in the new draft, but it cannot revive a rejected package entry or attach a script. Client preview is informational; server validation is mandatory.
 
+  In M1 this step is replaced by a read-only card showing `customer_report_search`; there is no Operation selector or editable handler field. The selector and all Operation-related validation below are M2 behavior.
+
 - [ ] **Step 6: Implement Operation selection with a read-only contract.**
 
   `OperationSelector` loads only active operations from `GET /skill-connectors/{connectorKey}/operations` or a tenant-safe aggregated endpoint. Display connector display name, operation display name, side-effect badge, input/output contract summary, timeout ceiling, cancellation support, retry safety, and required connection health. Never display secret values, internal endpoint templates, or editable connector/operation key text.
@@ -1610,6 +1664,8 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
   3. **Execution policy:** timeout, max retries, per-user rate limit, concurrency limit, result byte limit, artifact TTL, idempotency mode, side-effect label, and confirmation text.
 
   Render the selected Operation ceiling next to each numeric control. Inputs above the ceiling are rejected immediately in the UI and again by the server. For `EXTERNAL_WRITE` and `FILE_WRITE`, confirmation is mandatory and the confirmation text must state the effect in plain language. Never expose credential configuration, raw headers, SQL, URL templates, or arbitrary code controls in this panel.
+
+  M1 must hide this step completely. Enable it only after the authenticated M2 management API confirms `SKILL_MANAGE` and the tenant role catalog.
 
 - [ ] **Step 9: Implement role authorization and version review.**
 
@@ -1658,6 +1714,12 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
   ```
 
 ### Task 12: Build import/export, Connector, and audit management pages
+
+**阶段切片：**
+
+- **M1：** 本任务的页面/API 不注册、不打包到可用路由；M1 只使用 Skills 列表、分类和编辑器。
+- **M2：** 开放脱敏审计页面和只读服务端 Operation 目录/绑定状态页面，显示预注册 `knowledge-base.search` fake Operation；不允许客户端注册 Operation 或配置任意连接器。
+- **M3：** 开放 Agent Skills 包导入/导出、租户 Connector 连接配置、多 Operation、健康检查、导入历史和高级审计筛选。
 
 **Files:**
 - Create: `web/admin/src/features/skills/pages/SkillImportPage.tsx`
@@ -1738,6 +1800,12 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
 ### Task 13: Add the Chat Skills drawer, presets, structured form, and run card
 
+**阶段切片：**
+
+- **M1：** 完成分类浏览、可用 Skill 列表、手动选择、结构化参数表单、明确确认执行和固定 Demo Handler 结果卡；不提供收藏、显示名称、默认参数保存或排序。
+- **M2：** 接入真实登录/租户上下文、`SKILL_READ`/`SKILL_EXECUTE` 过滤、fake Operation 的异步状态、超时、取消、审计和产物下载；不显示个人收藏或 Preset 控件。
+- **M3：** 增加租户内用户私有 `SkillPreset`，实现收藏、默认参数、显示名称和排序；Preset 不能改变 Skill、版本、Operation、角色、URL、SQL、凭据或安全策略。
+
 **Files:**
 - Create: `web/admin/src/features/chat/api/skillApi.ts`
 - Create: `web/admin/src/features/chat/hooks/useSkillStream.ts`
@@ -1794,27 +1862,25 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
   Expected: FAIL with missing API, reducer, and component modules.
 
-- [ ] **Step 3: Implement Chat Skill API and typed state.**
+- [ ] **Step 3: Implement the staged Chat Skill API and typed state.**
 
-  `web/admin/src/features/chat/api/skillApi.ts` exposes:
+  The common API exposes:
 
   ```ts
   getAvailableCategories(): Promise<SkillCategorySummary[]>;
   getAvailableSkills(categoryId?: string): Promise<SkillSummary[]>;
   getAvailableDefinition(skillId: string): Promise<SkillAvailableDefinition>;
-  getPreset(skillId: string): Promise<SkillPreset | null>;
-  savePreset(skillId: string, payload: SkillPresetWrite): Promise<SkillPreset>;
   streamSkillRun(sessionId: string, body: { skillId: string; input: Record<string, unknown> }, handlers, options): Promise<void>;
   ```
 
-  The request builder must create exactly `{ skillId, input }`. It may send an `Idempotency-Key` header generated for the run, but it must never put version IDs, connector/operation keys, role IDs, URL, SQL, or credentials into the body. Types must mark runtime-control fields as impossible in the Chat form state.
+  M1 calls local-demo endpoints and does not request preset/audit data. M2 relies on the server to filter by authenticated tenant, `SKILL_READ`, `SKILL_EXECUTE`, published version and role grant. M3 adds `getPreset(skillId)` and `savePreset(skillId, payload)`; those calls are user/tenant scoped. The request builder must create exactly `{ skillId, input }`; an `Idempotency-Key` may be sent as a header, but version IDs, Connector/Operation keys, role IDs, URL, SQL and credentials never enter the body.
 
 - [ ] **Step 4: Implement the Skills drawer and details flow.**
 
   Add a “Skills” button beside the existing Chat composer. `SkillDrawer` contains:
 
   - active category tabs/list from the server;
-  - search and “收藏” filter;
+  - search in M1/M2; add the “收藏” filter only in M3 after the private preset query is available;
   - available Skill cards with icon, name, description, category, favorite state, side-effect badge, and version;
   - loading/error/empty states that include the request ID when available;
   - no card for a Skill the server did not return.
@@ -1825,7 +1891,7 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
   `SkillInputForm` renders only the server's restricted schema types and checks required/min/max/enum/date/file-reference constraints before enabling execution. It displays field help and safe default values. Unknown schema keywords render a blocking “无法渲染” state rather than falling back to a free-form JSON editor.
 
-  Provide “收藏”, custom display name, “保存为默认参数”, “恢复默认”, and display order actions through `SkillPreset`. Saving a preset sends only the four allowed fields and validates against the current available definition. If the Skill is disabled or the published version changes, re-fetch the definition and revalidate defaults before allowing execution. No control enables creation, sharing, publishing, operation changes, or role changes.
+  In M3 only, provide “收藏”, custom display name, “保存为默认参数”, “恢复默认”, and display order actions through `SkillPreset`. Saving sends only `isFavorite`, `displayName`, `defaultInput`, and `displayOrder`, then validates against the current available definition. In M1/M2 these controls do not render; schema defaults are session-only. If the Skill is disabled or the published version changes, re-fetch the definition and revalidate defaults before allowing execution. No control enables creation, sharing, publishing, Operation changes, or role changes.
 
 - [ ] **Step 6: Implement explicit confirmation and Skill run card.**
 
@@ -1874,6 +1940,12 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
 ### Task 14: Complete integration, security, observability, and release acceptance
 
+**阶段切片：**
+
+- **M1 验收：** 只验证 loopback + local-demo flag + 固定 Demo Handler 的创建/编辑/发布/手动执行闭环；不把真实登录、租户隔离、`SKILL_READ`/`SKILL_EXECUTE`、fake Connector Operation、Preset 或生产部署写入 M1 通过条件。
+- **M2 验收：** 在真实登录和租户上下文中验证 `SKILL_READ`/`SKILL_EXECUTE`、RBAC/角色授权、预注册 `knowledge-base.search` fake Operation、版本生命周期、超时/取消、审计、产物下载和越权拒绝。M2 是首个允许进入受控 staging/production 的版本。
+- **M3 验收：** 在 M2 安全边界上验证收藏、默认参数、显示名称、排序、私有 `SkillPreset`、安全导入导出、多 Connector/Operation 和生产治理。
+
 **Files:**
 - Modify: `server/tests/e2e/test_tool_skill_e2e.py`
 - Create: `server/tests/e2e/test_m1_tool_skill_closed_loop.py`
@@ -1889,53 +1961,50 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 - Modify: `web/admin/tests/t20_tool_skill_admin_playwright.py`
 - Modify: `web/admin/tests/t21_tool_skill_chat_playwright.py`
 
-- [ ] **Step 1: Write the release acceptance matrix as executable tests.**
+- [ ] **Step 1: Write a phase-tagged release acceptance matrix as executable tests.**
 
-  `test_skill_release_acceptance.py` must cover at least:
+  `test_skill_release_acceptance.py` must keep milestone boundaries visible in test names and cover at least:
 
-  | Area | Acceptance assertion |
-  |---|---|
-  | Admin create | Admin creates a category and Tool Skill draft. |
-  | Schema | Invalid root/additional property/runtime field is rejected. |
-  | Connector | Only seeded registry operations are selectable. |
-  | Publish | Operation, active category, role, policy, and audit are required. |
-  | RBAC | Employee sees/executes only granted published Skills; no manage API. |
-  | Versioning | Published edit creates a new draft; old execution remains pinned. |
-  | Import | Valid package becomes draft; malicious package is rejected before extraction. |
-  | Conflict | Same key requires explicit new/append/cancel choice. |
-  | Execution | Input, role, tenant, connector, and audit checks happen before invocation. |
-  | Chat | Manual click is required; ordinary text cannot invoke Skills. |
-  | SSE | All seven event types and terminal status are delivered/replayable. |
-  | Output | Sensitive data, tracebacks, storage keys, and credentials are absent. |
-  | Resource | Timeout, concurrency, rate, output, artifact, and cancellation limits hold. |
-  | Lifecycle | Category/Skill/Connector disable prevents new runs but preserves history. |
+  | Area | M1 local-demo assertion | M2 secure-operations assertion | M3 production/personalization assertion |
+  |---|---|---|---|
+  | Admin create | Demo admin creates category and Tool Skill draft through loopback gate. | Authenticated admin creates a tenant-scoped draft with `SKILL_MANAGE`. | Imported package maps into a new draft only. |
+  | Schema | Invalid root/additional property/runtime field is rejected. | Schema is intersected with the selected fake Operation contract. | Imported references/assets are normalized and scanned. |
+  | Binding | Fixed `customer_report_search` handler only. | Only pre-registered `knowledge-base.search` is selectable; client cannot choose a key. | Additional Operations remain server-registry controlled. |
+  | Publish | Valid metadata/schema can be published in local namespace. | Operation, active category, role grant, policy, tenant and audit are required. | Import never auto-publishes and health warnings are enforced. |
+  | Auth/RBAC | Local-demo identity and loopback gate; no real permission claim. | Login/session, tenant isolation, `SKILL_READ`, `SKILL_EXECUTE`, management permissions and role grants are enforced server-side. | Preset and governance APIs preserve the same tenant/role rules. |
+  | Version/lifecycle | Single demo draft/published pointer; no version history claim. | Published edit creates an immutable draft/version; disable/archive blocks new runs but preserves history. | Import/export and Connector lifecycle retain provenance and audit. |
+  | Execution | Explicit Chat click invokes only the inline Demo Handler. | Input, tenant, role, Operation, connection, audit and idempotency checks happen before Celery invocation. | Retry/rate/concurrency/health/retention policies hold. |
+  | Chat | Category browse → manual select → form → confirm → bounded result. | Authorized user sees progress, timeout, cancel, safe result and artifact download. | User can privately save favorite, display name, default input and order. |
+  | Security | Non-loopback, disabled flag, arbitrary handler and runtime-control injection are rejected. | Cross-tenant, unauthenticated, missing permission, forged version/Operation/role and artifact-download attempts are rejected. | Malicious packages, scripts, secrets, SSRF/free SQL and unsafe Connector config are rejected. |
 
-- [ ] **Step 2: Add malicious-input and resource-exhaustion security tests.**
+- [ ] **Step 2: Add phase-scoped malicious-input and resource-exhaustion security tests.**
 
   `server/tests/security/test_skill_security.py` must include:
 
-  - ZIP path traversal, absolute path, duplicate entry, symlink, encrypted archive, compression bomb, member-count, compressed/uncompressed/member-size, and unknown binary tests;
-  - scripts and executable file tests for `.py`, `.js`, `.sh`, `.ps1`, `.bat`, native executables, `node_modules`, `.venv`, `__pycache__`, and `.env`;
-  - private key, bearer token, cloud key, database URL, and secret-assignment pattern tests in markdown/references/assets;
-  - internal HTTP SSRF attempts using loopback, link-local, metadata, alternate IP notation, redirects, and user-supplied host/path/method headers;
-  - database free SQL, comment/union injection, template-key enumeration, cross-tenant parameter tests;
-  - forged `skillVersionId`, `connectorKey`, `operationKey`, `roleIds`, URL, SQL, and credential fields on API requests;
-  - sensitive output path, error traceback, result-size, artifact path, and signed-download replay tests;
-  - concurrency/rate/timeout/queue tests proving an operation cannot exhaust worker resources.
+  - **M1:** non-loopback requests, disabled local-demo flag, forged `connectorKey`/`operationKey`/`roleIds`/URL/SQL/credential fields, unknown schema fields and oversized input. Every rejection must be a safe public error with zero Demo Handler calls; the fixed Handler cannot access network, SQL, files or credentials.
+  - **M2:** unauthenticated/expired sessions, cross-tenant IDs, missing `SKILL_READ`, missing `SKILL_EXECUTE`, missing role grant, inactive category/Skill/Operation/connection, forged version/Operation/role fields, audit-write/queue failures, timeout/cancel races, sensitive output, result-size limits and artifact download replay.
+  - **M3:** ZIP path traversal, absolute path, duplicate entry, symlink, encrypted archive, compression bomb, member-count and size limits; scripts/executables; private-key/bearer/cloud/database-secret patterns; internal HTTP SSRF; free SQL/comment/union injection; unsafe Connector configuration; and rate/concurrency/retention tests.
 
-  Every security test must assert a safe public error and confirm no connector call, no package execution, and no privileged data in normal logs/audit exports.
+  All phases must assert a safe public error. M2/M3 tests must additionally assert no Connector call, no package execution and no secret/traceback in normal logs or audit exports.
 
-- [ ] **Step 3: Add end-to-end admin-to-Chat coverage.**
+- [ ] **Step 3: Add separate end-to-end admin-to-Chat coverage for each milestone.**
 
-  `server/tests/e2e/test_tool_skill_e2e.py` must run this sequence against a temporary tenant:
+  `server/tests/e2e/test_m1_tool_skill_closed_loop.py` runs against a loopback test app with local-demo mode enabled:
 
-  1. Seed permissions, roles, categories, registry operations, and a safe connection.
-  2. Admin creates `customer-report-export`, configures schema/presentation/policy, grants `EMPLOYEE`, validates, test-runs, and publishes version 1.
-  3. Employee lists available Skills by category and receives only that published definition.
-  4. Employee starts a run through an owned Chat session with `{skillId, input}`, receives ordered SSE events, and reads a safe result/artifact.
-  5. Admin edits and publishes version 2; a version-1 run still reports version 1 and its original operation snapshot.
-  6. Admin disables the Skill; a new employee run is rejected while history remains queryable.
-  7. Admin imports a valid package into a draft, resolves its operation/role mapping, and confirms it cannot auto-publish.
+  1. Demo admin creates a category and `customer-report-search` with `query`/`limit` schema.
+  2. Admin validates, fixes a bad schema, publishes the Skill and sees it in the local availability endpoint.
+  3. Demo Chat user manually selects it, submits `{skillId, input}`, receives ordered started/status/result/done events and a safe result.
+  4. Non-loopback requests, ordinary natural-language text and injected runtime fields are rejected.
+
+  `server/tests/e2e/test_m2_tool_skill_operational_loop.py` runs against temporary tenants:
+
+  1. Seed real users/roles/permissions and the `knowledge-base.search` fake Operation with a safe test connection.
+  2. Authenticated admin creates a tenant-scoped Skill, binds the fake Operation, grants a role, validates and publishes version 1.
+  3. Authorized user lists/executes it; missing `SKILL_READ`/`SKILL_EXECUTE`, unauthorized role and cross-tenant user are rejected.
+  4. Admin publishes version 2; history remains pinned to version 1; disable/archive blocks new runs.
+  5. A long fake run demonstrates queue/progress/timeout/cancel, audit events and authorized artifact download.
+
+  `server/tests/e2e/test_m3_tool_skill_complete.py` additionally verifies private favorite/display-name/default/order isolation, import-to-draft-only behavior, malicious package rejection and Connector health/configuration gates.
 
 - [ ] **Step 4: Verify OpenAPI and generated front-end types.**
 
@@ -1988,15 +2057,16 @@ All new API responses use the existing Pydantic alias convention (`snake_case` i
 
 - [ ] 占位符扫描没有发现未替换的占位符标记、示例路径或示例 ID。
 - [ ] 所有设计实体已映射到 ORM、迁移、repository、service、API 和测试；M1/M2/M3 的任务切片没有引用不存在的字段或旧 API 名称。
-- [ ] 设计中的七类 Skill SSE 事件（started、status、progress、result、artifact、error、done）都有 schema、服务端发送/重放测试和前端展示路径。
-- [ ] 所有用户侧/管理侧 API、后台页面和 Chat 页面都映射到对应 Task；M1/M2/M3 的浏览器验收不会依赖手工修改数据库。
-- [ ] 设计安全威胁中的包扫描、SSRF、自由 SQL、凭据泄露、跨租户访问、资源耗尽和下载越权均有命名控制与自动化测试。
-- [ ] 所有权限和授权公式都由服务端执行；前端过滤只用于体验，不能作为安全控制。
+- [ ] 七类 Skill SSE 事件（started、status、progress、result、artifact、error、done）按里程碑逐步实现：M1 至少有 started/status/result/done，M2 补齐 progress/artifact/error 和重连，M3 复用同一契约。
+- [ ] 所有用户侧/管理侧 API、后台页面和 Chat 页面都映射到对应 Task；浏览器验收不会依赖手工修改数据库。
+- [ ] 包扫描、SSRF、自由 SQL、凭据泄露、跨租户访问、资源耗尽和下载越权均有命名控制与自动化测试，并按 M2/M3 里程碑启用。
+- [ ] 所有权限和授权公式都由服务端执行；前端过滤只用于体验。M1 的例外仅是显式 loopback local-demo gate，不得被描述为真实权限。
 - [ ] Skill 和 SkillExecution 状态机均有合法/非法转换测试；终态不可被晚到的 worker 结果覆盖。
 - [ ] `POST /chat/sessions/{session_id}/skill-runs` 的客户端请求体始终只包含 `skillId` 和结构化 `input`；服务端拒绝 version/connector/operation/role/URL/SQL/credential 注入。
+- [ ] M1 只允许 local-demo 身份在 loopback 上创建/编辑/发布和手动执行固定 Demo Handler；不实现真实登录、租户隔离、`SKILL_READ`、`SKILL_EXECUTE`、fake Connector Operation、收藏、默认参数、显示名称、排序或 `SkillPreset`，且不得部署到共享 staging/production。
+- [ ] M2 完成基础登录、会话过期、租户隔离、`SKILL_READ` / `SKILL_EXECUTE`、RBAC/角色授权、预注册 fake Connector Operation、版本、归档、超时、取消、审计和产物下载；每一项都有自动化测试和人工操作证据。M2 是首个可进入受控 staging/production 的里程碑。
+- [ ] M3 完成用户私有 `SkillPreset` 的收藏、默认参数、显示名称和排序，并完成安全包导入/导出、Connector 运营、多 Operation、健康检查、重试/限流/并发和结果治理；Preset 不得创建或共享真正的 Skill。
 - [ ] 任何执行都锁定租户、已发布版本、Operation 契约和角色快照；跨租户、未授权、停用、归档、连接器不可用和审计写入失败均 fail closed。
-- [ ] M1 不允许 Chat 用户创建、导入、发布或共享真正的 Skill；用户个性化只写入私有 `SkillPreset`。
-- [ ] M2 的版本、归档、超时、取消、审计、产物下载和 RBAC 都有自动化测试和人工操作证据。
 - [ ] M3 的包导入在解压前完成安全预检，永不执行包内脚本；Connector 和 Operation 只能由服务端白名单注册。
 - [ ] `git diff --check`、后端 focused suite、前端 typecheck/lint/build、对应 marker 的 Playwright 和迁移 upgrade/downgrade 均通过。
 - [ ] 完成 M3 后另行立项 Prompt Skill；本计划不把 Prompt Skill、模型自动选择、自治编排或共享用户 Skill 混入 Tool Skill 发布。
