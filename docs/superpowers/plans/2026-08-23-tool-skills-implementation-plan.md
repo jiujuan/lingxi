@@ -10,6 +10,37 @@
 
 ---
 
+## 拆分后的独立实施文档
+
+本文件仍然是 Tool Skill 的总览计划，包含跨里程碑的 14 个原始 Task、总体架构、文件结构和全量验收矩阵；它不再作为单个里程碑的直接执行清单。为了让每个里程碑都能独立开发、自动验证和人工操作验收，实施时按以下三份文档执行：
+
+1. [M1：Tool Skill 本地 Demo 最小闭环](2026-08-23-tool-skills-m1-local-demo-implementation-plan.md)
+2. [M2：基础安全与受控执行闭环](2026-08-23-tool-skills-m2-secure-operations-implementation-plan.md)
+3. [M3：用户个性化与生产治理](2026-08-23-tool-skills-m3-production-governance-implementation-plan.md)
+
+三份文档都包含独立的任务编号、文件清单、自动化命令、每个 Task 的人工验收步骤、里程碑总体验收脚本、退出条件、提交点和发布标签。原 14 个 Task 的映射关系如下：
+
+| 原总计划 Task | M1 独立文档 | M2 独立文档 | M3 独立文档 |
+|---|---|---|---|
+| Task 1 合同与 fixture | M1-01 | — | — |
+| Task 2 持久化 | M1-02 | — | — |
+| Task 3 权限种子 | — | M2-01 | — |
+| Task 4 Connector/Operation | — | M2-02 | M3-04 |
+| Task 5 Skill CRUD/版本/生命周期 | M1-03 | M2-03 | — |
+| Task 6 包导入导出 | — | — | M3-03 |
+| Task 7 SkillPreset | — | — | M3-01、M3-02 |
+| Task 8 执行引擎 | M1-05 | M2-04 | M3-05 |
+| Task 9 Chat 后端/SSE | M1-05 | M2-06 | M3-05 |
+| Task 10 管理列表/分类 UI | M1-04 | M2-05 | M3-06 |
+| Task 11 Tool Skill 编辑器 | M1-04 | M2-02、M2-03、M2-05 | M3-03、M3-04 |
+| Task 12 管理扩展 UI | — | M2-05 | M3-03、M3-04、M3-05 |
+| Task 13 Chat UI | M1-06 | M2-06 | M3-02、M3-05、M3-06 |
+| Task 14 集成/安全/发布 | M1-07 | M2-07 | M3-06 |
+
+执行顺序固定为 M1 → M2 → M3。每个独立文档允许在前一个里程碑的标签上继续开发；完成一个 Task 后必须先通过该 Task 的人工验收，再进入同一里程碑的下一个 Task；完成里程碑后才建立对应发布标签。
+
+因此，原文的 14 个 Task 是跨里程碑的大粒度任务；拆分后的实际执行单元是 M1 的 7 个 Task、M2 的 7 个 Task、M3 的 6 个 Task，共 20 个里程碑 Task。M2/M3 中与原 Task 同主题的任务是后续能力切片，不是重复开发。
+
 ## 0. 第一期开工边界与不可违反的安全约束
 
 本计划以 `docs/superpowers/specs/2026-08-19-skills-management-system-design.md` 为产品和接口基线，并按里程碑延后安全能力。实现时必须同时满足以下范围：
@@ -525,6 +556,8 @@ The implementation must keep the existing module boundaries and add only the fol
 All new API responses use the existing Pydantic alias convention (`snake_case` internally, `camelCase` over HTTP). All management mutations must return the updated resource plus a request ID. All security decisions are server-side; client-side filtering is only a usability optimization.
 
 ## Detailed implementation plan
+
+> **执行说明：** 本节保留原始 14 个跨里程碑 Task，作为总体架构、文件边界和需求追溯基线；它不是新的单体执行清单。实际开发必须按上面的 M1、M2、M3 独立文档执行。每个独立文档中的 Task 才是可勾选、可提交、可人工验收的最小实施单元。
 
 ### Task 1: Freeze the Tool Skill contract and test fixtures
 
